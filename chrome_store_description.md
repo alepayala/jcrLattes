@@ -56,5 +56,10 @@ Como Usar:
 * Relatórios em Grupo: A geração de relatórios coletivos, especialmente a deduplicação de produções, pode exigir muito processamento. Caso seu navegador mostre uma notificação alertando lentidão ou inatividade na página, selecione "Aguardar" e tenha paciência até a conclusão.
 
 --------------------------------------------------
-Eleve o nível de sua gestão acadêmica e análise de produção científica com o JCRLattes.
 
+Código Fonte & Comunidade:
+O JCRLattes é um projeto de código aberto! Acesse o nosso repositório oficial no GitHub para baixar o script de geração de grafos (Parser Python), reportar problemas, contribuir com código ou ler a documentação completa:
+🔗 https://github.com/alepayala/JCRLattes
+
+--------------------------------------------------
+Eleve o nível de sua gestão acadêmica e análise de produção científica com o JCRLattes.
