@@ -1,0 +1,9 @@
+{
+  "backup_file": ".\\jcr_lattes_database_backup.json",
+  "graph": true,
+  "graph_output": "network_graph.png",
+  "graph_zoom": 2.5,
+  "ignore_isolated": true,
+  "target_researcher": null,
+  "target_custom_id": null
+}

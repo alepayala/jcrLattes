@@ -1,0 +1,421 @@
+let observer;
+
+(async () => await main())();
+
+async function main() {
+  // attempt to get CV name and link from Lattes page
+  const nameLink = getLattesNameAndLink();
+
+  // check whether name and link were not found (if not this is not a CV Lattes!)
+  if (!nameLink['name']) return;
+
+  // Initial processing
+  processLattesPage(nameLink);
+
+  // Debounced processor
+  const processDebounced = debounce(() => {
+    processLattesPage(nameLink);
+  }, 1000);
+
+  // Initialize observer
+  observer = new MutationObserver((mutations) => {
+    // console.log("Mutation detected, processing...");
+    processDebounced();
+  });
+
+  const articlesDiv = document.getElementById('artigos-completos');
+  if (articlesDiv) {
+    observer.observe(articlesDiv, { childList: true, subtree: true });
+  } else {
+    // Fallback if articles div is not yet present
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+}
+
+// Helper to safely update DOM without triggering observer loop
+function updateSafe(callback) {
+  if (observer) observer.disconnect();
+  try {
+    callback();
+  } finally {
+    if (observer) {
+      const articlesDiv = document.getElementById('artigos-completos');
+      if (articlesDiv) {
+        observer.observe(articlesDiv, { childList: true, subtree: true });
+      } else {
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
+    }
+  }
+}
+
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+function getLattesNameAndLink() {
+  // find name element
+  const nameElem = document.querySelector("h2[class='nome']");
+
+  if (!nameElem) return { name: '', link: '' };
+
+  let link = '';
+  let name = nameElem.textContent;
+
+  // find link element
+  const linkElem = document.querySelector("ul[class='informacoes-autor']");
+
+  if (linkElem) {
+    // extract URL from link element text
+    link = linkElem.innerText.match(/\bhttps?:\/\/\S+/gi)[0];
+  }
+
+  return { name, link };
+}
+
+async function processLattesPage(nameLink) {
+  // Default values
+  let highJcr = 6; // User requested default
+  let lowJcr = 2;
+
+  // Try to get values from existing inputs
+  const highInput = document.getElementById('high-jcr-input');
+  const lowInput = document.getElementById('low-jcr-input');
+
+  if (highInput) highJcr = parseFloat(highInput.value);
+  if (lowInput) lowJcr = parseFloat(lowInput.value);
+
+  // Wrap updates in updateSafe to prevent infinite loop
+  updateSafe(() => {
+    // Annotate Lattes page and return annotated Lattes info
+    const lattesInfo = annotateLattesPage(highJcr, lowJcr);
+
+    // inject report table into Lattes page
+    if (lattesInfo) {
+      const currentYear = new Date().getFullYear();
+      const startYearRecent = currentYear - 5;
+      const startYearLast10 = currentYear - 10;
+
+      // Helper to create a stats object
+      const createStatObj = () => ({ count: 0, sum: 0 });
+
+      const stats = {
+        all: { high: createStatObj(), mid: createStatObj(), low: createStatObj(), noJcr: 0, total: { count: 0, sum: 0, countWithJcr: 0 } },
+        recent: { high: createStatObj(), mid: createStatObj(), low: createStatObj(), noJcr: 0, total: { count: 0, sum: 0, countWithJcr: 0 } },
+        last10: { high: createStatObj(), mid: createStatObj(), low: createStatObj(), noJcr: 0, total: { count: 0, sum: 0, countWithJcr: 0 } }
+      };
+
+      for (const pub of lattesInfo) {
+        let category = 'noJcr';
+        let ifVal = 0;
+        let hasJcr = false;
+
+        if (pub.impactFactor) {
+          ifVal = parseFloat(pub.impactFactor);
+          hasJcr = true;
+          if (ifVal >= highJcr) category = 'high';
+          else if (ifVal >= lowJcr) category = 'mid';
+          else category = 'low';
+        }
+
+        // Update stats function
+        const updateStats = (periodStats) => {
+          if (category === 'noJcr') {
+            periodStats.noJcr++;
+          } else {
+            periodStats[category].count++;
+            periodStats[category].sum += ifVal;
+
+            // Total with JCR
+            periodStats.total.sum += ifVal;
+            periodStats.total.countWithJcr++;
+          }
+          // Grand total count
+          periodStats.total.count++;
+        };
+
+        // All papers
+        updateStats(stats.all);
+
+        // Recent papers (Current year + last 5 complete years)
+        if (pub.year >= startYearRecent) {
+          updateStats(stats.recent);
+        }
+
+        // Last 10 years + Current
+        if (pub.year >= startYearLast10) {
+          updateStats(stats.last10);
+        }
+      }
+
+      injectReportTable(stats, startYearRecent, startYearLast10, currentYear, highJcr, lowJcr, nameLink);
+    }
+  });
+}
+
+// Annotate and extract journal info form Lattes page
+function annotateLattesPage(highJcr, lowJcr) {
+  console.log('Searching for journal publications...');
+
+  // get search first element
+  const startElem = document.querySelector("div[id='artigos-completos']");
+
+  // may return null if the selector doesn't match anything.
+  if (!startElem) return [];
+
+  const pubInfoList = [];
+
+  // find all full articles
+  const pubElems = startElem.querySelectorAll("div[class='artigo-completo']");
+
+  for (const pubElem of pubElems) {
+    const pubInfo = {
+      year: NaN,
+      issn: '',
+      title: '',
+      impactFactor: null,
+      jcrYear: null,
+    };
+
+    // get year of publication
+    const yearElem = pubElem.querySelector(
+      "span[class='informacao-artigo'][data-tipo-ordenacao='ano']"
+    );
+
+    if (yearElem) {
+      pubInfo.year = parseInt(yearElem.textContent);
+    } else {
+      // Try to find year in the text content if specific span is missing
+      const yearMatch = pubElem.innerText.match(/\b(19|20)\d{2}\b/);
+      if (yearMatch) {
+        pubInfo.year = parseInt(yearMatch[0]);
+      }
+    }
+
+    // skip current element if it has no year value
+    if (isNaN(pubInfo.year)) continue;
+
+    // get JCR element
+    const jcrElem = pubElem.querySelector(".ajaxJCR");
+
+    if (jcrElem) {
+      // get Journal info items
+      const jcrTitle = jcrElem.getAttribute('original-title');
+      if (jcrTitle) {
+        // Example: "CHEMICAL PAPERS (0366-6352)<br />Fator de impacto (JCR 2021): 2.146"
+        const match = jcrTitle.match(/Fator de impacto \(JCR (\d{4})\): ([\d\.]+)/);
+        if (match && match[2]) {
+          pubInfo.jcrYear = match[1];
+          pubInfo.impactFactor = match[2];
+        }
+      }
+    }
+
+    // get last item of journal element
+    const pubElemLastItem = pubElem.querySelector('[cvuri]');
+
+    if (pubElemLastItem) {
+      // get Journal info items
+      const pubInfoString = escapeHtml(pubElemLastItem.getAttribute('cvuri'));
+      const pubInfoItems = pubInfoString.split(/\?(?!&)|&(?=\w+)/);
+
+      for (const pubInfoItem of pubInfoItems) {
+        // get journal ISSN
+        if (pubInfoItem.includes('issn=')) {
+          const issnStr = pubInfoItem.split('issn=')[1];
+          pubInfo.issn =
+            issnStr.substring(0, 4) + '-' + issnStr.substring(4, 8);
+        }
+      }
+
+      const journalInfo = {
+        impactFactor: pubInfo.impactFactor,
+        jcrYear: pubInfo.jcrYear
+      };
+
+      // inject info into Lattes page
+      injectJournalAnnotation(
+        pubElemLastItem,
+        pubInfo.issn,
+        journalInfo,
+        highJcr,
+        lowJcr
+      );
+    }
+    // add journal info to JourInfoList
+    pubInfoList.push(pubInfo);
+  }
+
+  return pubInfoList;
+}
+
+function escapeHtml(text) {
+  return text
+    .replace('&amp;', '&')
+    .replace('&lt;', '<')
+    .replace('&gt;', '>')
+    .replace('&quot;', '"')
+    .replace('&#039;', "'");
+}
+
+function injectJournalAnnotation(
+  elem,
+  issn,
+  journalInfo,
+  highJcr,
+  lowJcr
+) {
+  // create annotation element
+  const annotElem = document.createElement('span'); // Changed to span for inline bolding if needed, or keep p but styled
+
+  let journalAnnot;
+
+  if (!journalInfo.impactFactor) {
+    journalAnnot = ` Não classificado`;
+  } else {
+    const ifVal = parseFloat(journalInfo.impactFactor);
+    let color = 'red'; // Default low
+    if (ifVal >= highJcr) color = 'green';
+    else if (ifVal >= lowJcr) color = 'blue';
+
+    journalAnnot = ` Fator de Impacto (JCR ${journalInfo.jcrYear}): <b style="color: ${color}">${journalInfo.impactFactor}</b>`;
+  }
+
+  annotElem.innerHTML = journalAnnot;
+
+  // inject annotation element into Lattes page
+  const existingAnnot = elem.parentNode.querySelector('.jcr-lattes-annotation');
+  if (existingAnnot) {
+    existingAnnot.remove();
+  }
+
+  setAttributes(annotElem, {
+    class: 'jcr-lattes-annotation',
+    style: 'font-size: 11px; line-height: 1.2; margin-top: 2px; display: block;' // Ensure block display
+  });
+
+  elem.insertAdjacentElement('afterend', annotElem);
+}
+
+function injectReportTable(stats, startYearRecent, startYearLast10, currentYear, highJcr, lowJcr, nameLink) {
+  // get main content div
+  const mainContentDiv = document.getElementsByClassName('main-content')[0];
+
+  const formatNum = (num) => num.toFixed(2);
+  const getAvg = (sum, count) => count > 0 ? formatNum(sum / count) : '0.00';
+
+  // Helper to generate row cells
+  const generateRow = (label, data) => `
+    <tr style="border-bottom: 1px solid #ddd;">
+      <td style="padding: 8px; text-align: left;">${label}</td>
+      
+      <!-- High -->
+      <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${data.high.count}</td>
+      <td style="padding: 8px; text-align: center;">${formatNum(data.high.sum)}</td>
+      <td style="padding: 8px; text-align: center;">${getAvg(data.high.sum, data.high.count)}</td>
+      
+      <!-- Mid -->
+      <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${data.mid.count}</td>
+      <td style="padding: 8px; text-align: center;">${formatNum(data.mid.sum)}</td>
+      <td style="padding: 8px; text-align: center;">${getAvg(data.mid.sum, data.mid.count)}</td>
+      
+      <!-- Low -->
+      <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${data.low.count}</td>
+      <td style="padding: 8px; text-align: center;">${formatNum(data.low.sum)}</td>
+      <td style="padding: 8px; text-align: center;">${getAvg(data.low.sum, data.low.count)}</td>
+      
+      <!-- No JCR -->
+      <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${data.noJcr}</td>
+      
+      <!-- Total -->
+      <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;"><strong>${data.total.count}</strong></td>
+      <td style="padding: 8px; text-align: center;"><strong>${formatNum(data.total.sum)}</strong></td>
+      <td style="padding: 8px; text-align: center;"><strong>${getAvg(data.total.sum, data.total.countWithJcr)}</strong></td>
+    </tr>
+  `;
+
+  // create table HTML
+  const tableHTML = `
+  <style>
+    /* Force input spinners to be visible */
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      opacity: 1;
+    }
+  </style>
+  <div class="layout-cell-pad-main" style="padding: 10px 10px">
+    <div class="rodape-cv" style="margin-top: 0px; color: #333; font-size: 1.1em;">
+      <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
+        <thead>
+          <tr style="background-color: #f2f2f2; border-bottom: 1px solid #ddd;">
+            <th rowspan="2" style="padding: 8px; text-align: center; vertical-align: middle;">Período</th>
+            <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc;">
+              High JCR (>= <input type="number" id="high-jcr-input" value="${highJcr}" style="width: 40px; padding: 2px; text-align: center;">)
+            </th>
+            <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc;">
+              Mid JCR (>= <input type="number" id="low-jcr-input" value="${lowJcr}" style="width: 40px; padding: 2px; text-align: center;">)
+            </th>
+            <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc;">Low JCR (< ${lowJcr})</th>
+            <th rowspan="2" style="padding: 8px; border-left: 1px solid #ccc; vertical-align: middle;">Sem JCR</th>
+            <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc;">Total</th>
+          </tr>
+          <tr style="background-color: #f9f9f9; border-bottom: 2px solid #ddd; font-size: 0.85em;">
+            <!-- High Sub-headers -->
+            <th style="padding: 4px; border-left: 1px solid #eee;">Qtd</th>
+            <th style="padding: 4px;">Σ</th>
+            <th style="padding: 4px;">μ</th>
+            <!-- Mid Sub-headers -->
+            <th style="padding: 4px; border-left: 1px solid #eee;">Qtd</th>
+            <th style="padding: 4px;">Σ</th>
+            <th style="padding: 4px;">μ</th>
+            <!-- Low Sub-headers -->
+            <th style="padding: 4px; border-left: 1px solid #eee;">Qtd</th>
+            <th style="padding: 4px;">Σ</th>
+            <th style="padding: 4px;">μ</th>
+            <!-- Total Sub-headers -->
+            <th style="padding: 4px; border-left: 1px solid #eee;">Qtd</th>
+            <th style="padding: 4px;">Σ</th>
+            <th style="padding: 4px;">μ</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${generateRow('Total', stats.all)}
+          ${generateRow(`${startYearRecent} - ${currentYear}`, stats.recent)}
+          ${generateRow(`${startYearLast10} - ${currentYear}`, stats.last10)}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+
+  // create new alert div
+  let alertDiv = document.querySelector('#annotation-alert-div');
+  if (!alertDiv) {
+    alertDiv = document.createElement('div');
+    setAttributes(alertDiv, {
+      class: 'main-content max-width min-width',
+      id: 'annotation-alert-div',
+    });
+    // inject alert div into Lattes page just before the main content div
+    mainContentDiv.parentNode.insertBefore(alertDiv, mainContentDiv);
+  }
+
+  alertDiv.innerHTML = tableHTML;
+
+  // Add event listeners to inputs
+  document.getElementById('high-jcr-input').addEventListener('change', () => processLattesPage(nameLink));
+  document.getElementById('low-jcr-input').addEventListener('change', () => processLattesPage(nameLink));
+}
+
+function setAttributes(elem, attrs) {
+  for (const key of Object.keys(attrs)) {
+    elem.setAttribute(key, attrs[key]);
+  }
+}
