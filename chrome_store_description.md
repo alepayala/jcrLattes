@@ -1,4 +1,4 @@
-JCRLattes - Versão 1.5
+JCRLattes - Versão 1.5.7
 
 Resumo:
 Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes e orientações em segundos.
@@ -25,8 +25,9 @@ Principais Funcionalidades:
 * Consolidação Instantânea de Grupos: Atribua IDs customizados aos currículos para compilar métricas integradas em tempo real. 
 * Deduplicação Inteligente: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria/colaboração repetidos entre os membros, gerando métricas reais e não infladas da produção coletiva.
 * Acesso Direto Integrado: Atalho flutuante injetado na incômoda tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
+* Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status (⚠️ atualização necessária / 🔄 atualizado) na coluna de ações, com botão direto para abrir o Lattes. O ícone de ação global se adapta automaticamente ao conjunto selecionado.
 * Atualização Simplificada (Update): Um botão de atualização rápida permite abrir o currículo Lattes em uma nova aba para reprocessar e sincronizar os dados mais recentes.
-* Backup e Portabilidade: Exporte todo o seu banco de dados em formato JSON para restaurá-lo em outros dispositivos ou exporte os dados tabulados em CSV para análise no Microsoft Excel ou ferramentas estatísticas.
+* Backup e Portabilidade: Exporte todo o seu banco de dados em formato JSON para restaurá-lo em outros dispositivos ou exporte os dados tabulados em CSV para análise no Microsoft Excel ou ferramentas estatísticas. Na importação, o sistema compara automaticamente as versões e mantém sempre o registro mais recente.
 
 3. Análise de Autoria, Patentes, Orientações e Eventos:
 * Análise Avançada de Autoria: Identificação automatizada do papel do pesquisador como Primeiro Autor (1º) ou Último Autor (Últ) em cada publicação.
