@@ -1080,7 +1080,6 @@ window.JCRDBTools = {
             });
         }
 
-        const bulkBtnOpen = newTab.document.getElementById('bulk-btn-open');
         if (bulkBtnOpen) {
             bulkBtnOpen.addEventListener('click', () => {
                 const selected = selectedCheckboxData();
