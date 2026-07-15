@@ -31,6 +31,7 @@ window.JCRDBTools = {
     currentCvData: null,
     sortConfig: { key: 'name', ascending: true },
     lastArgs: null,
+    DB_SCHEMA_VERSION: 2,
 
     _esc: function(str) {
         return String(str)
@@ -67,9 +68,10 @@ window.JCRDBTools = {
         return /^https?:\/\//i.test(s) ? this._esc(s) : '';
     },
 
-    // Returns true if the CV has old-format fields that require a re-save
+    // Returns true if the CV has old-format fields or an outdated schema version that require a re-save
     cvNeedsUpdate: function(cv) {
         if (!cv.dateAdded) return true;
+        if ((cv._schemaVersion || 0) < this.DB_SCHEMA_VERSION) return true;
         if (!cv.publications || cv.publications.length === 0) return false;
         if (cv.publications.some(p => p.impactFactor !== undefined || p.isFirstAuthor !== undefined)) return true;
         // All publications lack both journalName and paperTitle → saved before those fields were extracted
@@ -205,7 +207,8 @@ window.JCRDBTools = {
                 scopusCitations: pub.scopusCitations || 0,
                 doi: pub.doi || '',
                 reference: pub.reference || ''
-            }))
+            })),
+            _schemaVersion: this.DB_SCHEMA_VERSION
         };
     },
 
@@ -707,7 +710,7 @@ window.JCRDBTools = {
             let tbodyHtml = ``;
             db.forEach(cv => {
                 tbodyHtml += `<tr>`;
-                tbodyHtml += `<td style="text-align: center;"><input type="checkbox" class="row-checkbox" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}"></td>`;
+                tbodyHtml += `<td style="text-align: center;"><input type="checkbox" class="row-checkbox" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-needs-update="${this.cvNeedsUpdate(cv) ? 'true' : 'false'}"></td>`;
                 this.METRICS_CONFIG.forEach(m => {
                     const val = cv[m.key] !== undefined ? cv[m.key] : '';
                     let classes = [];
@@ -718,10 +721,7 @@ window.JCRDBTools = {
 
                     if (m.key === 'name') {
                         const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
-                        const staleIcon = this.cvNeedsUpdate(cv)
-                            ? `<span title="CV desatualizado: reabra no Lattes para atualizar" style="cursor:help; margin-right:4px;">⚠️</span>`
-                            : '';
-                        tbodyHtml += `<td${classAttr}>${staleIcon}<strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong></td>`;
+                        tbodyHtml += `<td${classAttr}><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong></td>`;
                     } else if (m.key === 'researcherIdLink') {
                         const safeRid = this._safeUrl(val);
                         if (safeRid) {
@@ -743,10 +743,12 @@ window.JCRDBTools = {
                         tbodyHtml += `<td${classAttr}>${this._esc(String(val))}</td>`;
                     }
                 });
+                const needsUpdate = this.cvNeedsUpdate(cv);
                 tbodyHtml += `<td class="division-left" style="white-space: nowrap;">
                     <button class="btn btn-view-report" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Relatório">📊</button>
                     <button class="btn btn-clear-id" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Limpar ID">🧹</button>
                     <button class="btn btn-delete-row" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Excluir">🗑️</button>
+                    <button class="btn btn-open-cv" data-lattesid="${this._esc(cv.lattesId || '')}" title="${needsUpdate ? 'CV desatualizado: abrir no Lattes para atualizar' : 'Abrir no Lattes'}">${needsUpdate ? '⚠️' : '🔄'}</button>
                 </td></tr>`;
             });
 
@@ -924,15 +926,27 @@ window.JCRDBTools = {
         // Add Bulk Action and Checkbox Event Listeners
         const selectAllCheckbox = newTab.document.getElementById('selectAllCheckbox');
         const rowCheckboxes = newTab.document.querySelectorAll('.row-checkbox');
-        
+        const bulkBtnOpen = newTab.document.getElementById('bulk-btn-open');
+
+        const updateBulkOpenBtn = () => {
+            const checked = Array.from(rowCheckboxes).filter(cb => cb.checked);
+            const anyNeedsUpdate = checked.some(cb => cb.getAttribute('data-needs-update') === 'true');
+            if (bulkBtnOpen) {
+                bulkBtnOpen.textContent = anyNeedsUpdate ? '⚠️' : '🔄';
+                bulkBtnOpen.title = anyNeedsUpdate
+                    ? 'Alguns CVs selecionados precisam de atualização. Abrir no Lattes.'
+                    : 'Abrir CVs selecionados no Lattes para atualizar';
+            }
+        };
+
         if (selectAllCheckbox) {
             selectAllCheckbox.addEventListener('change', (e) => {
                 const isChecked = e.currentTarget.checked;
-                rowCheckboxes.forEach(cb => {
-                    cb.checked = isChecked;
-                });
+                rowCheckboxes.forEach(cb => { cb.checked = isChecked; });
+                updateBulkOpenBtn();
             });
         }
+        rowCheckboxes.forEach(cb => cb.addEventListener('change', updateBulkOpenBtn));
         
         const bulkIdInput = newTab.document.getElementById('bulk-id-input');
         const bulkIdSelect = newTab.document.getElementById('bulk-id-select');
@@ -1088,9 +1102,7 @@ window.JCRDBTools = {
         openCvBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const lattesId = e.currentTarget.getAttribute('data-lattesid');
-                if (lattesId) {
-                    window.open(`http://lattes.cnpq.br/${lattesId}`, '_blank');
-                }
+                if (lattesId) newTab.open(`http://lattes.cnpq.br/${lattesId}`, '_blank');
             });
         });
 
