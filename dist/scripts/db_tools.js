@@ -1604,6 +1604,9 @@ window.JCRDBTools = {
                         } else {
                             tbodyHtml += `<td style="${style}"></td>`;
                         }
+                    } else if (m.key === 'dateAdded') {
+                        const dateStr = val ? new Date(val).toLocaleDateString() : '';
+                        tbodyHtml += `<td style="${style}">${dateStr}</td>`;
                     } else {
                         tbodyHtml += `<td style="${style}">${this._esc(String(val))}</td>`;
                     }
