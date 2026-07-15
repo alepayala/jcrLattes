@@ -1391,7 +1391,7 @@ window.JCRDBTools = {
                 customYears: 1,
                 pubListYears: 5,
                 journalYears: 5,
-                minJournalPapers: 2,
+                minJournalPapers: 1,
                 showHighJcr: true,
                 showMidJcr: true,
                 showLowJcr: true,
@@ -1783,7 +1783,7 @@ window.JCRDBTools = {
                                 <h3 style="margin: 0;">Publicações por Periódico</h3>
                                 <div style="font-size: 0.9em; font-weight: normal; margin-top: 2px;" onclick="event.stopPropagation();">
                                     Período (anos): <input type="number" id="inp-journal-years" value="${state.journalYears !== undefined ? state.journalYears : 5}" min="0" style="width: 50px; padding: 2px;">
-                                    &nbsp;Mín. artigos: <input type="number" id="inp-journal-min-papers" value="${state.minJournalPapers !== undefined ? state.minJournalPapers : 2}" min="1" style="width: 40px; padding: 2px;">
+                                    &nbsp;Mín. artigos: <input type="number" id="inp-journal-min-papers" value="${state.minJournalPapers !== undefined ? state.minJournalPapers : 1}" min="1" style="width: 40px; padding: 2px;">
                                     <button id="btn-journal-update" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
                                 </div>
                             </div>
