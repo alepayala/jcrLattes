@@ -2,12 +2,6 @@
 let COLORS = window.JCRReportUtils.COLORS;
 let GRAPH_COLORS = window.JCRReportUtils.GRAPH_COLORS;
 
-const SECTIONS = {
-  citations: { ref: 'Citacoes', selector: 'a[name="Citacoes"]' },
-  articles: { ref: 'ArtigosCompletos', selector: '#artigos-completos' },
-  books: { ref: 'LivrosCapitulos', selector: 'a[name="LivrosCapitulos"]' },
-  congress: { ref: 'TrabalhosPublicadosAnaisCongresso', selector: 'a[name="TrabalhosPublicadosAnaisCongresso"]' }
-};
 
 let observer;
 const observerConfig = {
@@ -146,9 +140,6 @@ async function main() {
   // Initial processing
   processLattesPage(nameLink);
 
-  // Identify requested sections
-  try { identifySections(); } catch (e) { console.error('[JCR Lattes] Error during initial section identification:', e); }
-
   // Debounced processor
   const processDebounced = debounce(() => {
     processLattesPage(nameLink);
@@ -157,14 +148,15 @@ async function main() {
   // Initialize observer
   observer = new MutationObserver((mutations) => {
     // Only trigger if mutation is relevant (child list changes or JCR/CVURI attributes)
-    const isRelevant = mutations.some(m =>
-      m.type === 'childList' ||
+    const isRelevant = mutations.some(m => {
+      if (m.target && m.target.closest && m.target.closest('.jcr-lattes-year-separator')) return false;
+      return m.type === 'childList' ||
       (m.type === 'attributes' && (
         m.target.classList.contains('ajaxJCR') ||
         m.target.hasAttribute('cvuri') ||
         m.target.classList.contains('artigo-completo')
-      ))
-    );
+      ));
+    });
 
     if (isRelevant) {
       processDebounced();
@@ -207,6 +199,14 @@ function debounce(func, wait) {
     clearTimeout(timeout);
     timeout = setTimeout(later, wait);
   };
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function getLattesNameAndLink() {
@@ -329,13 +329,14 @@ async function processLattesPage(nameLink) {
   const highInput = document.getElementById('high-jcr-input');
   const lowInput = document.getElementById('low-jcr-input');
 
-  if (highInput) highJcr = parseFloat(highInput.value);
-  if (lowInput) lowJcr = parseFloat(lowInput.value);
+  // Ignora valores não numéricos (ex.: campo apagado pelo usuário)
+  if (highInput && !isNaN(parseFloat(highInput.value))) highJcr = parseFloat(highInput.value);
+  if (lowInput && !isNaN(parseFloat(lowInput.value))) lowJcr = parseFloat(lowInput.value);
 
   // Custom year span
   let customYears = saved?.customYears ?? 1;
   const customInput = document.getElementById('custom-year-input');
-  if (customInput) customYears = parseInt(customInput.value);
+  if (customInput && !isNaN(parseInt(customInput.value))) customYears = parseInt(customInput.value);
 
   // Wrap updates in updateSafe to prevent infinite loop
   await updateSafe(async () => {
@@ -386,9 +387,17 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
 
   if (pubElems.length === 0) return [];
 
-  // Remove existing year separators
-  document.querySelectorAll('.jcr-lattes-year-separator').forEach(el => el.remove());
+  // Save existing year separators states before removing
+  window.jcrCollapsedYears = window.jcrCollapsedYears || {};
+  document.querySelectorAll('.jcr-lattes-year-separator').forEach(el => {
+    const y = el.getAttribute('data-year');
+    if (y) window.jcrCollapsedYears[y] = el.getAttribute('data-collapsed') === 'true';
+    el.remove();
+  });
   let lastYear = null;
+
+  const disableExtraInfoCb = document.getElementById('toggle-disable-extra-info');
+  const isExtraInfoHidden = disableExtraInfoCb && disableExtraInfoCb.checked;
 
   const pubInfoList = [];
 
@@ -399,7 +408,8 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
     const pubInfo = {
       year: NaN,
       issn: '',
-      title: '',
+      journalName: '',
+      paperTitle: '',
       impactFactor: null,
       jcrYear: null,
       wosCitations: 0,
@@ -432,8 +442,8 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
       }
     }
 
-    // Insert year separator if year changed
-    if (!isNaN(pubInfo.year)) {
+    // Insert year separator if year changed and extra info is not hidden
+    if (!isExtraInfoHidden && !isNaN(pubInfo.year)) {
       if (pubInfo.year !== lastYear) {
         injectYearSeparator(pubElem, pubInfo.year);
         lastYear = pubInfo.year;
@@ -447,21 +457,36 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
       pubInfo.hasEtAl = true;
     }
 
-    // Calculate author count and extract author list
-    const parts = pubElem.innerText.split(';');
+    // Pre-extract paper title and journal name from cvuri for reliable author-boundary detection
+    const pubElemLastItem = pubElem.querySelector('[cvuri]');
+    let titleFromCvuri = '';
+    if (pubElemLastItem) {
+      const cvuriStr = decodeHtmlEntities(pubElemLastItem.getAttribute('cvuri'));
+      const tituloMatch = cvuriStr.match(/[?&]titulo=([^&]+)/);
+      if (tituloMatch) titleFromCvuri = tituloMatch[1].trim();
+      const periMatch = cvuriStr.match(/[?&]nomePeriodico=([^&]+)/);
+      if (periMatch) pubInfo.journalName = periMatch[1].trim();
+    }
+    pubInfo.paperTitle = titleFromCvuri;
 
+    // Calculate author count: truncate at paper title to exclude title/journal text from the split
+    const rawText = pubElem.innerText.replace(/\s+/g, ' ').trim();
+    let authorText = rawText;
+    if (titleFromCvuri) {
+      const titleIdx = rawText.indexOf(titleFromCvuri);
+      if (titleIdx !== -1) {
+        authorText = rawText.substring(0, titleIdx).replace(/\s*\.\s*$/, '').trim();
+      }
+    }
+
+    const parts = authorText.split(';');
     const pubAuthors = [];
     let authorCount = 0;
 
     for (const part of parts) {
-      // Remove leading numbering like "54." or "54 . " or "54" at start of string
       let p = part.replace(/^\d+\s*\.\s*/, '').trim();
-      p = p.trim();
-
-      if (p.startsWith('et.al') || p.toUpperCase().includes('COLLABORATION')) {
-        continue;
-      }
-
+      if (!p) continue;
+      if (p.startsWith('et.al') || p.toUpperCase().includes('COLLABORATION')) continue;
       if (p.includes(',')) {
         authorCount++;
         pubAuthors.push(p);
@@ -567,8 +592,18 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
 
     const jcrElem = pubElem.querySelector(".ajaxJCR");
     if (jcrElem) {
-      const jcrTitle = jcrElem.getAttribute('original-title');
+      const jcrTitle = jcrElem.getAttribute('original-title') || '';
       if (jcrTitle) {
+        // Fallback journal name from original-title when cvuri nomePeriodico is absent.
+        // Format: "Journal Name (ISSN)<br />Fator de impacto..." or "Journal Name - Fator de Impacto..."
+        if (!pubInfo.journalName) {
+          const journalPart = jcrTitle.split(/<br/i)[0]
+            .split(/ - Fator de [Ii]mpacto/)[0]
+            .replace(/\s*\([0-9X\-]{4,}\)\s*$/, '')
+            .trim();
+          if (journalPart) pubInfo.journalName = journalPart;
+        }
+
         const match = jcrTitle.match(/Fator de impacto \(JCR (\d{4})\): ([\d\.]+)/);
         if (match && match[2]) {
           pubInfo.jcrYear = match[1];
@@ -587,6 +622,7 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
       }
     }
     pubElem.setAttribute('data-jcr-level', jcrLevel);
+
     if (!isNaN(pubInfo.year)) {
       pubElem.setAttribute('data-year', pubInfo.year);
     }
@@ -594,15 +630,15 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
     pubElem.setAttribute('data-is-last', pubInfo.isLastAuthor);
     pubElem.setAttribute('data-is-gc', pubInfo.hasEtAl);
 
-    const pubElemLastItem = pubElem.querySelector('[cvuri]');
     if (pubElemLastItem) {
-      const pubInfoString = escapeHtml(pubElemLastItem.getAttribute('cvuri'));
+      const pubInfoString = decodeHtmlEntities(pubElemLastItem.getAttribute('cvuri'));
       const pubInfoItems = pubInfoString.split(/\?(?!&)|&(?=\w+)/);
 
       for (const pubInfoItem of pubInfoItems) {
         if (pubInfoItem.includes('issn=')) {
           const issnStr = pubInfoItem.split('issn=')[1];
-          pubInfo.issn = issnStr.substring(0, 4) + '-' + issnStr.substring(4, 8);
+          if (issnStr && issnStr.length >= 8)
+            pubInfo.issn = issnStr.substring(0, 4) + '-' + issnStr.substring(4, 8);
         }
         if (pubInfoItem.includes('doi=')) {
           pubInfo.doi = pubInfoItem.split('doi=')[1];
@@ -640,13 +676,13 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
   return pubInfoList;
 }
 
-function escapeHtml(text) {
+function decodeHtmlEntities(text) {
   return text
-    .replace('&amp;', '&')
-    .replace('&lt;', '<')
-    .replace('&gt;', '>')
-    .replace('&quot;', '"')
-    .replace('&#039;', "'");
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'");
 }
 
 function injectJournalAnnotation(
@@ -692,15 +728,17 @@ function injectJournalAnnotation(
 }
 
 function injectYearSeparator(pubElem, year) {
+  const isPreviouslyCollapsed = window.jcrCollapsedYears && window.jcrCollapsedYears[year] === true;
   const separator = document.createElement('div');
   setAttributes(separator, {
     class: 'jcr-lattes-year-separator',
     'data-year': year,
-    style: 'margin-top: 25px; margin-bottom: 15px; clear: both;'
+    'data-collapsed': isPreviouslyCollapsed ? 'true' : 'false',
+    style: 'margin-top: 25px; margin-bottom: 15px; clear: both; cursor: pointer;'
   });
 
   separator.innerHTML = `
-    <div style="
+    <div class="jcr-year-sep-inner" style="
       padding: 8px 15px;
       background: linear-gradient(to right, #f8f9fa, #ffffff);
       border-left: 5px solid ${COLORS.midJcr};
@@ -709,20 +747,61 @@ function injectYearSeparator(pubElem, year) {
       align-items: center;
       justify-content: space-between;
       border-radius: 4px;
+      transition: background 0.2s;
     ">
       <span style="font-size: 1.4em; font-weight: bold; color: #333; font-family: inherit;">${year}</span>
-      <span style="font-size: 0.85em; color: #777; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">Publicações de ${year}</span>
+      <div style="display: flex; align-items: center;">
+        <span style="font-size: 0.85em; color: #777; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 8px;">Publicações de ${year}</span>
+        <span class="jcr-collapse-icon" style="display: inline-block; width: 20px; font-size: 1.1em; font-weight: bold; color: ${COLORS.midJcr}; text-align: center;">${isPreviouslyCollapsed ? '[+]' : '[-]'}</span>
+      </div>
     </div>
   `;
+
+  const innerDiv = separator.querySelector('.jcr-year-sep-inner');
+  if (innerDiv) {
+    innerDiv.addEventListener('mouseover', () => { innerDiv.style.background = 'linear-gradient(to right, #eef1f4, #ffffff)'; });
+    innerDiv.addEventListener('mouseout',  () => { innerDiv.style.background = 'linear-gradient(to right, #f8f9fa, #ffffff)'; });
+  }
+
+  separator.addEventListener('click', function() {
+    const isCollapsed = separator.getAttribute('data-collapsed') === 'true';
+    const newState = !isCollapsed;
+    separator.setAttribute('data-collapsed', newState);
+    
+    const iconSpan = separator.querySelector('.jcr-collapse-icon');
+    if (iconSpan) {
+        iconSpan.innerText = newState ? '[+]' : '[-]';
+    }
+
+    let nextNode = separator.nextElementSibling;
+    while(nextNode && !nextNode.classList.contains('jcr-lattes-year-separator') && nextNode.tagName !== 'H1' && nextNode.tagName !== 'H2' && !nextNode.classList.contains('layout-cell-pad-5')) {
+        // Toggle visibility
+        if (newState) {
+            // collapsing
+            if (nextNode.style.display !== 'none') {
+                nextNode.setAttribute('data-original-display', nextNode.style.display);
+            }
+            nextNode.style.display = 'none';
+        } else {
+            // expanding
+            nextNode.style.display = nextNode.getAttribute('data-original-display') || '';
+        }
+        nextNode = nextNode.nextElementSibling;
+    }
+  });
 
   pubElem.parentNode.insertBefore(separator, pubElem);
 }
 
+
+
 async function injectReportTable(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo) {
-  // get main content div
+  // get main content div (absent na versão impressa do CV)
   const mainContentDiv = document.getElementsByClassName('main-content')[0];
-
-
+  if (!mainContentDiv) {
+    console.log('JCR Lattes: div .main-content não encontrada. Relatório não será injetado.');
+    return;
+  }
 
   const getSoftColor = window.JCRReportUtils.getSoftColor.bind(window.JCRReportUtils);
   const bgTotal = '#f8f9fa';
@@ -924,7 +1003,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
         rows += `
                 <tr style="border-bottom: 1px solid #ddd;">
-                    <td style="padding: 8px; text-align: left;">${type}</td>
+                    <td style="padding: 8px; text-align: left;">${escHtml(type)}</td>
                     <td style="padding: 8px; text-align: center;">${inCourseCount}</td>
                     <td style="padding: 8px; text-align: center;"><strong>${concludedCount}</strong></td>
                     <td style="padding: 8px; text-align: center;">${count5}</td>
@@ -978,7 +1057,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
       rowsHtml += `
         <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${status}</td>
+          <td style="padding: 8px; text-align: left;">${escHtml(status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.all, status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.recent, status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.last10, status)}</td>
@@ -1031,7 +1110,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
       rowsHtml += `
         <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${type}</td>
+          <td style="padding: 8px; text-align: left;">${escHtml(type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.all, type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.recent, type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.last10, type)}</td>
@@ -1074,7 +1153,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
   const headerHTML = `
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 10px; background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border}; border-radius: 4px;">
-      <h2 style="margin: 0; font-size: 1.25em; color: ${COLORS.footerText}; font-weight: bold;">JCR Lattes Report <span id="jcr-report-name" style="color: #326C99; font-weight: 900; margin-left: 5px;">- ${nameLink.name}</span></h2>
+      <h2 style="margin: 0; font-size: 1.25em; color: ${COLORS.footerText}; font-weight: bold;">JCR Lattes Report <span id="jcr-report-name" style="color: #326C99; font-weight: 900; margin-left: 5px;">- ${escHtml(nameLink.name)}</span></h2>
       <div style="display: flex; gap: 20px; align-items: center;">
         <span id="jcr-db-tools-mount" style="display: inline-flex; gap: 8px; margin-right: 10px;"></span>
         <label style="cursor: pointer; display: inline-flex; align-items: center; font-size: 0.95em; font-weight: bold; color: ${COLORS.footerText};">
@@ -1272,19 +1351,18 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       });
     });
 
-    // Apply visibility based on JCR/Period/Author (Initial Refresh)
-    // Wait a tiny bit to ensure DOM attributes are there if possible, 
-    // but processLattesPage calls this AFTER annotateLattesPage, so attributes should be there.
-
-    const filtrarCbInit = document.getElementById('tbl-chk-filtrar');
-    if (filtrarCbInit) {
-      filtrarCbInit.addEventListener('change', () => {
-        refreshPubFilters(true);
-      });
-    }
-
-    refreshPubFilters();
   }
+
+  // Apply visibility based on JCR/Period/Author (Initial Refresh).
+  // Fora do bloco de settings salvos para funcionar também na primeira execução.
+  const filtrarCbInit = document.getElementById('tbl-chk-filtrar');
+  if (filtrarCbInit) {
+    filtrarCbInit.addEventListener('change', () => {
+      refreshPubFilters(true);
+    });
+  }
+
+  refreshPubFilters();
 
   // Table Toggle Listeners
   document.querySelectorAll('.toggle-table-btn').forEach(btn => {
@@ -1410,6 +1488,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
     });
   });
 
+
+
   // 1. Identificação Group
   if (identificationSections.length > 0) {
     const identCheckbox = document.getElementById('toggle-group-identification');
@@ -1511,8 +1591,25 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
     // Update year separators visibility
     document.querySelectorAll('.jcr-lattes-year-separator').forEach(sep => {
       const year = parseInt(sep.getAttribute('data-year'));
-      sep.style.display = (!isReportHidden && visibleYears.has(year)) ? '' : 'none';
+      if (isReportHidden) {
+        sep.style.display = '';
+      } else {
+        sep.style.display = visibleYears.has(year) ? '' : 'none';
+      }
+
+      // Re-apply collapse state if collapsed
+      if (sep.getAttribute('data-collapsed') === 'true') {
+        let nextNode = sep.nextElementSibling;
+        while(nextNode && !nextNode.classList.contains('jcr-lattes-year-separator') && nextNode.tagName !== 'H1' && nextNode.tagName !== 'H2' && !nextNode.classList.contains('layout-cell-pad-5')) {
+          if (nextNode.style.display !== 'none') {
+            nextNode.setAttribute('data-original-display', nextNode.style.display);
+            nextNode.style.display = 'none';
+          }
+          nextNode = nextNode.nextElementSibling;
+        }
+      }
     });
+
 
     // Update graphs based on period filter ONLY if changed
     if (cutoffYear !== lastGraphCutoffYear) {
@@ -1642,9 +1739,10 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
       if (nameLink.researcherIdLink) {
           if (window.cachedRidStats) {
-              injectRidTable(window.cachedRidStats);
+              const ridStatsOrNull = window.cachedRidStats._failed ? null : window.cachedRidStats;
+              if (ridStatsOrNull) injectRidTable(ridStatsOrNull);
               if (typeof window.JCRDBTools !== 'undefined') {
-                  window.JCRDBTools.init('jcr-db-tools-mount', nameLink, stats, lattesInfo, window.cachedRidStats);
+                  window.JCRDBTools.init('jcr-db-tools-mount', nameLink, stats, lattesInfo, ridStatsOrNull);
               }
           } else if (!window.isFetchingRidStats) {
               window.isFetchingRidStats = true;
@@ -1663,12 +1761,15 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
                   { action: 'fetch_rid_stats', url: nameLink.researcherIdLink },
                   (response) => {
                       clearTimeout(ridTimeout);
+                      if (chrome.runtime.lastError) {
+                          console.warn(`[RID Extraction Content Script] Background communication warning:`, chrome.runtime.lastError.message);
+                      }
                       console.log(`[RID Extraction Content Script] Received response from background:`, response);
                       window.isFetchingRidStats = false;
                       if (response && response.success) {
                           window.cachedRidStats = response.stats;
                       } else {
-                          console.warn(`[RID Extraction Content Script] Fetch failed or no success flat:`, response);
+                          console.warn(`[RID Extraction Content Script] Fetch failed or no success flag:`, response);
                           window.cachedRidStats = { _failed: true };
                       }
                       
@@ -1801,7 +1902,7 @@ function generateSectionToggles(identificationSections, otherSections) {
   const otherCheckboxes = otherSections.map(section => `
     <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
       <input type="checkbox" id="toggle-section-${section.id}" checked style="margin-right: 5px;">
-      ${section.label}
+      ${escHtml(section.label)}
     </label>
   `).join('');
 
@@ -1918,32 +2019,12 @@ function extractSupervisions() {
   };
 
   const processSection = (anchorName, targetObj, extractYear = false) => {
-    const anchor = document.querySelector(`a[name = '${anchorName}']`);
+    const anchor = Array.from(document.querySelectorAll('a[name]')).find(
+      a => a.getAttribute('name').toLowerCase() === anchorName.toLowerCase()
+    );
     if (!anchor) return;
 
     let sibling = anchor.nextElementSibling;
-
-    // Sometimes the anchor is inside a span or similar wrapper, so we might need to go up
-    // But usually in Lattes it's a direct child of the main container or preceded by the anchor.
-    // The previous logic used anchor.parentElement which might be 'layout-cell-12'.
-    // Let's stick to the previous reliable traversal logic but just be careful.
-    // The previous logic was:
-    // let currentElement = anchor.parentElement;
-    // let sibling = anchor.nextElementSibling;
-
-    // Actually, looking at the previous code: 
-    // const anchor = document.querySelector...
-    // let currentElement = anchor.parentElement; 
-    // let sibling = anchor.nextElementSibling;
-
-    // If anchor is just <a name="..."></a>, it might be inline.
-    // Let's re-verify the previous logic I am replacing to ensure I don't break traversal.
-    // Previous:
-    // let currentElement = anchor.parentElement;
-    // let sibling = anchor.nextElementSibling;
-    // ...
-    // Loop sibling
-
     let currentCategory = '';
 
     // Traverse siblings
@@ -1979,17 +2060,51 @@ function extractSupervisions() {
             targetObj[finalKey]++;
           }
 
+          let area = "";
+          let institution = "";
+
+          let searchStr = cleanText;
+          const yearMatches = cleanText.match(/\b(?:19|20)\d{2}\b/g);
+          if (yearMatches && yearMatches.length > 0) {
+              const lastYear = yearMatches[yearMatches.length - 1];
+              const lastYearIndex = cleanText.lastIndexOf(lastYear);
+              searchStr = cleanText.substring(lastYearIndex + 4);
+          }
+
+          const areaInstMatch = searchStr.match(/\(([^)]+)\)\s*-\s*([^,.]+)/);
+          if (areaInstMatch) {
+              area = areaInstMatch[1].trim();
+              institution = areaInstMatch[2].trim();
+          } else {
+              const natureMatch = cleanText.match(/(?:natureza|natureza\.)\s*-\s*([^,.]+)/);
+              if (natureMatch) {
+                  institution = natureMatch[1].trim();
+              } else {
+                  let lastYearMatchStr = null;
+                  const regex = /\b(?:19|20)\d{2}\.\s+([^,.]+)/g;
+                  let match;
+                  while ((match = regex.exec(cleanText)) !== null) {
+                      lastYearMatchStr = match[1];
+                  }
+                  if (lastYearMatchStr) {
+                      institution = lastYearMatchStr.trim();
+                  }
+              }
+          }
+
+
           supervisions.raw.push({
             category: finalKey,
             status: extractYear ? 'Concluída' : 'Em andamento',
             year: extractedYear,
+            area: area,
+            institution: institution,
             reference: cleanText
           });
         }
       } else if (sibling.tagName === 'A' && sibling.hasAttribute('name')) {
-        const name = sibling.getAttribute('name');
-        // Stop if we hit another major section
-        if (name && (name === 'Orientacoesconcluidas' || name === 'Producaobibliografica' || name === 'Producaotecnica' || name === 'Outraproducao' || name === 'Dadoscomplementares')) {
+        const name = sibling.getAttribute('name').toLowerCase();
+        if (name && (name === 'orientacoesconcluidas' || name === 'producaobibliografica' || name === 'producaotecnica' || name === 'outraproducao' || name === 'dadoscomplementares')) {
           break;
         }
       } else if (sibling.querySelector && sibling.querySelector("div.title-wrapper")) {
@@ -2099,7 +2214,7 @@ function extractEvents() {
         const text = item.innerText;
 
         // Year
-        const yearMatch = text.match(/\b(19|20)\d{2}\b\. \(/);
+        const yearMatch = text.match(/\b(19|20)\d{2}\b\.\s*\(/);
         let year = NaN;
         if (yearMatch) {
           year = parseInt(yearMatch[0]);
@@ -2184,39 +2299,46 @@ function getAuthorNames() {
   return [];
 }
 
-function showLoading() {
-  let loader = document.getElementById('jcr-lattes-loader');
-  if (!loader) {
-    loader = document.createElement('div');
-    loader.id = 'jcr-lattes-loader';
-    loader.innerHTML = `<div class="spinner"></div> <span style="margin-left: 8px; font-weight: bold; color: ${COLORS.authorCount};">Atualizando dados...</span>`;
-    // Add styles
-    loader.style.cssText = `position: fixed; top: 10px; left: 10px; z-index: 9999; background: rgba(255, 255, 255, 0.9); padding: 5px 10px; border-radius: 5px; box-shadow: 0 0 5px rgba(0, 0, 0, 0.1); display: flex; align-items: center; border: 1px solid ${COLORS.border};`;
+var loadingTimeout = null;
 
-    const style = document.createElement('style');
-    style.innerHTML = `
-  .spinner {
-  border: 4px solid ${COLORS.spinnerBorder};
-  border-top: 4px solid ${COLORS.spinnerAccent};
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  animation: spin 1s linear infinite;
-}
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-`;
-    document.head.appendChild(style);
-    document.body.appendChild(loader);
+function showLoading() {
+  if (loadingTimeout) return;
+  loadingTimeout = setTimeout(() => {
+    let loader = document.getElementById('jcr-lattes-loader');
+    if (!loader) {
+      loader = document.createElement('div');
+      loader.id = 'jcr-lattes-loader';
+      loader.innerHTML = `<div class="spinner"></div> <span style="margin-left: 8px; font-weight: bold; color: ${COLORS.authorCount};">Atualizando dados...</span>`;
+      // Add styles
+      loader.style.cssText = `position: fixed; top: 10px; left: 10px; z-index: 9999; background: rgba(255, 255, 255, 0.9); padding: 5px 10px; border-radius: 5px; box-shadow: 0 0 5px rgba(0, 0, 0, 0.1); display: flex; align-items: center; border: 1px solid ${COLORS.border};`;
+
+      const style = document.createElement('style');
+      style.innerHTML = `
+    .spinner {
+    border: 4px solid ${COLORS.spinnerBorder};
+    border-top: 4px solid ${COLORS.spinnerAccent};
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
   }
-  loader.style.display = 'flex';
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  `;
+      document.head.appendChild(style);
+      document.body.appendChild(loader);
+    }
+    loader.style.display = 'flex';
+  }, 1000); // 1000ms delay to avoid flashing
 }
 
 function hideLoading(force = false) {
-  const loader = document.getElementById('jcr-lattes-loader');
-  if (!loader) return;
+  if (loadingTimeout) {
+    clearTimeout(loadingTimeout);
+    loadingTimeout = null;
+  }
 
   // Check if anything is still pending before hiding
   const pendingJcr = document.querySelectorAll('.ajaxJCR:not([original-title])');
@@ -2229,38 +2351,20 @@ function hideLoading(force = false) {
       // Re-check just in case something started in the meantime
       const stillPendingJcr = document.querySelectorAll('.ajaxJCR:not([original-title])');
       if (force || (stillPendingJcr.length === 0 && !window.isFetchingRidStats)) {
-        loader.style.display = 'none';
+        const loader = document.getElementById('jcr-lattes-loader');
+        if (loader) {
+            loader.style.display = 'none';
+        }
+        
+        if (typeof observer !== 'undefined' && observer) {
+          observer.disconnect();
+          console.log('[JCR Lattes] Asynchronous data loaded. MutationObserver disconnected.');
+        }
       }
     }, 800);
   }
 }
 
-function identifySections() {
-  console.log('JCR Lattes: Identifying sections...');
-  try {
-    if (typeof SECTIONS === 'undefined' || !SECTIONS) {
-      console.warn('[JCR Lattes] SECTIONS is not defined.');
-      return;
-    }
-
-    for (const [key, config] of Object.entries(SECTIONS)) {
-      if (!config || typeof config.selector !== 'string' || !config.selector) {
-        continue;
-      }
-
-      try {
-        const element = document.querySelector(config.selector);
-        if (element) {
-          console.log(`[JCR Lattes] Found section: ${key} `, element);
-        }
-      } catch (innerError) {
-        console.error(`[JCR Lattes] Error selecting section "${key}" with selector "${config.selector}":`, innerError);
-      }
-    }
-  } catch (outerError) {
-    console.error('[JCR Lattes] Unexpected error in identifySections:', outerError);
-  }
-}
 
 function extractDeclaredCitations() {
   const declared = {

@@ -3,11 +3,11 @@
 
 window.JCRReportUtils = {
   COLORS: {
-    highJcr: '#3daa43ff',
-    midJcr: '#a838caff',
+    highJcr: '#3daa43',
+    midJcr: '#a838ca',
     lowJcr: '#E65100',
-    noJcr: '#e03535ff',
-    authorRank: '#3daa43ff',
+    noJcr: '#e03535',
+    authorRank: '#3daa43',
     authorCount: '#666',
     footerText: '#333',
     border: '#ddd',
@@ -26,6 +26,8 @@ window.JCRReportUtils = {
     noJcr: '#C62828'
   },
 
+  JOURNAL_STRIP_SUFFIXES: ['(print)', '(online)','(Cambridge. Online)','(Impresso)','(Internet)','(Philadelphia, PA)','(New York)','(São Paulo. Impresso)','(London. 1996. Print)'],
+
   formatNum: function(num) {
     return num.toFixed(2);
   },
@@ -37,6 +39,7 @@ window.JCRReportUtils = {
   getSoftColor: function(hex, factor = 0.85) {
     let c = hex.startsWith('#') ? hex.substring(1) : hex;
     if (c.length === 3) c = c.split('').map(x => x + x).join('');
+    if (c.length === 8) c = c.substring(0, 6); // #rrggbbaa: descarta o canal alpha
     const rgb = parseInt(c, 16);
     let r = (rgb >> 16) & 0xff;
     let g = (rgb >> 8) & 0xff;
@@ -492,9 +495,10 @@ window.JCRReportUtils = {
 
   generateRidTableHTML: function(ridStats, researcherIdLink, isUnlocked) {
     if (!ridStats || !researcherIdLink) return '';
-    
-    const ridId = researcherIdLink.split('/').pop();
-    
+
+    const safeLink = this._safeUrl(researcherIdLink);
+    const ridId = this._esc(String(researcherIdLink).split('/').pop());
+
     return `
       <div id="rid-stats-table" class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
         <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
@@ -510,7 +514,7 @@ window.JCRReportUtils = {
           </thead>
           <tbody>
             <tr style="border-bottom: 1px solid #ddd;">
-              <td style="padding: 8px; text-align: left;"><a href="${researcherIdLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${ridId}</a></td>
+              <td style="padding: 8px; text-align: left;">${safeLink ? `<a href="${safeLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${ridId}</a>` : ridId}</td>
               <td style="padding: 8px; text-align: center;">${ridStats.hIndex !== null && ridStats.hIndex !== undefined ? ridStats.hIndex : '-'}</td>
               <td style="padding: 8px; text-align: center;">${ridStats.publications !== null && ridStats.publications !== undefined ? ridStats.publications : '-'}</td>
               <td style="padding: 8px; text-align: center;">${ridStats.wosPublications !== null && ridStats.wosPublications !== undefined ? ridStats.wosPublications : '-'}</td>
@@ -579,7 +583,7 @@ window.JCRReportUtils = {
               <td style="padding: 8px; text-align: center;">${getVal(last10, 'scopus', 'hIndex')}</td>
             </tr>
             <tr style="border-bottom: 1px solid #ddd;">
-              <td style="padding: 8px; text-align: left;">Customizado (${stats.customYears} ${stats.customYears == 1 || stats.customYears == 0 ? 'ano' : 'anos'})</td>
+              <td style="padding: 8px; text-align: left;">${stats.customYears} ${stats.customYears == 1 || stats.customYears == 0 ? 'ano' : 'anos'}</td>
               <td style="padding: 8px; text-align: center;">${custom.total.count}</td>
               <td style="padding: 8px; text-align: center;">${custom.total.countWithJcr}</td>
               <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${getVal(custom, 'wos', 'sum')}</td>
@@ -592,10 +596,10 @@ window.JCRReportUtils = {
               <td style="padding: 8px; text-align: left;">Declarado (Lattes)</td>
               <td style="padding: 8px; text-align: center;">-</td>
               <td style="padding: 8px; text-align: center;">-</td>
-              <td style="padding: 8px; border-left: 1px solid #ccc; text-align: center;">${declaredCitations.wosCitations !== '' ? declaredCitations.wosCitations : '-'}</td>
-              <td style="padding: 8px; text-align: center;">${declaredCitations.wosHIndex !== '' ? declaredCitations.wosHIndex : '-'}</td>
-              <td style="padding: 8px; border-left: 1px solid #ccc; text-align: center;">${declaredCitations.scopusCitations !== '' ? declaredCitations.scopusCitations : '-'}</td>
-              <td style="padding: 8px; text-align: center;">${declaredCitations.scopusHIndex !== '' ? declaredCitations.scopusHIndex : '-'}</td>
+              <td style="padding: 8px; border-left: 1px solid #ccc; text-align: center;">${declaredCitations.wosCitations !== '' ? this._esc(declaredCitations.wosCitations) : '-'}</td>
+              <td style="padding: 8px; text-align: center;">${declaredCitations.wosHIndex !== '' ? this._esc(declaredCitations.wosHIndex) : '-'}</td>
+              <td style="padding: 8px; border-left: 1px solid #ccc; text-align: center;">${declaredCitations.scopusCitations !== '' ? this._esc(declaredCitations.scopusCitations) : '-'}</td>
+              <td style="padding: 8px; text-align: center;">${declaredCitations.scopusHIndex !== '' ? this._esc(declaredCitations.scopusHIndex) : '-'}</td>
             </tr>` : ''}
           </tbody>
         </table>
@@ -605,34 +609,235 @@ window.JCRReportUtils = {
 
   generateSupervisionTableHTML: function(stats, customYears) {
     const { supervisions } = stats;
-    if (!supervisions || (!supervisions.inCourse && !supervisions.concluded)) return '';
+    if (!supervisions || (!supervisions.inCourse && !supervisions.concluded && (!supervisions.raw || supervisions.raw.length === 0))) return '';
 
-    const allCategories = new Set([
-      ...Object.keys(supervisions.inCourse || {}),
-      ...Object.keys(supervisions.concluded || {})
-    ]);
+    if (!supervisions.raw || supervisions.raw.length === 0) {
+        // Fallback for older databases
+        const allCategories = new Set([
+          ...Object.keys(supervisions.inCourse || {}),
+          ...Object.keys(supervisions.concluded || {})
+        ]);
 
+        let rows = '';
+        allCategories.forEach(cat => {
+          const inCourse = supervisions.inCourse[cat] || 0;
+          const concludedYears = supervisions.concluded[cat] || [];
+          const totalConcluded = concludedYears.length;
+          
+          const currentYear = new Date().getFullYear();
+          const countRecent = concludedYears.filter(y => y >= currentYear - 5).length;
+          const countLast10 = concludedYears.filter(y => y >= currentYear - 10).length;
+          const countCustom = concludedYears.filter(y => y >= currentYear - customYears).length;
+
+          rows += `
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 8px; text-align: left;">${this._esc(cat)}</td>
+              <td style="padding: 8px; text-align: center; border-left: 1px solid #eee;">${inCourse}</td>
+              <td style="padding: 8px; text-align: center; border-left: 1px solid #eee;">${totalConcluded}</td>
+              <td style="padding: 8px; text-align: center;">${countRecent}</td>
+              <td style="padding: 8px; text-align: center;">${countLast10}</td>
+              <td style="padding: 8px; text-align: center;">${countCustom}</td>
+            </tr>
+          `;
+        });
+
+        return `
+          <div class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
+            <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
+              <thead>
+                <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
+                  <th style="padding: 8px; text-align: left;">Orientações</th>
+                  <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Em Andamento</th>
+                  <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Concluídas</th>
+                  <th style="padding: 8px; text-align: center;">5 Anos</th>
+                  <th style="padding: 8px; text-align: center;">10 Anos</th>
+                  <th style="padding: 8px; text-align: center;">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          </div>
+        `;
+    }
+
+    const currentYear = new Date().getFullYear();
+    const tree = {};
+
+    supervisions.raw.forEach(item => {
+        let type = item.category || 'Outros';
+        let inst = item.institution || 'Não especificada';
+        let area = item.area || 'Não especificada';
+        
+        // Retroactively extract area and institution for old DB entries
+        if (item.reference && (!item.area && !item.institution)) {
+            const cleanText = item.reference;
+            let searchStr = cleanText;
+            const yearMatches = cleanText.match(/\b(?:19|20)\d{2}\b/g);
+            if (yearMatches && yearMatches.length > 0) {
+                const lastYear = yearMatches[yearMatches.length - 1];
+                const lastYearIndex = cleanText.lastIndexOf(lastYear);
+                searchStr = cleanText.substring(lastYearIndex + 4);
+            }
+
+            const areaInstMatch = searchStr.match(/\(([^)]+)\)\s*-\s*([^,.]+)/);
+            if (areaInstMatch) {
+                area = areaInstMatch[1].trim();
+                inst = areaInstMatch[2].trim();
+            } else {
+                const natureMatch = cleanText.match(/(?:natureza|natureza\.)\s*-\s*([^,.]+)/);
+                if (natureMatch) {
+                    inst = natureMatch[1].trim();
+                } else {
+                    let lastYearMatchStr = null;
+                    const regex = /\b(?:19|20)\d{2}\.\s+([^,.]+)/g;
+                    let match;
+                    while ((match = regex.exec(cleanText)) !== null) {
+                        lastYearMatchStr = match[1];
+                    }
+                    if (lastYearMatchStr) {
+                        inst = lastYearMatchStr.trim();
+                    }
+                }
+            }
+        }
+
+        const typeKey = type.toLowerCase();
+        const instKey = inst.toLowerCase();
+        const areaKey = area.toLowerCase();
+
+        if (!tree[typeKey]) tree[typeKey] = { name: type, institutions: {} };
+        if (!tree[typeKey].institutions[instKey]) tree[typeKey].institutions[instKey] = { name: inst, areas: {} };
+        if (!tree[typeKey].institutions[instKey].areas[areaKey]) {
+            tree[typeKey].institutions[instKey].areas[areaKey] = {
+                name: area,
+                inCourse: 0,
+                concluded: 0,
+                recent: 0,
+                last10: 0,
+                custom: 0
+            };
+        }
+
+        const leaf = tree[typeKey].institutions[instKey].areas[areaKey];
+
+        if (item.status === 'Em andamento') {
+            leaf.inCourse++;
+        } else {
+            leaf.concluded++;
+            if (!isNaN(item.year)) {
+                if (item.year >= currentYear - 5) leaf.recent++;
+                if (item.year >= currentYear - 10) leaf.last10++;
+                if (item.year >= currentYear - customYears) leaf.custom++;
+            }
+        }
+    });
+
+    const genId = () => 'jcr_sup_' + Math.random().toString(36).substr(2, 9);
     let rows = '';
-    allCategories.forEach(cat => {
-      const inCourse = supervisions.inCourse[cat] || 0;
-      const concludedYears = supervisions.concluded[cat] || [];
-      const totalConcluded = concludedYears.length;
-      
-      const currentYear = new Date().getFullYear();
-      const countRecent = concludedYears.filter(y => y >= currentYear - 5).length;
-      const countLast10 = concludedYears.filter(y => y >= currentYear - 10).length;
-      const countCustom = concludedYears.filter(y => y >= currentYear - customYears).length;
+    const sortKeys = (obj) => Object.keys(obj).sort((a,b) => obj[a].name.localeCompare(obj[b].name));
 
-      rows += `
-        <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${cat}</td>
-          <td style="padding: 8px; text-align: center; border-left: 1px solid #eee;">${inCourse}</td>
-          <td style="padding: 8px; text-align: center; border-left: 1px solid #eee;">${totalConcluded}</td>
-          <td style="padding: 8px; text-align: center;">${countRecent}</td>
-          <td style="padding: 8px; text-align: center;">${countLast10}</td>
-          <td style="padding: 8px; text-align: center;">${countCustom}</td>
-        </tr>
-      `;
+    sortKeys(tree).forEach(tKey => {
+        const typeNode = tree[tKey];
+        const typeId = genId();
+        
+        let tInCourse = 0, tConcluded = 0, tRecent = 0, tLast10 = 0, tCustom = 0;
+        let instRows = '';
+
+        sortKeys(typeNode.institutions).forEach(iKey => {
+            const instNode = typeNode.institutions[iKey];
+            const instId = genId();
+            
+            let iInCourse = 0, iConcluded = 0, iRecent = 0, iLast10 = 0, iCustom = 0;
+            let areaRows = '';
+
+            const areaKeys = sortKeys(instNode.areas);
+            // If there's only one area and it's "Não especificada", don't render the area level
+            const showAreas = !(areaKeys.length === 1 && instNode.areas[areaKeys[0]].name === 'Não especificada');
+
+            areaKeys.forEach(aKey => {
+                const areaNode = instNode.areas[aKey];
+                
+                iInCourse += areaNode.inCourse;
+                iConcluded += areaNode.concluded;
+                iRecent += areaNode.recent;
+                iLast10 += areaNode.last10;
+                iCustom += areaNode.custom;
+
+                if (showAreas) {
+                    areaRows += `
+                      <tr class="child-of-${instId} child-of-${typeId}-all" style="border-bottom: 1px solid #eee; display: none; background-color: #fafafa;">
+                        <td style="padding: 6px 8px 6px 40px; text-align: left; font-size: 0.9em; color: #555;">└ ${this._esc(areaNode.name)}</td>
+                        <td style="padding: 6px 8px; text-align: center; border-left: 1px solid #eee;">${areaNode.inCourse}</td>
+                        <td style="padding: 6px 8px; text-align: center; border-left: 1px solid #eee;">${areaNode.concluded}</td>
+                        <td style="padding: 6px 8px; text-align: center;">${areaNode.recent}</td>
+                        <td style="padding: 6px 8px; text-align: center;">${areaNode.last10}</td>
+                        <td style="padding: 6px 8px; text-align: center;">${areaNode.custom}</td>
+                      </tr>
+                    `;
+                }
+            });
+
+            tInCourse += iInCourse;
+            tConcluded += iConcluded;
+            tRecent += iRecent;
+            tLast10 += iLast10;
+            tCustom += iCustom;
+
+            const instToggleScript = showAreas 
+                ? `onclick="const els = document.querySelectorAll('.child-of-${instId}'); els.forEach(el => { el.style.display = el.style.display === 'none' ? 'table-row' : 'none'; }); const icon = this.querySelector('.inst-icon'); if(icon) icon.textContent = icon.textContent === '▶' ? '▼' : '▶';"` 
+                : '';
+
+            instRows += `
+              <tr class="child-of-${typeId}" style="border-bottom: 1px solid #eee; display: none; background-color: #fdfdfd; ${showAreas ? 'cursor: pointer;' : ''}" ${instToggleScript}>
+                <td style="padding: 6px 8px 6px 25px; text-align: left; font-size: 0.95em;">
+                  ${showAreas ? '<span class="inst-icon" style="display:inline-block; width: 15px; font-size:0.8em; color:#888;">▶</span>' : '<span style="display:inline-block; width: 15px;"></span>'}
+                  ${this._esc(instNode.name)}
+                </td>
+                <td style="padding: 6px 8px; text-align: center; border-left: 1px solid #eee;">${iInCourse}</td>
+                <td style="padding: 6px 8px; text-align: center; border-left: 1px solid #eee;">${iConcluded}</td>
+                <td style="padding: 6px 8px; text-align: center;">${iRecent}</td>
+                <td style="padding: 6px 8px; text-align: center;">${iLast10}</td>
+                <td style="padding: 6px 8px; text-align: center;">${iCustom}</td>
+              </tr>
+            `;
+            
+            if (showAreas) {
+                instRows += areaRows;
+            }
+        });
+
+        const typeToggleScript = `onclick="
+            const els = document.querySelectorAll('.child-of-${typeId}'); 
+            const isExpanding = this.querySelector('.type-icon').textContent === '▶';
+            if (!isExpanding) {
+                // hide all descendants
+                document.querySelectorAll('.child-of-${typeId}, .child-of-${typeId}-all').forEach(el => el.style.display = 'none');
+                // reset institution icons
+                document.querySelectorAll('.child-of-${typeId} .inst-icon').forEach(icon => icon.textContent = '▶');
+            } else {
+                // show direct children
+                els.forEach(el => el.style.display = 'table-row');
+            }
+            const icon = this.querySelector('.type-icon'); 
+            if(icon) icon.textContent = isExpanding ? '▼' : '▶';
+        "`;
+
+        rows += `
+          <tr style="border-bottom: 1px solid #ddd; background-color: #fff; cursor: pointer;" ${typeToggleScript}>
+            <td style="padding: 8px; text-align: left; font-weight: bold;">
+              <span class="type-icon" style="display:inline-block; width: 15px; font-size:0.8em; color:#555;">▶</span>
+              ${this._esc(typeNode.name)}
+            </td>
+            <td style="padding: 8px; text-align: center; border-left: 1px solid #ccc; font-weight: bold;">${tInCourse}</td>
+            <td style="padding: 8px; text-align: center; border-left: 1px solid #ccc; font-weight: bold;">${tConcluded}</td>
+            <td style="padding: 8px; text-align: center; font-weight: bold;">${tRecent}</td>
+            <td style="padding: 8px; text-align: center; font-weight: bold;">${tLast10}</td>
+            <td style="padding: 8px; text-align: center; font-weight: bold;">${tCustom}</td>
+          </tr>
+        `;
+        rows += instRows;
     });
 
     return `
@@ -667,7 +872,7 @@ window.JCRReportUtils = {
 
       rowsHtml += `
         <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${status}</td>
+          <td style="padding: 8px; text-align: left;">${this._esc(status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.all, status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.recent, status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.last10, status)}</td>
@@ -717,7 +922,7 @@ window.JCRReportUtils = {
 
       rowsHtml += `
         <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${type}</td>
+          <td style="padding: 8px; text-align: left;">${this._esc(type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.all, type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.recent, type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.last10, type)}</td>
@@ -754,5 +959,241 @@ window.JCRReportUtils = {
         </table>
       </div>
     `;
+  },
+
+  _esc: function(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  },
+
+  // Escapa e valida uma URL para uso em atributo href ('' se não for http/https)
+  _safeUrl: function(url) {
+    const s = String(url || '');
+    return /^https?:\/\//i.test(s) ? this._esc(s) : '';
+  },
+
+  generateJournalTableHTML: function(publications, yearsCutoff, minPapers, currentYear, highJcr, lowJcr) {
+    const COLORS = this.COLORS;
+    const startYear = yearsCutoff > 0 ? currentYear - yearsCutoff : 0;
+
+    const stripName = (raw) => {
+      let n = raw.trim();
+      let prev;
+      do { prev = n; n = n.replace(/\s*\([^)]*\)\s*$/, '').trim(); } while (n !== prev);
+      return n;
+    };
+
+    const pickDisplayName = (nameCounts) =>
+      Object.entries(nameCounts).reduce((best, [n, c]) => c > best[1] ? [n, c] : best, ['', 0])[0];
+
+    // Phase 1: separate buckets for ISSN, no-ISSN-with-JIF, and no-ISSN-without-JIF.
+    // nameCounts keys are original-case stripped names; use .toLowerCase() when comparing across groups.
+    const issnGroups  = {}; // { [issn]: { nameCounts, jif, bestIssn, count, wos, scopus } }
+    const noIssnByJif = {}; // { [lk]: { [jifStr]: { nameCounts, issn, count, wos, scopus } } }
+    const noIssnZero  = {}; // { [lk]: { nameCounts, issn, count, wos, scopus } }
+
+    for (const pub of publications) {
+      if (!pub.journalName) continue;
+      const y = parseInt(pub.year, 10);
+      if (isNaN(y) || (yearsCutoff > 0 && y < startYear)) continue;
+      const stripped = stripName(pub.journalName);
+      if (!stripped) continue;
+      const lk = stripped.toLowerCase();
+      const rawJif = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+      const pubJif = parseFloat(rawJif) || 0;
+      const issn = (pub.issn && pub.issn.trim() !== '-') ? pub.issn.trim() : '';
+
+      if (issn) {
+        if (!issnGroups[issn]) issnGroups[issn] = { nameCounts: {}, jif: 0, bestIssn: issn, count: 0, wos: 0, scopus: 0 };
+        const g = issnGroups[issn];
+        g.nameCounts[stripped] = (g.nameCounts[stripped] || 0) + 1;
+        g.count++;
+        g.wos += pub.wosCitations || 0;
+        g.scopus += pub.scopusCitations || 0;
+        if (pubJif > 0 && !g.jif) g.jif = pubJif;
+      } else if (pubJif > 0) {
+        if (!noIssnByJif[lk]) noIssnByJif[lk] = {};
+        const jifStr = pubJif.toFixed(3);
+        if (!noIssnByJif[lk][jifStr]) noIssnByJif[lk][jifStr] = { nameCounts: {}, issn: '', count: 0, wos: 0, scopus: 0 };
+        const b = noIssnByJif[lk][jifStr];
+        b.nameCounts[stripped] = (b.nameCounts[stripped] || 0) + 1;
+        b.count++; b.wos += pub.wosCitations || 0; b.scopus += pub.scopusCitations || 0;
+      } else {
+        if (!noIssnZero[lk]) noIssnZero[lk] = { nameCounts: {}, issn: '', count: 0, wos: 0, scopus: 0 };
+        const b = noIssnZero[lk];
+        b.nameCounts[stripped] = (b.nameCounts[stripped] || 0) + 1;
+        b.count++; b.wos += pub.wosCitations || 0; b.scopus += pub.scopusCitations || 0;
+      }
+    }
+
+    // Phase 1.5: flatten no-ISSN buckets into noIssnGroups (order-independent JIF splitting).
+    // Zero-JIF papers are merged into the most-populous non-zero JIF group for their name.
+    // If multiple non-zero JIF groups share a name they are different journals → stay separate.
+    const noIssnGroups = {};
+    for (const lk of new Set([...Object.keys(noIssnByJif), ...Object.keys(noIssnZero)])) {
+      const byJif = noIssnByJif[lk] || {};
+      const zero  = noIssnZero[lk];
+      const nonZeroKeys = Object.keys(byJif);
+      const mainJifStr  = nonZeroKeys.length > 0
+        ? nonZeroKeys.reduce((best, k) => byJif[k].count > byJif[best].count ? k : best)
+        : null;
+
+      for (const jifStr of nonZeroKeys) {
+        const b = byJif[jifStr];
+        noIssnGroups[lk + '|' + jifStr] = { nameCounts: { ...b.nameCounts }, issn: b.issn, jif: parseFloat(jifStr), count: b.count, wos: b.wos, scopus: b.scopus };
+      }
+      if (zero) {
+        if (mainJifStr) {
+          const m = noIssnGroups[lk + '|' + mainJifStr];
+          m.count += zero.count; m.wos += zero.wos; m.scopus += zero.scopus;
+          if (zero.issn && !m.issn) m.issn = zero.issn;
+          for (const [n, c] of Object.entries(zero.nameCounts)) m.nameCounts[n] = (m.nameCounts[n] || 0) + c;
+        } else {
+          noIssnGroups[lk] = { nameCounts: { ...zero.nameCounts }, issn: zero.issn, jif: 0, count: zero.count, wos: zero.wos, scopus: zero.scopus };
+        }
+      }
+    }
+
+    // Phase 2: merge ISSN groups that share a name and have compatible JIFs (union-find).
+    const issnKeys = Object.keys(issnGroups);
+    const parent = Object.fromEntries(issnKeys.map(k => [k, k]));
+    const find = k => { while (parent[k] !== k) { parent[k] = parent[parent[k]]; k = parent[k]; } return k; };
+    const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+
+    for (let i = 0; i < issnKeys.length; i++) {
+      const gi = issnGroups[issnKeys[i]];
+      const niLower = new Set(Object.keys(gi.nameCounts).map(n => n.toLowerCase()));
+      for (let j = i + 1; j < issnKeys.length; j++) {
+        const gj = issnGroups[issnKeys[j]];
+        if (gi.jif > 0 && gj.jif > 0 && Math.abs(gi.jif - gj.jif) > 0.001) continue;
+        if (Object.keys(gj.nameCounts).some(n => niLower.has(n.toLowerCase()))) union(issnKeys[i], issnKeys[j]);
+      }
+    }
+
+    const mergedIssnGroups = {};
+    for (const issn of issnKeys) {
+      const root = find(issn);
+      if (!mergedIssnGroups[root]) mergedIssnGroups[root] = { nameCounts: {}, jif: 0, bestIssn: '', count: 0, wos: 0, scopus: 0 };
+      const m = mergedIssnGroups[root], g = issnGroups[issn];
+      for (const [n, c] of Object.entries(g.nameCounts)) m.nameCounts[n] = (m.nameCounts[n] || 0) + c;
+      m.count += g.count; m.wos += g.wos; m.scopus += g.scopus;
+      if (g.jif > 0 && !m.jif) m.jif = g.jif;
+      if (g.bestIssn && !m.bestIssn) m.bestIssn = g.bestIssn;
+    }
+    for (const m of Object.values(mergedIssnGroups)) m.displayName = pickDisplayName(m.nameCounts);
+
+    // Phase 2b: merge noIssnGroups entries sharing the same ISSN and compatible JIF (union-find).
+    const ngKeys = Object.keys(noIssnGroups);
+    const ngPar = Object.fromEntries(ngKeys.map(k => [k, k]));
+    const ngFind = k => { while (ngPar[k] !== k) { ngPar[k] = ngPar[ngPar[k]]; k = ngPar[k]; } return k; };
+    const ngUnion = (a, b) => { const ra = ngFind(a), rb = ngFind(b); if (ra !== rb) ngPar[ra] = rb; };
+    const issnToNgKeys = {};
+    for (const key of ngKeys) {
+      const iss = noIssnGroups[key].issn;
+      if (!iss) continue;
+      if (!issnToNgKeys[iss]) issnToNgKeys[iss] = [];
+      issnToNgKeys[iss].push(key);
+    }
+    for (const keys of Object.values(issnToNgKeys)) {
+      for (let i = 0; i < keys.length; i++) {
+        for (let j = i + 1; j < keys.length; j++) {
+          const gi = noIssnGroups[keys[i]], gj = noIssnGroups[keys[j]];
+          if (gi.jif > 0 && gj.jif > 0 && Math.abs(gi.jif - gj.jif) > 0.001) continue;
+          ngUnion(keys[i], keys[j]);
+        }
+      }
+    }
+    const mergedNoIssnGroups = {};
+    for (const key of ngKeys) {
+      const root = ngFind(key);
+      if (!mergedNoIssnGroups[root]) mergedNoIssnGroups[root] = { nameCounts: {}, issn: '', jif: 0, count: 0, wos: 0, scopus: 0 };
+      const m = mergedNoIssnGroups[root], g = noIssnGroups[key];
+      m.count += g.count; m.wos += g.wos; m.scopus += g.scopus;
+      if (g.jif > 0 && !m.jif) m.jif = g.jif;
+      if (g.issn && !m.issn) m.issn = g.issn;
+      for (const [n, c] of Object.entries(g.nameCounts)) m.nameCounts[n] = (m.nameCounts[n] || 0) + c;
+    }
+    for (const m of Object.values(mergedNoIssnGroups)) m.displayName = pickDisplayName(m.nameCounts);
+
+    // Phase 3: absorb no-ISSN groups into matching ISSN groups (all name variants checked);
+    // remainder become standalone rows.
+    const noIssnRows = [];
+    for (const ng of Object.values(mergedNoIssnGroups)) {
+      const ngLower = new Set(Object.keys(ng.nameCounts).map(n => n.toLowerCase()));
+      let absorbed = false;
+      for (const m of Object.values(mergedIssnGroups)) {
+        const mLower = new Set(Object.keys(m.nameCounts).map(n => n.toLowerCase()));
+        if (![...ngLower].some(n => mLower.has(n))) continue;
+        if (ng.jif > 0 && m.jif > 0 && Math.abs(ng.jif - m.jif) > 0.001) continue;
+        m.count += ng.count; m.wos += ng.wos; m.scopus += ng.scopus;
+        if (ng.jif > 0 && !m.jif) m.jif = ng.jif;
+        for (const [n, c] of Object.entries(ng.nameCounts)) m.nameCounts[n] = (m.nameCounts[n] || 0) + c;
+        m.displayName = pickDisplayName(m.nameCounts);
+        absorbed = true; break;
+      }
+      if (!absorbed) noIssnRows.push({ name: ng.displayName, issn: ng.issn || '', jif: ng.jif, count: ng.count, wos: ng.wos, scopus: ng.scopus });
+    }
+
+    const allJournals = [
+      ...Object.values(mergedIssnGroups).map(m => ({ name: m.displayName, issn: m.bestIssn, jif: m.jif, count: m.count, wos: m.wos, scopus: m.scopus })),
+      ...noIssnRows
+    ];
+
+    const rows = allJournals.filter(j => j.count >= minPapers).sort((a, b) => b.count - a.count || b.jif - a.jif);
+    const totalOmitted = allJournals.length - rows.length;
+
+    if (rows.length === 0) {
+      const msg = allJournals.length === 0
+        ? 'Nenhuma publicação com dados de periódico encontrada neste período.'
+        : `Todos os ${allJournals.length} periódico(s) têm menos de ${minPapers} artigo(s). Reduza o mínimo de artigos.`;
+      return `<div style="padding: 15px; color: #777; text-align: center;">${msg}</div>`;
+    }
+
+    let rowsHTML = '';
+    rows.forEach((j, idx) => {
+      let jifColor = '#555';
+      if (j.jif > 0) {
+        if (j.jif >= highJcr) jifColor = COLORS.highJcr;
+        else if (j.jif >= lowJcr) jifColor = COLORS.midJcr;
+        else jifColor = COLORS.lowJcr;
+      }
+      const bg = idx % 2 !== 0 ? `background: ${COLORS.backgroundSubHeader};` : '';
+      rowsHTML += `
+        <tr style="border-bottom: 1px solid ${COLORS.borderLight}; ${bg}">
+          <td style="padding: 7px 8px; text-align: left; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this._esc(j.name)}">${this._esc(j.name)}</td>
+          <td style="padding: 7px 8px; text-align: center;" data-val="${j.jif}"><strong style="color: ${jifColor};">${j.jif > 0 ? j.jif.toFixed(3) : '—'}</strong></td>
+          <td style="padding: 7px 8px; text-align: center;">${this._esc(j.issn) || '—'}</td>
+          <td style="padding: 7px 8px; text-align: center; font-weight: bold;" data-val="${j.count}">${j.count}</td>
+          <td style="padding: 7px 8px; text-align: center;" data-val="${j.wos}">${j.wos > 0 ? j.wos : '—'}</td>
+          <td style="padding: 7px 8px; text-align: center;" data-val="${j.scopus}">${j.scopus > 0 ? j.scopus : '—'}</td>
+        </tr>`;
+    });
+
+    const footerNote = totalOmitted > 0
+      ? `<div style="padding: 8px; color: #999; font-size: 0.85em; text-align: right;">${totalOmitted} periódico(s) omitido(s) por ter(em) menos de ${minPapers} artigo(s).</div>`
+      : '';
+
+    return `
+      <div style="overflow-x: auto;">
+        <table id="journal-table" style="width: 100%; border-collapse: collapse; font-size: 0.9em; font-family: inherit;">
+          <thead>
+            <tr style="background: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border}; user-select: none;">
+              <th data-sort-col="0" data-sort-type="str" style="padding: 8px; text-align: left; cursor: pointer; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis;">Periódico</th>
+              <th data-sort-col="1" data-sort-type="num" style="padding: 8px; text-align: center; cursor: pointer; white-space: nowrap;">JCR</th>
+              <th data-sort-col="2" data-sort-type="str" style="padding: 8px; text-align: center; cursor: pointer; white-space: nowrap;">ISSN</th>
+              <th data-sort-col="3" data-sort-type="num" style="padding: 8px; text-align: center; cursor: pointer; white-space: nowrap;">Nº Artigos</th>
+              <th data-sort-col="4" data-sort-type="num" style="padding: 8px; text-align: center; cursor: pointer; white-space: nowrap;">Cit. WoS</th>
+              <th data-sort-col="5" data-sort-type="num" style="padding: 8px; text-align: center; cursor: pointer; white-space: nowrap;">Cit. Scopus</th>
+            </tr>
+          </thead>
+          <tbody id="journal-table-body">
+            ${rowsHTML}
+          </tbody>
+        </table>
+        ${footerNote}
+      </div>`;
   }
 };

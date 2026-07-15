@@ -1,7 +1,3 @@
-// db_tools.js
-// This file contains database tools and metrics logic for JCR Lattes.
-// It should be REPLACED WITH AN EMPTY FILE for the public Chrome Web Store release.
-
 /**
  * Available Keys for METRICS_CONFIG:
  * - name: Researcher's name
@@ -27,14 +23,59 @@
  */
 
 window.JCRDBTools = {
-    passcode: "avalia26",
-    isUnlocked: false,
+    isUnlocked: true,
     autoSave: false,
-    dbKey: 'jcr_cv_database',
+    dbKey: 'jcr_cv_database', // chave legada (array único); migrada para chaves por CV
+    cvKeyPrefix: 'jcr_cv:',
     settingsKey: 'jcr_private_settings',
     currentCvData: null,
     sortConfig: { key: 'name', ascending: true },
     lastArgs: null,
+
+    _esc: function(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    },
+
+    // Escape a value for use inside a CSS [attr="value"] selector
+    _cssAttr: function(str) {
+        return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    },
+
+    // True se o CV do banco corresponde ao par (name, lattesId).
+    // Quando ambos os lados têm ID Lattes, só o ID decide (evita colisão de homônimos);
+    // o nome é usado apenas quando um dos lados não tem ID.
+    cvMatches: function (cv, name, lattesId) {
+        if (lattesId && cv.lattesId) return cv.lattesId === lattesId;
+        return !!name && cv.name === name;
+    },
+
+    // Chave de armazenamento individual do CV (preferindo o ID Lattes).
+    // Registros de Processo (piccTools) usam chave própria por processo, para não
+    // colidirem com o CV do proponente nem entre si (mesmo proponente, vários processos).
+    _cvStorageKey: function (cv) {
+        if (cv.isProcesso && cv.processId) return this.cvKeyPrefix + 'proc:' + cv.processId;
+        return this.cvKeyPrefix + (cv.lattesId ? 'id:' + cv.lattesId : 'nm:' + (cv.name || ''));
+    },
+
+    // Escapa e valida uma URL para uso em atributo href ('' se não for http/https)
+    _safeUrl: function (url) {
+        const s = String(url || '');
+        return /^https?:\/\//i.test(s) ? this._esc(s) : '';
+    },
+
+    // Returns true if the CV has old-format fields that require a re-save
+    cvNeedsUpdate: function(cv) {
+        if (!cv.dateAdded) return true;
+        if (!cv.publications || cv.publications.length === 0) return false;
+        if (cv.publications.some(p => p.impactFactor !== undefined || p.isFirstAuthor !== undefined)) return true;
+        // All publications lack both journalName and paperTitle → saved before those fields were extracted
+        if (cv.publications.every(p => !p.journalName && !p.paperTitle)) return true;
+        return false;
+    },
 
     METRICS_CONFIG: [
         { key: 'name', label: 'Nome', title: 'Nome do Pesquisador (link para o Lattes)' },
@@ -56,7 +97,8 @@ window.JCRDBTools = {
         { key: 'ridSumOfTimesCited', label: 'Citações RID', title: 'Soma de Vezes Citado (ResearcherID)', numeric: true },
         { key: 'ridSumOfTimesCitedWithoutSelf', label: 'Citações RID (sem auto)', title: 'Soma de Vezes Citado sem autocitações (ResearcherID)', numeric: true },
         { key: 'researcherIdLink', label: 'RID Link', title: 'Link para o perfil ResearcherID na Web of Science' },
-        { key: 'customId', label: 'ID', title: 'ID ou Grupo customizado', customRender: true }
+        { key: 'customId', label: 'ID', title: 'ID ou Grupo customizado', customRender: true },
+        { key: 'dateAdded', label: 'Atualizado', title: 'Data da última atualização no banco de dados', division: true }
     ],
 
     init: async function (mountId, nameLink, stats, lattesInfo = [], ridStats = null) {
@@ -68,16 +110,30 @@ window.JCRDBTools = {
         const hasRidLink = !!nameLink.researcherIdLink;
         const isRidPending = hasRidLink && !ridStats;
 
-        if (this.autoSave && this.isUnlocked && !isRidPending) {
-            if (this._saveTimeout) clearTimeout(this._saveTimeout);
-            this._saveTimeout = setTimeout(() => {
-                // At the end of the timeout, ensure we fetch the latest DOM state again
-                // by calling extractData with the most recent lastArgs
-                if (this.lastArgs) {
-                    this.extractData(this.lastArgs.nameLink, this.lastArgs.stats, this.lastArgs.lattesInfo, this.lastArgs.ridStats);
+        if (this.isUnlocked) {
+            try {
+                const db = await this.getDB();
+                const isAlreadyInDb = db.some(cv =>
+                    !cv.isProcesso && this.cvMatches(cv, this.currentCvData.name, this.currentCvData.lattesId)
+                );
+
+                // Existing CVs: always auto-save immediately — the save protection logic preserves
+                // existing RID fields, so we don't need to wait for RID stats to arrive.
+                // New CVs with autoSave=true: wait for RID stats before the first save.
+                const ridBlocksSave = isRidPending && this.autoSave && !isAlreadyInDb;
+
+                if ((this.autoSave || isAlreadyInDb) && !ridBlocksSave) {
+                    if (this._saveTimeout) clearTimeout(this._saveTimeout);
+                    this._saveTimeout = setTimeout(() => {
+                        if (this.lastArgs) {
+                            this.extractData(this.lastArgs.nameLink, this.lastArgs.stats, this.lastArgs.lattesInfo, this.lastArgs.ridStats);
+                        }
+                        this.saveCurrentCV(true).catch(() => {}); // silent auto-save; suppress unhandled rejection
+                    }, 3000);
                 }
-                this.saveCurrentCV(true); // silent auto-save
-            }, 3000); // Wait 3 seconds after the last update to ensure Lattes AJAX has finished injecting
+            } catch (e) {
+                console.warn('[JCRLattes] init: could not check DB for existing CV:', e.message);
+            }
         }
 
         this.renderUI(mountId);
@@ -139,8 +195,10 @@ window.JCRDBTools = {
             publications: lattesInfo.map(pub => ({
                 year: pub.year,
                 issn: pub.issn || '',
+                journalName: pub.journalName || pub.title || '',
+                paperTitle: pub.paperTitle || '',
                 jif: pub.impactFactor ? parseFloat(pub.impactFactor) : 0,
-                authorCount: pub.authorCount,
+                authorCount: pub.authorCount || 0,
                 authorRank: pub.authorRank || -1,
                 hasEtAl: pub.hasEtAl,
                 wosCitations: pub.wosCitations || 0,
@@ -153,48 +211,145 @@ window.JCRDBTools = {
 
     loadSettings: async function () {
         return new Promise((resolve) => {
-            chrome.storage.local.get(this.settingsKey, (result) => {
-                if (result && result[this.settingsKey]) {
-                    this.isUnlocked = result[this.settingsKey].isUnlocked || false;
-                    this.autoSave = result[this.settingsKey].autoSave || false;
-                }
+            try {
+                if (!chrome.runtime?.id) { resolve(); return; }
+                chrome.storage.local.get(this.settingsKey, (result) => {
+                    if (chrome.runtime.lastError) { resolve(); return; }
+                    if (result && result[this.settingsKey]) {
+                        this.isUnlocked = result[this.settingsKey].isUnlocked !== undefined ? result[this.settingsKey].isUnlocked : true;
+                        this.autoSave = result[this.settingsKey].autoSave !== undefined ? result[this.settingsKey].autoSave : false;
+                    }
+                    resolve();
+                });
+            } catch (e) {
                 resolve();
-            });
-        });
-    },
-
-    saveSettings: function () {
-        chrome.storage.local.set({
-            [this.settingsKey]: {
-                isUnlocked: this.isUnlocked,
-                autoSave: this.autoSave
             }
         });
     },
 
+    saveSettings: function () {
+        try {
+            if (!chrome.runtime?.id) return;
+            chrome.storage.local.set({
+                [this.settingsKey]: {
+                    isUnlocked: this.isUnlocked,
+                    autoSave: this.autoSave
+                }
+            });
+        } catch (e) { /* extension context invalidated */ }
+    },
+
     getDB: async function () {
-        return new Promise((resolve) => {
-            chrome.storage.local.get(this.dbKey, (result) => {
-                const db = result && result[this.dbKey] ? result[this.dbKey] : [];
-                // Normalize older entries that don't have wosCitations
-                db.forEach(cv => {
-                    if (cv.wosCitations === undefined && cv.publications) {
-                        let sum = 0;
-                        cv.publications.forEach(p => {
-                            if (p.wosCitations) sum += p.wosCitations;
-                        });
-                        cv.wosCitations = sum;
+        const items = await new Promise((resolve) => {
+            try {
+                if (!chrome.runtime?.id) { resolve(null); return; }
+                chrome.storage.local.get(null, (result) => {
+                    if (chrome.runtime.lastError) { resolve(null); return; }
+                    resolve(result || {});
+                });
+            } catch (e) {
+                resolve(null);
+            }
+        });
+        if (!items) return [];
+
+        const db = Object.keys(items)
+            .filter(k => k.startsWith(this.cvKeyPrefix))
+            .map(k => items[k])
+            .filter(cv => cv && cv.name);
+
+        // Migração: formato antigo (array único em dbKey) → uma chave por CV.
+        // Cada CV passa a ser gravado isoladamente, evitando que abas concorrentes
+        // sobrescrevam o banco inteiro umas das outras (last-write-wins).
+        const legacy = items[this.dbKey];
+        if (Array.isArray(legacy)) {
+            for (const cv of legacy) {
+                if (!cv || !cv.name) continue;
+                // Dedupe pela chave de armazenamento: preserva Processos (piccTools)
+                // e CVs do mesmo pesquisador como registros distintos.
+                if (!db.some(c => this._cvStorageKey(c) === this._cvStorageKey(cv))) db.push(cv);
+            }
+            try {
+                await this.saveCVs(db);
+                await new Promise((resolve) => {
+                    chrome.storage.local.remove(this.dbKey, () => {
+                        void chrome.runtime.lastError;
+                        resolve();
+                    });
+                });
+            } catch (e) {
+                // migração falhou: mantém a chave legada para retentar no próximo acesso
+            }
+        }
+
+        // Normalize older entries that don't have wosCitations
+        db.forEach(cv => {
+            if (cv.wosCitations === undefined && cv.publications) {
+                let sum = 0;
+                cv.publications.forEach(p => {
+                    if (p.wosCitations) sum += p.wosCitations;
+                });
+                cv.wosCitations = sum;
+            }
+        });
+        return db;
+    },
+
+    // Grava (upsert) apenas os CVs informados, cada um em sua própria chave.
+    // Nunca apaga registros: exclusões passam por removeCVs.
+    saveCVs: function (cvArray) {
+        return new Promise((resolve, reject) => {
+            try {
+                if (!chrome.runtime?.id) { reject(new Error('Extension context invalidated')); return; }
+                const toSet = {};
+                cvArray.forEach(cv => {
+                    if (cv && cv.name) toSet[this._cvStorageKey(cv)] = cv;
+                });
+                if (Object.keys(toSet).length === 0) { resolve(); return; }
+                chrome.storage.local.set(toSet, () => {
+                    if (chrome.runtime.lastError) {
+                        const msg = chrome.runtime.lastError.message || 'Erro desconhecido';
+                        console.error('[JCRLattes] saveCVs failed:', msg);
+                        this.showToast(`Erro ao salvar: ${msg}`, '#c62828');
+                        reject(new Error(msg));
+                    } else {
+                        resolve();
                     }
                 });
-                resolve(db);
-            });
+            } catch (e) {
+                reject(e);
+            }
         });
     },
 
-    saveDB: function (dbArray) {
-        return new Promise((resolve) => {
-            chrome.storage.local.set({ [this.dbKey]: dbArray }, resolve);
+    removeCVs: function (cvArray) {
+        return new Promise((resolve, reject) => {
+            try {
+                if (!chrome.runtime?.id) { reject(new Error('Extension context invalidated')); return; }
+                const keys = cvArray.map(cv => this._cvStorageKey(cv));
+                if (keys.length === 0) { resolve(); return; }
+                chrome.storage.local.remove(keys, () => {
+                    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                    else resolve();
+                });
+            } catch (e) {
+                reject(e);
+            }
         });
+    },
+
+    // Upsert de um CV; remove a chave antiga se o registro mudou de chave
+    // (ex.: CV salvo antes sem lattesId que agora tem ID).
+    upsertCV: async function (cvData, existingCv = null) {
+        if (existingCv && this._cvStorageKey(existingCv) !== this._cvStorageKey(cvData)) {
+            await this.removeCVs([existingCv]);
+        }
+        await this.saveCVs([cvData]);
+    },
+
+    // Compatibilidade (usado pelo piccTools): upsert de todos os CVs do array.
+    saveDB: function (dbArray) {
+        return this.saveCVs(dbArray);
     },
 
     saveCurrentCV: async function (silent = false) {
@@ -204,10 +359,13 @@ window.JCRDBTools = {
         }
 
         const db = await this.getDB();
-        const existingIndex = db.findIndex(cv => cv.name === this.currentCvData.name);
-        if (existingIndex >= 0) {
-            const existing = db[existingIndex];
-            
+        // Ignora registros de Processo (piccTools): o save de um CV do Lattes
+        // nunca deve substituir/remover um Processo do mesmo proponente.
+        const existing = db.find(cv =>
+            !cv.isProcesso && this.cvMatches(cv, this.currentCvData.name, this.currentCvData.lattesId)
+        ) || null;
+        if (existing) {
+
             // Define RID-related fields that we want to protect from being overwritten by null/empty values
             const ridFields = [
                 'ridHIndex', 'ridPublications', 'ridWosPublications', 'ridSumOfTimesCited', 
@@ -237,13 +395,17 @@ window.JCRDBTools = {
                 }
             }
 
-            // Protect JCR/WoS fields from being zeroed out by incomplete loads
+            // Protect JCR/WoS fields from being overwritten by incomplete page loads.
+            // If the new paper count is lower than what was previously saved, treat it as a
+            // partial load (Lattes AJAX still running) and restore all previous metric values.
+            const isPartialLoad = existing.totalPapers > 0 &&
+                this.currentCvData.totalPapers < existing.totalPapers;
             jcrFields.forEach(field => {
                 const newVal = this.currentCvData[field];
                 const oldVal = existing[field];
-                // If new value is 0/empty but old value was non-zero, and we have papers, preserve old value
-                if ((newVal === 0 || newVal === '') && oldVal && oldVal !== 0 && oldVal !== '') {
-                    // Only preserve if we actually have papers (if totalPapers is 0, then 0 JCR is correct)
+                if (isPartialLoad && oldVal && oldVal !== 0 && oldVal !== '') {
+                    this.currentCvData[field] = oldVal;
+                } else if ((newVal === 0 || newVal === '') && oldVal && oldVal !== 0 && oldVal !== '') {
                     if (this.currentCvData.totalPapers > 0) {
                         this.currentCvData[field] = oldVal;
                     }
@@ -256,44 +418,37 @@ window.JCRDBTools = {
             } else {
                 this.currentCvData.customId = '';
             }
-            
-            db[existingIndex] = this.currentCvData;
         } else {
             if (this.currentCvData.customId === undefined) {
                 this.currentCvData.customId = '';
             }
-            db.push(this.currentCvData);
         }
-        await this.saveDB(db);
+        // Grava só este CV (chave própria) — abas concorrentes não se sobrescrevem
+        await this.upsertCV(this.currentCvData, existing);
         if (!silent) this.showToast('CV Salvo no Banco de Dados!');
     },
 
-    deleteSingleCV: async function (name) {
+    deleteSingleCV: async function (name, lattesId = '') {
         const db = await this.getDB();
-        const existingIndex = db.findIndex(cv => cv.name === name);
-        if (existingIndex >= 0) {
-            db.splice(existingIndex, 1);
-            await this.saveDB(db);
+        const existing = db.find(cv => this.cvMatches(cv, name, lattesId));
+        if (existing) {
+            await this.removeCVs([existing]);
         }
     },
 
     clearDB: async function (silent = false) {
         if (silent || confirm("Tem certeza que deseja apagar todos os CVs salvos?")) {
-            await this.saveDB([]);
+            const db = await this.getDB();
+            await this.removeCVs(db);
             if (!silent) this.showToast('Banco de dados limpo!');
         }
     },
 
     promptUnlock: function () {
-        // const input = prompt("Digite a senha de acesso (Comitê Assessor):");
-        // if (input === this.passcode) {
-            this.isUnlocked = true;
-            this.saveSettings();
-            const mount = document.getElementById('jcr-db-tools-mount');
-            if (mount) this.renderUI('jcr-db-tools-mount');
-        // } else if (input !== null) {
-        //     alert("Senha incorreta!");
-        // }
+        this.isUnlocked = true;
+        this.saveSettings();
+        const mount = document.getElementById('jcr-db-tools-mount');
+        if (mount) this.renderUI('jcr-db-tools-mount');
     },
 
     lock: function () {
@@ -419,10 +574,14 @@ window.JCRDBTools = {
                     .btn-refresh:hover { background-color: #1565C0; }
                     .btn-view-report { background-color: #E3F2FD; color: #333; padding: 4px 6px; font-size: 14px; margin-right: 5px; border: 1px solid #90CAF9; border-radius: 4px; }
                     .btn-view-report:hover { background-color: #BBDEFB; }
+                    .btn-rename-id { background-color: #FFF8E1; color: #333; padding: 4px 6px; font-size: 14px; margin-right: 5px; border: 1px solid #FFE082; border-radius: 4px; }
+                    .btn-rename-id:hover { background-color: #FFECB3; }
                     .btn-clear-id { background-color: #FFF3E0; color: #333; padding: 4px 6px; font-size: 14px; margin-right: 5px; border: 1px solid #FFCC80; border-radius: 4px; }
                     .btn-clear-id:hover { background-color: #FFE0B2; }
                     .btn-delete-row { background-color: #FFEBEE; color: #333; padding: 4px 6px; font-size: 14px; border: 1px solid #EF9A9A; border-radius: 4px; }
                     .btn-delete-row:hover { background-color: #FFCDD2; }
+                    .btn-export-group { background-color: #E8F5E9; color: #333; padding: 4px 6px; font-size: 14px; margin-right: 5px; border: 1px solid #A5D6A7; border-radius: 4px; }
+                    .btn-export-group:hover { background-color: #C8E6C9; }
                     .table-container { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow-x: auto; }
                     table { width: 100%; border-collapse: collapse; }
                     th, td { padding: 8px 10px; border-bottom: 1px solid #eee; line-height: 1.2; }
@@ -459,14 +618,13 @@ window.JCRDBTools = {
             const uniqueIds = Array.from(new Set(
                 db.flatMap(cv => (cv.customId || '').split(',').map(s => s.trim()).filter(s => s !== ''))
             )).sort();
-            let datalistHtml = `<datalist id="custom-id-list">`;
+            let dropdownOptionsHtml = `<option value="">&#9660;</option>`;
             let groupOptions = `<option value="">-- Selecione um Grupo --</option>`;
             uniqueIds.forEach(id => {
-                datalistHtml += `<option value="${id.replace(/"/g, '&quot;')}">`;
-                groupOptions += `<option value="${id.replace(/"/g, '&quot;')}">${id}</option>`;
+                const safeId = this._esc(id);
+                dropdownOptionsHtml += `<option value="${safeId}">${safeId}</option>`;
+                groupOptions += `<option value="${safeId}">${safeId}</option>`;
             });
-            datalistHtml += `</datalist>`;
-            tableHtml += datalistHtml;
 
             tableHtml += `
                 <div class="group-summary" style="margin-bottom: 20px; padding: 15px; background: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 8px;">
@@ -479,6 +637,8 @@ window.JCRDBTools = {
                         </div>
                         <div id="group-actions-container" style="display: none; align-items: center;">
                             <button id="group-btn-report" class="btn btn-view-report" title="Relatório do Grupo">📊</button>
+                            <button id="group-btn-export-json" class="btn btn-export-group" title="Salvar JSON deste grupo">📥</button>
+                            <button id="group-btn-rename" class="btn btn-rename-id" title="Renomear ID deste grupo">✏️</button>
                             <button id="group-btn-clear" class="btn btn-clear-id" title="Limpar este ID de todos os CVs">🧹</button>
                             <button id="group-btn-delete" class="btn btn-delete-row" title="Excluir todos os CVs deste grupo">🗑️</button>
                         </div>
@@ -513,6 +673,7 @@ window.JCRDBTools = {
             `;
 
             let theadHtml = `<tr>`;
+            theadHtml += `<th style="width: 30px; text-align: center;"><input type="checkbox" id="selectAllCheckbox" title="Selecionar Todos"></th>`;
             this.METRICS_CONFIG.forEach(m => {
                 const arrow = this.sortConfig.key === m.key ? (this.sortConfig.ascending ? ' ▲' : ' ▼') : '';
                 const titleAttr = m.title ? ` title="${m.title}"` : '';
@@ -520,13 +681,33 @@ window.JCRDBTools = {
                 if (m.division) classes.push('division-left');
                 if (m.numeric) classes.push('numeric-cell');
                 const classAttr = ` class="${classes.join(' ')}"`;
-                theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>${m.label}<span class="sort-indicator">${arrow}</span></th>`;
+                
+                if (m.key === 'customId') {
+                    theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>
+                        ${m.label}<span class="sort-indicator">${arrow}</span><br>
+                        <div style="display: flex; gap: 2px; margin-top: 4px;">
+                            <input type="text" id="bulk-id-input" placeholder="Lote..." style="width: 100%; min-width: 60px; padding: 2px 4px; font-weight: normal; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;">
+                            <select id="bulk-id-select" style="width: 24px; border: 1px solid #ccc; border-radius: 3px; background: white;" title="Selecionar ID Existente">${dropdownOptionsHtml}</select>
+                        </div>
+                    </th>`;
+                } else {
+                    theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>${m.label}<span class="sort-indicator">${arrow}</span></th>`;
+                }
             });
-            theadHtml += `<th class="division-left" style="font-size: 0.85em;">Ações</th></tr>`;
+            theadHtml += `<th class="division-left" style="font-size: 0.85em; text-align: center; white-space: nowrap;">
+                Ações<br>
+                <div style="margin-top: 4px;">
+                    <button id="bulk-btn-report" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Relatório dos Selecionados">📊</button>
+                    <button id="bulk-btn-clear" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Limpar ID dos Selecionados">🧹</button>
+                    <button id="bulk-btn-delete" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Excluir Selecionados">🗑️</button>
+                    <button id="bulk-btn-open" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Abrir CVs selecionados no Lattes para atualizar">🔄</button>
+                </div>
+            </th></tr>`;
 
             let tbodyHtml = ``;
             db.forEach(cv => {
                 tbodyHtml += `<tr>`;
+                tbodyHtml += `<td style="text-align: center;"><input type="checkbox" class="row-checkbox" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}"></td>`;
                 this.METRICS_CONFIG.forEach(m => {
                     const val = cv[m.key] !== undefined ? cv[m.key] : '';
                     let classes = [];
@@ -534,31 +715,38 @@ window.JCRDBTools = {
                     if (m.numeric) classes.push('numeric-cell');
                     if (m.key === 'name') classes.push('name-cell');
                     const classAttr = classes.length > 0 ? ` class="${classes.join(' ')}"` : '';
-                    
+
                     if (m.key === 'name') {
-                        const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${cv.lattesId}` : '#';
-                        tbodyHtml += `<td${classAttr}><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${val}</a></strong></td>`;
+                        const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
+                        const staleIcon = this.cvNeedsUpdate(cv)
+                            ? `<span title="CV desatualizado: reabra no Lattes para atualizar" style="cursor:help; margin-right:4px;">⚠️</span>`
+                            : '';
+                        tbodyHtml += `<td${classAttr}>${staleIcon}<strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong></td>`;
                     } else if (m.key === 'researcherIdLink') {
-                        if (val) {
-                            tbodyHtml += `<td class="rid-link-cell"><a href="${val}" target="_blank" title="ResearcherID" style="text-decoration:none; font-size:1.2em;">🔗</a></td>`;
+                        const safeRid = this._safeUrl(val);
+                        if (safeRid) {
+                            tbodyHtml += `<td class="rid-link-cell"><a href="${safeRid}" target="_blank" title="ResearcherID" style="text-decoration:none; font-size:1.2em;">🔗</a></td>`;
                         } else {
                             tbodyHtml += `<td></td>`;
                         }
+                    } else if (m.key === 'dateAdded') {
+                        const dateStr = val ? new Date(val).toLocaleDateString() : '';
+                        tbodyHtml += `<td${classAttr} style="text-align: center; white-space: nowrap;">${dateStr}</td>`;
                     } else if (m.key === 'customId') {
-                        const safeId = (val || '').replace(/"/g, '&quot;');
-                        const safeName = (cv.name || '').replace(/"/g, '&quot;');
                         tbodyHtml += `<td${classAttr}>
-                            <input type="text" class="custom-id-input" data-name="${safeName}" value="${safeId}" list="custom-id-list" placeholder="ID..." style="width: 80px; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px;">
+                            <div style="display: flex; gap: 2px;">
+                                <input type="text" class="custom-id-input" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" value="${this._esc(String(val))}" placeholder="ID..." style="width: 100%; min-width: 100px; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;">
+                                <select class="custom-id-select" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" style="width: 24px; border: 1px solid #ccc; border-radius: 3px; background: white;" title="Adicionar ID Existente">${dropdownOptionsHtml}</select>
+                            </div>
                         </td>`;
                     } else {
-                        tbodyHtml += `<td${classAttr}>${val}</td>`;
+                        tbodyHtml += `<td${classAttr}>${this._esc(String(val))}</td>`;
                     }
                 });
-                const safeName = (cv.name || '').replace(/"/g, '&quot;');
                 tbodyHtml += `<td class="division-left" style="white-space: nowrap;">
-                    <button class="btn btn-view-report" data-name="${safeName}" title="Relatório">📊</button>
-                    <button class="btn btn-clear-id" data-name="${safeName}" title="Limpar ID">🧹</button>
-                    <button class="btn btn-delete-row" data-name="${safeName}" title="Excluir">🗑️</button>
+                    <button class="btn btn-view-report" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Relatório">📊</button>
+                    <button class="btn btn-clear-id" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Limpar ID">🧹</button>
+                    <button class="btn btn-delete-row" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Excluir">🗑️</button>
                 </td></tr>`;
             });
 
@@ -637,8 +825,9 @@ window.JCRDBTools = {
         deleteBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
+                const lattesId = e.currentTarget.getAttribute('data-lattesid');
                 if (newTab.confirm(`Tem certeza que deseja apagar o CV de ${name}?`)) {
-                    this.deleteSingleCV(name).then(() => {
+                    this.deleteSingleCV(name, lattesId).then(() => {
                         this.viewDB(newTab);
                     });
                 }
@@ -646,60 +835,261 @@ window.JCRDBTools = {
         });
 
         const customIdInputs = newTab.document.querySelectorAll('.custom-id-input');
+        const customIdSelects = newTab.document.querySelectorAll('.custom-id-select');
         
-        const updateDatalist = (db, currentInputVal = '') => {
+        const updateAllDropdowns = (db) => {
             const uniqueIds = Array.from(new Set(
                 db.flatMap(cv => (cv.customId || '').split(',').map(s => s.trim()).filter(s => s !== ''))
             )).sort();
-            
-            let prefix = '';
-            const lastComma = currentInputVal.lastIndexOf(',');
-            if (lastComma >= 0) {
-                prefix = currentInputVal.substring(0, lastComma + 1).trim() + ' ';
-            }
 
-            const datalist = newTab.document.getElementById('custom-id-list');
-            if (datalist) {
-                datalist.innerHTML = '';
+            let newOptionsHtml = `<option value="">&#9660;</option>`;
+            uniqueIds.forEach(id => {
+                const safeId = this._esc(id);
+                newOptionsHtml += `<option value="${safeId}">${safeId}</option>`;
+            });
+
+            const allSelects = newTab.document.querySelectorAll('.custom-id-select, #bulk-id-select');
+            allSelects.forEach(select => {
+                select.innerHTML = newOptionsHtml;
+            });
+            
+            // Also update the group select
+            const groupSelect = newTab.document.getElementById('group-id-select');
+            if (groupSelect) {
+                const currentVal = groupSelect.value;
+                let groupOptions = `<option value="">-- Selecione um Grupo --</option>`;
                 uniqueIds.forEach(id => {
-                    // Prevent showing duplicates in the datalist if already in prefix
-                    if (prefix && prefix.includes(id)) return;
-                    
-                    const option = newTab.document.createElement('option');
-                    option.value = prefix + id;
-                    datalist.appendChild(option);
+                    const safeId = this._esc(id);
+                    const selected = id === currentVal ? ' selected' : '';
+                    groupOptions += `<option value="${safeId}"${selected}>${safeId}</option>`;
                 });
+                groupSelect.innerHTML = groupOptions;
+            }
+        };
+
+        const findCvIndex = (dbArr, name, lattesId) => dbArr.findIndex(cv => this.cvMatches(cv, name, lattesId));
+
+        const updateCustomId = async (name, lattesId, newValue, inputEl) => {
+            const freshDb = await this.getDB();
+            const cvIndex = findCvIndex(freshDb, name, lattesId);
+            if (cvIndex >= 0) {
+                let finalIds = newValue.split(',').map(s => s.trim()).filter(s => s !== '');
+                const finalValue = finalIds.join(', ');
+
+                freshDb[cvIndex].customId = finalValue;
+                await this.saveCVs([freshDb[cvIndex]]);
+                updateAllDropdowns(freshDb);
+
+                const localIndex = findCvIndex(db, name, lattesId);
+                if (localIndex >= 0) db[localIndex].customId = finalValue;
+
+                if (inputEl) inputEl.value = finalValue;
             }
         };
 
         customIdInputs.forEach(input => {
-            const updateLocalDatalist = async () => {
-                const db = await this.getDB();
-                updateDatalist(db, input.value);
-            };
-            
-            input.addEventListener('focus', updateLocalDatalist);
-            input.addEventListener('input', updateLocalDatalist);
-            
             input.addEventListener('change', async (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
-                let newValue = e.currentTarget.value;
-                
-                // Cleanup trailing commas or spaces
-                const cleanedValue = newValue.split(',').map(s => s.trim()).filter(s => s !== '').join(', ');
-                if (newValue.trim() !== '' && cleanedValue === '') {
-                   // User typed commas but no valid ID, keep whatever they typed so they can finish
-                } else {
-                    newValue = cleanedValue;
-                    e.currentTarget.value = newValue; // Reflect cleaned up value back to UI
-                }
+                const lattesId = e.currentTarget.getAttribute('data-lattesid');
+                const newValue = e.currentTarget.value;
+                await updateCustomId(name, lattesId, newValue, e.currentTarget);
+            });
+        });
 
-                const db = await this.getDB();
-                const cvIndex = db.findIndex(cv => cv.name === name);
+        customIdSelects.forEach(select => {
+            select.addEventListener('change', async (e) => {
+                const selectedVal = e.currentTarget.value;
+                e.currentTarget.value = '';
+                if (!selectedVal) return;
+
+                const name = e.currentTarget.getAttribute('data-name');
+                const lattesId = e.currentTarget.getAttribute('data-lattesid');
+                const inputEl = (lattesId ? newTab.document.querySelector(`.custom-id-input[data-lattesid="${this._cssAttr(lattesId)}"]`) : null) ||
+                                newTab.document.querySelector(`.custom-id-input[data-name="${this._cssAttr(name)}"]`);
+
+                if (inputEl) {
+                    let currentVal = inputEl.value;
+                    let existingIds = currentVal.split(',').map(s => s.trim()).filter(s => s !== '');
+
+                    if (!existingIds.includes(selectedVal)) {
+                        existingIds.push(selectedVal);
+                        const finalValue = existingIds.join(', ');
+                        inputEl.value = finalValue;
+                        await updateCustomId(name, lattesId, finalValue, inputEl);
+                    }
+                }
+            });
+        });
+
+        // Add Bulk Action and Checkbox Event Listeners
+        const selectAllCheckbox = newTab.document.getElementById('selectAllCheckbox');
+        const rowCheckboxes = newTab.document.querySelectorAll('.row-checkbox');
+        
+        if (selectAllCheckbox) {
+            selectAllCheckbox.addEventListener('change', (e) => {
+                const isChecked = e.currentTarget.checked;
+                rowCheckboxes.forEach(cb => {
+                    cb.checked = isChecked;
+                });
+            });
+        }
+        
+        const bulkIdInput = newTab.document.getElementById('bulk-id-input');
+        const bulkIdSelect = newTab.document.getElementById('bulk-id-select');
+
+        const selectedCheckboxData = () => Array.from(rowCheckboxes)
+            .filter(cb => cb.checked)
+            .map(cb => ({ name: cb.getAttribute('data-name'), lattesId: cb.getAttribute('data-lattesid') }));
+
+        const applyBulkId = async (newValue, inputEl) => {
+            if (!newValue) return;
+
+            const selected = selectedCheckboxData();
+            if (selected.length === 0) {
+                newTab.alert("Selecione pelo menos um CV na tabela para aplicar o ID em lote.");
+                if (inputEl) inputEl.value = '';
+                return;
+            }
+
+            const newIds = newValue.split(',').map(s => s.trim()).filter(s => s !== '');
+            if (newIds.length === 0) {
+                if (inputEl) inputEl.value = '';
+                return;
+            }
+
+            const freshDb = await this.getDB();
+            const modifiedCvs = [];
+
+            selected.forEach(({ name, lattesId }) => {
+                const cvIndex = findCvIndex(freshDb, name, lattesId);
                 if (cvIndex >= 0) {
-                    db[cvIndex].customId = newValue;
-                    await this.saveDB(db);
-                    updateDatalist(db, newValue);
+                    let existingIds = (freshDb[cvIndex].customId || '').split(',').map(s => s.trim()).filter(s => s !== '');
+                    let modified = false;
+
+                    newIds.forEach(id => {
+                        if (!existingIds.includes(id)) {
+                            existingIds.push(id);
+                            modified = true;
+                        }
+                    });
+
+                    if (modified) {
+                        freshDb[cvIndex].customId = existingIds.join(', ');
+                        modifiedCvs.push(freshDb[cvIndex]);
+                    }
+                }
+            });
+
+            if (modifiedCvs.length > 0) {
+                await this.saveCVs(modifiedCvs);
+                this.viewDB(newTab);
+            } else {
+                if (inputEl) inputEl.value = '';
+            }
+        };
+
+        if (bulkIdInput) {
+            bulkIdInput.addEventListener('click', (e) => e.stopPropagation());
+            bulkIdInput.addEventListener('change', async (e) => {
+                await applyBulkId(e.currentTarget.value.trim(), e.currentTarget);
+            });
+        }
+
+        if (bulkIdSelect) {
+            bulkIdSelect.addEventListener('click', (e) => e.stopPropagation());
+            bulkIdSelect.addEventListener('change', async (e) => {
+                const selectedVal = e.currentTarget.value;
+                e.currentTarget.value = ""; 
+                if (!selectedVal) return;
+
+                const currentVal = bulkIdInput ? bulkIdInput.value.trim() : "";
+                let existingIds = currentVal.split(',').map(s => s.trim()).filter(s => s !== '');
+                
+                if (!existingIds.includes(selectedVal)) {
+                    existingIds.push(selectedVal);
+                    const finalValue = existingIds.join(', ');
+                    if (bulkIdInput) {
+                        bulkIdInput.value = finalValue;
+                        await applyBulkId(finalValue, bulkIdInput);
+                    }
+                }
+            });
+        }
+        
+        const bulkBtnReport = newTab.document.getElementById('bulk-btn-report');
+        if (bulkBtnReport) {
+            bulkBtnReport.addEventListener('click', async () => {
+                const selected = selectedCheckboxData();
+                if (selected.length === 0) {
+                    newTab.alert("Selecione pelo menos um CV na tabela.");
+                    return;
+                }
+                const selectedDb = db.filter(cv => selected.some(s => this.cvMatches(cv, s.name, s.lattesId)));
+                this.renderCVReport(selectedDb[0], newTab, selectedDb);
+            });
+        }
+
+        const bulkBtnClear = newTab.document.getElementById('bulk-btn-clear');
+        if (bulkBtnClear) {
+            bulkBtnClear.addEventListener('click', async () => {
+                const selected = selectedCheckboxData();
+                if (selected.length === 0) return;
+
+                if (newTab.confirm(`Tem certeza que deseja limpar o ID de ${selected.length} CV(s)?`)) {
+                    const freshDb = await this.getDB();
+                    const modifiedCvs = [];
+                    selected.forEach(({ name, lattesId }) => {
+                        const cvIndex = findCvIndex(freshDb, name, lattesId);
+                        if (cvIndex >= 0) {
+                            freshDb[cvIndex].customId = '';
+                            modifiedCvs.push(freshDb[cvIndex]);
+                        }
+                    });
+                    await this.saveCVs(modifiedCvs);
+                    this.viewDB(newTab);
+                }
+            });
+        }
+
+        const bulkBtnDelete = newTab.document.getElementById('bulk-btn-delete');
+        if (bulkBtnDelete) {
+            bulkBtnDelete.addEventListener('click', async () => {
+                const selected = selectedCheckboxData();
+                if (selected.length === 0) return;
+
+                if (newTab.confirm(`Tem certeza que deseja EXCLUIR ${selected.length} CV(s) do banco de dados? Esta ação não pode ser desfeita.`)) {
+                    const freshDb = await this.getDB();
+                    const toRemove = freshDb.filter(cv => selected.some(s => this.cvMatches(cv, s.name, s.lattesId)));
+                    await this.removeCVs(toRemove);
+                    this.viewDB(newTab);
+                }
+            });
+        }
+
+        const bulkBtnOpen = newTab.document.getElementById('bulk-btn-open');
+        if (bulkBtnOpen) {
+            bulkBtnOpen.addEventListener('click', () => {
+                const selected = selectedCheckboxData();
+                if (selected.length === 0) {
+                    this.showToast('Nenhum CV selecionado.', '#e67e22');
+                    return;
+                }
+                const MAX_OPEN = 10;
+                if (selected.length > MAX_OPEN) {
+                    if (!newTab.confirm(`Abrir ${selected.length} CVs de uma vez pode ser bloqueado pelo navegador. Continuar?`)) return;
+                }
+                selected.forEach(({ lattesId }) => {
+                    if (lattesId) newTab.open(`http://lattes.cnpq.br/${lattesId}`, '_blank');
+                });
+            });
+        }
+
+        const openCvBtns = newTab.document.querySelectorAll('.btn-open-cv');
+        openCvBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const lattesId = e.currentTarget.getAttribute('data-lattesid');
+                if (lattesId) {
+                    window.open(`http://lattes.cnpq.br/${lattesId}`, '_blank');
                 }
             });
         });
@@ -708,12 +1098,13 @@ window.JCRDBTools = {
         clearIdBtns.forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
-                const db = await this.getDB();
-                const cvIndex = db.findIndex(cv => cv.name === name);
+                const lattesId = e.currentTarget.getAttribute('data-lattesid');
+                const freshDb = await this.getDB();
+                const cvIndex = findCvIndex(freshDb, name, lattesId);
                 if (cvIndex >= 0) {
-                    db[cvIndex].customId = '';
-                    await this.saveDB(db);
-                    this.viewDB(newTab); // Fully refresh the table to update sorting and datalists
+                    freshDb[cvIndex].customId = '';
+                    await this.saveCVs([freshDb[cvIndex]]);
+                    this.viewDB(newTab);
                 }
             });
         });
@@ -722,8 +1113,9 @@ window.JCRDBTools = {
         viewReportBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
-                if (!name) return; // Skip group report button
-                const cvData = db.find(cv => cv.name === name);
+                const lattesId = e.currentTarget.getAttribute('data-lattesid');
+                if (!name) return;
+                const cvData = db.find(cv => this.cvMatches(cv, name, lattesId));
                 if (cvData) {
                     this.renderCVReport(cvData, newTab, db);
                 }
@@ -878,6 +1270,61 @@ window.JCRDBTools = {
             });
         }
 
+        const groupBtnExportJson = newTab.document.getElementById('group-btn-export-json');
+        if (groupBtnExportJson) {
+            groupBtnExportJson.addEventListener('click', async () => {
+                const groupId = groupSelect.value;
+                if (!groupId) return;
+                
+                const db = await this.getDB();
+                const groupCvs = db.filter(cv => {
+                    let ids = (cv.customId || '').split(',').map(s => s.trim()).filter(s => s !== '');
+                    return ids.includes(groupId);
+                });
+                
+                if (groupCvs.length === 0) {
+                    newTab.alert("Nenhum CV encontrado para este grupo.");
+                    return;
+                }
+
+                const jsonContent = JSON.stringify(groupCvs, null, 2);
+                const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = newTab.document.createElement("a");
+                link.setAttribute("href", url);
+                link.setAttribute("download", `${groupId}_jcr_lattes_database_backup.json`);
+                newTab.document.body.appendChild(link);
+                link.click();
+                newTab.document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(url), 100);
+            });
+        }
+
+        const groupBtnRename = newTab.document.getElementById('group-btn-rename');
+        if (groupBtnRename) {
+            groupBtnRename.addEventListener('click', async () => {
+                const groupId = groupSelect.value;
+                if (!groupId) return;
+                const newId = newTab.prompt(`Digite o novo ID para substituir '${groupId}':`);
+                if (newId !== null && newId.trim() !== '') {
+                    const cleanNewId = newId.trim();
+                    const db = await this.getDB();
+                    const modifiedCvs = [];
+                    db.forEach(cv => {
+                        let ids = (cv.customId || '').split(',').map(s => s.trim()).filter(s => s !== '');
+                        if (ids.includes(groupId)) {
+                            const index = ids.indexOf(groupId);
+                            ids[index] = cleanNewId;
+                            cv.customId = [...new Set(ids)].join(', ');
+                            modifiedCvs.push(cv);
+                        }
+                    });
+                    await this.saveCVs(modifiedCvs);
+                    this.viewDB(newTab);
+                }
+            });
+        }
+
         const groupBtnClear = newTab.document.getElementById('group-btn-clear');
         if (groupBtnClear) {
             groupBtnClear.addEventListener('click', async () => {
@@ -885,14 +1332,16 @@ window.JCRDBTools = {
                 if (!groupId) return;
                 if (newTab.confirm(`Tem certeza que deseja limpar o ID '${groupId}' de todos os currículos?`)) {
                     const db = await this.getDB();
-                    db.forEach(cv => { 
+                    const modifiedCvs = [];
+                    db.forEach(cv => {
                         let ids = (cv.customId || '').split(',').map(s => s.trim()).filter(s => s !== '');
                         if (ids.includes(groupId)) {
                             ids = ids.filter(id => id !== groupId);
                             cv.customId = ids.join(', ');
+                            modifiedCvs.push(cv);
                         }
                     });
-                    await this.saveDB(db);
+                    await this.saveCVs(modifiedCvs);
                     this.viewDB(newTab);
                 }
             });
@@ -905,18 +1354,18 @@ window.JCRDBTools = {
                 if (!groupId) return;
                 if (newTab.confirm(`ATENÇÃO! Tem certeza que deseja EXCLUIR permanentemente todos os currículos com ID '${groupId}' do banco de dados?`)) {
                     const db = await this.getDB();
-                    const newDb = db.filter(cv => {
+                    const toRemove = db.filter(cv => {
                         let ids = (cv.customId || '').split(',').map(s => s.trim()).filter(s => s !== '');
-                        return !ids.includes(groupId);
+                        return ids.includes(groupId);
                     });
-                    await this.saveDB(newDb);
+                    await this.removeCVs(toRemove);
                     this.viewDB(newTab);
                 }
             });
         }
     },
 
-    renderCVReport: function(cvData, newTab, sortedDb = null) {
+    renderCVReport: function(cvData, newTab, sortedDb = null, parentGroupData = null) {
         const publications = cvData.publications || [];
         const rawPatents = cvData.rawPatents || [];
         const rawEvents = cvData.rawEvents || [];
@@ -929,6 +1378,9 @@ window.JCRDBTools = {
                 highJcr: parseFloat(cvData.highJcr || 7.0),
                 lowJcr: parseFloat(cvData.lowJcr || 1.5),
                 customYears: 1,
+                pubListYears: 5,
+                journalYears: 5,
+                minJournalPapers: 2,
                 showHighJcr: true,
                 showMidJcr: true,
                 showLowJcr: true,
@@ -997,8 +1449,8 @@ window.JCRDBTools = {
                 const nextCv = sortedDb[nextIndex];
                 
                 navButtonsHTML = `
-                    <button id="btn-prev-cv" data-name="${prevCv.name.replace(/"/g, '&quot;')}" style="padding: 8px 15px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="CV Anterior: ${prevCv.name.replace(/"/g, '&quot;')}">⬅️ Anterior</button>
-                    <button id="btn-next-cv" data-name="${nextCv.name.replace(/"/g, '&quot;')}" style="padding: 8px 15px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="Próximo CV: ${nextCv.name.replace(/"/g, '&quot;')}">Próximo ➡️</button>
+                    <button id="btn-prev-cv" data-name="${this._esc(prevCv.name)}" style="padding: 8px 15px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="CV Anterior: ${this._esc(prevCv.name)}">⬅️ Anterior</button>
+                    <button id="btn-next-cv" data-name="${this._esc(nextCv.name)}" style="padding: 8px 15px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="Próximo CV: ${this._esc(nextCv.name)}">Próximo ➡️</button>
                 `;
             }
         }
@@ -1006,10 +1458,10 @@ window.JCRDBTools = {
         const headerHTML = `
             <div style="background: ${COLORS.backgroundSubHeader}; padding: 15px; border-bottom: 1px solid ${COLORS.border}; margin-bottom: 15px; border-radius: 8px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h2 style="margin: 0; color: ${COLORS.footerText};">Relatório: ${cvData.name}</h2>
+                    <h2 style="margin: 0; color: ${COLORS.footerText};">Relatório: ${this._esc(cvData.name)}</h2>
                     <div>
                         ${navButtonsHTML}
-                        <button id="btn-back-db" style="padding: 8px 15px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">⬅️ Voltar ao Banco</button>
+                        <button id="btn-back-db" style="padding: 8px 15px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">⬅️ Voltar</button>
                     </div>
                 </div>
                 
@@ -1037,7 +1489,7 @@ window.JCRDBTools = {
                         <div style="font-weight: bold; margin-bottom: 8px;">Período Customizado:</div>
                         <div>Anos: <input type="number" id="inp-custom-years" value="${state.customYears}" min="0" style="width: 50px;"></div>
                         <div style="margin-top: 20px; color: #666; font-size: 0.9em;">
-                            ${cvData.name.startsWith('Grupo:') ? '' : `ID Lattes: ${cvData.lattesId}<br>`}
+                            ${cvData.name.startsWith('Grupo:') ? '' : `ID Lattes: <a href="http://lattes.cnpq.br/${this._esc(cvData.lattesId)}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(cvData.lattesId)}</a><br>`}
                             Sincronizado em: ${new Date(cvData.dateAdded).toLocaleDateString()}
                         </div>
                     </div>
@@ -1110,38 +1562,44 @@ window.JCRDBTools = {
         if (cvData.groupMembers && cvData.groupMembers.length > 0) {
             let theadHtml = `<tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border};">`;
             this.METRICS_CONFIG.forEach(m => {
-                if (m.key === 'customId' || m.key === 'researcherIdLink') return;
+                if (['customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
                 const titleAttr = m.title ? ` title="${m.title}"` : '';
                 let style = 'padding: 8px; font-weight: bold; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #ccc;';
                 if (m.division) style += ' border-left: 1px solid #bbb;';
                 if (m.numeric || m.key === 'researcherIdLink') style += ' text-align: center;';
                 theadHtml += `<th${titleAttr} style="${style}">${m.label}</th>`;
             });
+            theadHtml += `<th style="padding: 8px; font-weight: bold; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #ccc; text-align: center;">Ações</th>`;
             theadHtml += `</tr>`;
 
             let tbodyHtml = ``;
-            cvData.groupMembers.forEach(cv => {
+            const sortedMembers = [...cvData.groupMembers].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            sortedMembers.forEach(cv => {
                 tbodyHtml += `<tr>`;
                 this.METRICS_CONFIG.forEach(m => {
-                    if (m.key === 'customId' || m.key === 'researcherIdLink') return;
+                    if (['customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
                     const val = cv[m.key] !== undefined ? cv[m.key] : '';
                     let style = 'padding: 6px 8px; border-bottom: 1px solid #eee;';
                     if (m.division) style += ' border-left: 1px solid #bbb;';
                     if (m.numeric || m.key === 'researcherIdLink') style += ' text-align: center;';
-                    
+
                     if (m.key === 'name') {
-                        const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${cv.lattesId}` : '#';
-                        tbodyHtml += `<td style="${style}"><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${val}</a></strong></td>`;
+                        const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
+                        tbodyHtml += `<td style="${style}"><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong></td>`;
                     } else if (m.key === 'researcherIdLink') {
-                        if (val) {
-                            tbodyHtml += `<td style="${style}"><a href="${val}" target="_blank" title="ResearcherID" style="text-decoration:none; font-size:1.2em;">🔗</a></td>`;
+                        const safeRid = this._safeUrl(val);
+                        if (safeRid) {
+                            tbodyHtml += `<td style="${style}"><a href="${safeRid}" target="_blank" title="ResearcherID" style="text-decoration:none; font-size:1.2em;">🔗</a></td>`;
                         } else {
                             tbodyHtml += `<td style="${style}"></td>`;
                         }
                     } else {
-                        tbodyHtml += `<td style="${style}">${val}</td>`;
+                        tbodyHtml += `<td style="${style}">${this._esc(String(val))}</td>`;
                     }
                 });
+                tbodyHtml += `<td style="padding: 6px 8px; border-bottom: 1px solid #eee; text-align: center;">
+                    <button class="btn btn-view-member-report" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Relatório Individual" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;">📊</button>
+                </td>`;
                 tbodyHtml += `</tr>`;
             });
 
@@ -1172,7 +1630,7 @@ window.JCRDBTools = {
             <html lang="pt-BR">
             <head>
                 <meta charset="UTF-8">
-                <title>Relatório: ${cvData.name}</title>
+                <title>Relatório: ${this._esc(cvData.name)}</title>
                 <style>
                     body { font-family: Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding: 20px; color: #333; line-height: 1.4; }
                     .container { max-width: 1200px; margin: auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -1285,6 +1743,45 @@ window.JCRDBTools = {
 
                     ${membersTableHTML}
 
+                    ${filteredPublications.length > 0 ? `
+                    <div class="collapsible-section" id="sec-pub-list">
+                        <div class="collapsible-header" id="header-pub-list">
+                            <div style="display: flex; align-items: center; gap: 15px;">
+                                <h3 style="margin: 0;">Lista de Publicações</h3>
+                                <div style="font-size: 0.9em; font-weight: normal; margin-top: 2px;" onclick="event.stopPropagation();">
+                                    Período (anos): <input type="number" id="inp-pub-list-years" value="${state.pubListYears !== undefined ? state.pubListYears : 5}" min="0" style="width: 50px; padding: 2px;">
+                                    <button id="btn-pub-list-update" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                </div>
+                            </div>
+                            <span class="toggle-icon">[+]</span>
+                        </div>
+                        <div class="collapsible-content" style="display: none;" id="content-pub-list">
+                            <div id="pub-list-container" style="max-height: 500px; overflow-y: auto; padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 4px;">
+                                <div style="color: #777; text-align: center;">Carregando...</div>
+                            </div>
+                        </div>
+                    </div>` : ''}
+
+                    ${filteredPublications.length > 0 ? `
+                    <div class="collapsible-section" id="sec-journals">
+                        <div class="collapsible-header" id="header-journal-list">
+                            <div style="display: flex; align-items: center; gap: 15px;">
+                                <h3 style="margin: 0;">Publicações por Periódico</h3>
+                                <div style="font-size: 0.9em; font-weight: normal; margin-top: 2px;" onclick="event.stopPropagation();">
+                                    Período (anos): <input type="number" id="inp-journal-years" value="${state.journalYears !== undefined ? state.journalYears : 5}" min="0" style="width: 50px; padding: 2px;">
+                                    &nbsp;Mín. artigos: <input type="number" id="inp-journal-min-papers" value="${state.minJournalPapers !== undefined ? state.minJournalPapers : 2}" min="1" style="width: 40px; padding: 2px;">
+                                    <button id="btn-journal-update" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                </div>
+                            </div>
+                            <span class="toggle-icon">[+]</span>
+                        </div>
+                        <div class="collapsible-content" style="display: none;" id="content-journal-list">
+                            <div id="journal-list-container" style="padding: 5px;">
+                                <div style="color: #777; text-align: center; padding: 20px;">Abra a seção para gerar a lista.</div>
+                            </div>
+                        </div>
+                    </div>` : ''}
+
                     <div style="margin-top: 40px; text-align: center; color: #999; font-size: 0.85em; border-top: 1px solid #eee; padding-top: 15px;">
                         Gerado por JCR Lattes em ${new Date().toLocaleString()}
                     </div>
@@ -1301,7 +1798,11 @@ window.JCRDBTools = {
         const doc = newTab.document;
         
         doc.getElementById('btn-back-db').addEventListener('click', () => {
-            this.viewDB(newTab);
+            if (parentGroupData) {
+                this.renderCVReport(parentGroupData, newTab);
+            } else {
+                this.viewDB(newTab);
+            }
         });
 
         const btnPrev = doc.getElementById('btn-prev-cv');
@@ -1309,7 +1810,7 @@ window.JCRDBTools = {
             btnPrev.addEventListener('click', () => {
                 const name = btnPrev.getAttribute('data-name');
                 const nextCvData = sortedDb.find(cv => cv.name === name);
-                if (nextCvData) this.renderCVReport(nextCvData, newTab, sortedDb);
+                if (nextCvData) this.renderCVReport(nextCvData, newTab, sortedDb, parentGroupData);
             });
         }
 
@@ -1318,7 +1819,22 @@ window.JCRDBTools = {
             btnNext.addEventListener('click', () => {
                 const name = btnNext.getAttribute('data-name');
                 const nextCvData = sortedDb.find(cv => cv.name === name);
-                if (nextCvData) this.renderCVReport(nextCvData, newTab, sortedDb);
+                if (nextCvData) this.renderCVReport(nextCvData, newTab, sortedDb, parentGroupData);
+            });
+        }
+
+        const viewMemberReportBtns = doc.querySelectorAll('.btn-view-member-report');
+        if (viewMemberReportBtns.length > 0 && cvData.groupMembers) {
+            const sortedGroupMembers = [...cvData.groupMembers].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            viewMemberReportBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const name = e.currentTarget.getAttribute('data-name');
+                    if (!name) return;
+                    const memberData = sortedGroupMembers.find(cv => cv.name === name);
+                    if (memberData) {
+                        this.renderCVReport(memberData, newTab, sortedGroupMembers, cvData);
+                    }
+                });
             });
         }
 
@@ -1336,7 +1852,7 @@ window.JCRDBTools = {
             state.showAuthorOthers = doc.getElementById('chk-auth-others').checked;
             state.showAuthorGc = doc.getElementById('chk-auth-gc').checked;
             
-            this.renderCVReport(cvData, newTab, sortedDb);
+            this.renderCVReport(cvData, newTab, sortedDb, parentGroupData);
         };
 
         ['inp-high-jcr', 'inp-low-jcr', 'inp-custom-years'].forEach(id => {
@@ -1365,6 +1881,185 @@ window.JCRDBTools = {
                 }
             });
         });
+
+        const headerPubList = doc.getElementById('header-pub-list');
+        const contentPubList = doc.getElementById('content-pub-list');
+        const pubContainer = doc.getElementById('pub-list-container');
+        const inpPubYears = doc.getElementById('inp-pub-list-years');
+        const btnPubUpdate = doc.getElementById('btn-pub-list-update');
+        
+        let isPubListGenerated = false;
+
+        const generatePubList = () => {
+            const pubYears = parseInt(inpPubYears.value, 10) || 0;
+            state.pubListYears = pubYears;
+            const startYear = currentYear - pubYears;
+            
+            const pubsInRange = filteredPublications.filter(p => {
+                const y = parseInt(p.year, 10);
+                return !isNaN(y) && y >= startYear;
+            });
+
+            pubsInRange.sort((a, b) => {
+                const yA = parseInt(a.year, 10) || 0;
+                const yB = parseInt(b.year, 10) || 0;
+                if (yB !== yA) return yB - yA;
+                const jA = parseFloat(a.jif) || 0;
+                const jB = parseFloat(b.jif) || 0;
+                return jB - jA;
+            });
+
+            let html = '';
+            let currentPubYear = null;
+            
+            pubsInRange.forEach((pub, index) => {
+                const pYear = pub.year || 'Desconhecido';
+                if (pYear !== currentPubYear) {
+                    if (currentPubYear !== null) html += `</div></div>`;
+                    currentPubYear = pYear;
+                    html += `
+                    <div style="margin-bottom: 15px;">
+                        <div class="pub-year-header" style="background: #e0e0e0; padding: 6px 12px; cursor: pointer; font-weight: bold; border-radius: 4px; display: flex; justify-content: space-between; border: 1px solid #ccc;" onclick="const c = this.nextElementSibling; const isHidden = c.style.display === 'none'; c.style.display = isHidden ? 'block' : 'none'; this.querySelector('.y-icon').textContent = isHidden ? '[-]' : '[+]';">
+                            <span>Ano: ${pYear}</span>
+                            <span class="y-icon">[-]</span>
+                        </div>
+                        <div class="pub-year-content" style="padding: 12px; border: 1px solid #ccc; border-top: none; background: #fff; display: block; border-radius: 0 0 4px 4px;">
+                    `;
+                }
+
+                let cleanRef = pub.reference || 'Referência indisponível';
+                cleanRef = cleanRef.replace(/^\s*\d+\.\s*/, '');
+                cleanRef = cleanRef.replace(/\s*Fator de Impacto:\s*[\d.]+\s*(?:\(.*?\))?/g, '');
+                cleanRef = cleanRef.replace(/\s*Não classificado\s*(?:\(.*?\))?/g, '');
+                cleanRef = cleanRef.replace(/\s*Citações:\s*\d+(?:\|\d+)?/g, '');
+                cleanRef = this._esc(cleanRef.trim());
+                cleanRef = `<b>${index + 1}.</b> ` + cleanRef;
+                
+                let extraInfo = [];
+                if (pub.jif > 0) {
+                    let jcrColor = '#555';
+                    const jifVal = parseFloat(pub.jif) || 0;
+                    if (jifVal >= state.highJcr) jcrColor = window.JCRReportUtils.COLORS.highJcr;
+                    else if (jifVal >= state.lowJcr) jcrColor = window.JCRReportUtils.COLORS.midJcr;
+                    else jcrColor = window.JCRReportUtils.COLORS.lowJcr;
+                    
+                    extraInfo.push(`<strong style="color: ${jcrColor};">JCR: ${jifVal.toFixed(3)}</strong>`);
+                }
+                if (pub.doi) {
+                    const safeDoi = this._esc(pub.doi);
+                    extraInfo.push(`DOI: <a href="https://doi.org/${safeDoi}" target="_blank" style="color: #1565C0; text-decoration: none;">${safeDoi}</a>`);
+                }
+                
+                const extraHtml = extraInfo.length > 0 ? `<div style="font-size: 0.9em; margin-top: 4px; color: #555;">${extraInfo.join(' | ')}</div>` : '';
+                
+                html += `<div style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #ddd; text-align: left;">
+                    <div style="font-size: 0.95em;">${cleanRef}</div>
+                    ${extraHtml}
+                </div>`;
+            });
+            if (currentPubYear !== null) html += `</div></div>`;
+            
+            if (pubsInRange.length === 0) {
+                html = `<div style="padding: 10px; color: #777; text-align: center;">Nenhuma publicação encontrada neste período.</div>`;
+            }
+
+            pubContainer.innerHTML = html;
+            isPubListGenerated = true;
+        };
+
+        if (headerPubList) {
+            headerPubList.addEventListener('click', () => {
+                if (!isPubListGenerated) generatePubList();
+            });
+        }
+
+        if (btnPubUpdate) {
+            btnPubUpdate.addEventListener('click', (e) => {
+                e.stopPropagation();
+                generatePubList();
+                contentPubList.style.display = 'block';
+                headerPubList.querySelector('.toggle-icon').textContent = '[-]';
+            });
+        }
+
+        // Journal table
+        const headerJournalList = doc.getElementById('header-journal-list');
+        const contentJournalList = doc.getElementById('content-journal-list');
+        const journalContainer = doc.getElementById('journal-list-container');
+        const inpJournalYears = doc.getElementById('inp-journal-years');
+        const inpJournalMinPapers = doc.getElementById('inp-journal-min-papers');
+        const btnJournalUpdate = doc.getElementById('btn-journal-update');
+        let isJournalGenerated = false;
+
+        const attachJournalSort = () => {
+            const table = doc.getElementById('journal-table');
+            if (!table) return;
+            const tbody = doc.getElementById('journal-table-body');
+            const sortState = { col: 3, dir: -1 };
+
+            table.querySelectorAll('th[data-sort-col]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const col = parseInt(th.getAttribute('data-sort-col'));
+                    const sortType = th.getAttribute('data-sort-type');
+                    if (sortState.col === col) {
+                        sortState.dir *= -1;
+                    } else {
+                        sortState.col = col;
+                        sortState.dir = -1;
+                    }
+                    const dir = sortState.dir;
+                    const rows = Array.from(tbody.querySelectorAll('tr'));
+                    rows.sort((a, b) => {
+                        const tdA = a.querySelectorAll('td')[col];
+                        const tdB = b.querySelectorAll('td')[col];
+                        let valA, valB;
+                        if (sortType === 'num') {
+                            valA = parseFloat(tdA.getAttribute('data-val')) || 0;
+                            valB = parseFloat(tdB.getAttribute('data-val')) || 0;
+                        } else {
+                            valA = tdA.textContent.trim().toLowerCase();
+                            valB = tdB.textContent.trim().toLowerCase();
+                        }
+                        const cmp = valA < valB ? -1 : valA > valB ? 1 : 0;
+                        return dir === 1 ? cmp : -cmp;
+                    });
+                    rows.forEach(r => tbody.appendChild(r));
+                    table.querySelectorAll('th[data-sort-col]').forEach(h => {
+                        const c = parseInt(h.getAttribute('data-sort-col'));
+                        const base = h.textContent.replace(/\s[▲▼]$/, '');
+                        h.textContent = base + (c === col ? ' ' + (dir === -1 ? '▼' : '▲') : '');
+                    });
+                });
+            });
+        };
+
+        const generateJournalList = () => {
+            const years = parseInt(inpJournalYears.value, 10);
+            const minP = parseInt(inpJournalMinPapers.value, 10);
+            state.journalYears = isNaN(years) ? 5 : Math.max(0, years);
+            state.minJournalPapers = isNaN(minP) || minP < 1 ? 1 : minP;
+            journalContainer.innerHTML = window.JCRReportUtils.generateJournalTableHTML(
+                filteredPublications, state.journalYears, state.minJournalPapers,
+                currentYear, state.highJcr, state.lowJcr
+            );
+            attachJournalSort();
+            isJournalGenerated = true;
+        };
+
+        if (headerJournalList) {
+            headerJournalList.addEventListener('click', () => {
+                if (!isJournalGenerated) generateJournalList();
+            });
+        }
+
+        if (btnJournalUpdate) {
+            btnJournalUpdate.addEventListener('click', (e) => {
+                e.stopPropagation();
+                generateJournalList();
+                contentJournalList.style.display = 'block';
+                headerJournalList.querySelector('.toggle-icon').textContent = '[-]';
+            });
+        }
     },
 
     exportCSV: async function () {
@@ -1440,21 +2135,29 @@ window.JCRDBTools = {
                     const currentDB = await this.getDB();
                     let addedCount = 0;
                     let updatedCount = 0;
+                    const toUpsert = [];
+                    const toRemoveOldKey = [];
 
                     for (const importedCV of importedDB) {
                         if (!importedCV.name) continue; // Invalid entry
-                        
-                        const existingIndex = currentDB.findIndex(cv => cv.name === importedCV.name);
+
+                        const existingIndex = currentDB.findIndex(cv => this.cvMatches(cv, importedCV.name, importedCV.lattesId));
                         if (existingIndex >= 0) {
+                            const existing = currentDB[existingIndex];
+                            if (this._cvStorageKey(existing) !== this._cvStorageKey(importedCV)) {
+                                toRemoveOldKey.push(existing);
+                            }
                             currentDB[existingIndex] = importedCV;
                             updatedCount++;
                         } else {
                             currentDB.push(importedCV);
                             addedCount++;
                         }
+                        toUpsert.push(importedCV);
                     }
 
-                    await this.saveDB(currentDB);
+                    if (toRemoveOldKey.length > 0) await this.removeCVs(toRemoveOldKey);
+                    await this.saveCVs(toUpsert);
                     alert(`Importação concluída com sucesso!\n\nCVs adicionados: ${addedCount}\nCVs atualizados: ${updatedCount}`);
                     resolve();
                 } catch (error) {
@@ -1470,14 +2173,15 @@ window.JCRDBTools = {
         });
     },
 
-    showToast: function (msg) {
+    showToast: function (msg, color = '#4CAF50') {
         let toast = document.getElementById('jcr-private-toast');
         if (!toast) {
             toast = document.createElement('div');
             toast.id = 'jcr-private-toast';
-            toast.style.cssText = 'position:fixed; bottom:20px; right:20px; background:#4CAF50; color:white; padding:10px 20px; border-radius:4px; font-weight:bold; z-index:9999; box-shadow:0 2px 5px rgba(0,0,0,0.2); transition: opacity 0.3s; opacity: 0;';
+            toast.style.cssText = 'position:fixed; bottom:20px; right:20px; color:white; padding:10px 20px; border-radius:4px; font-weight:bold; z-index:9999; box-shadow:0 2px 5px rgba(0,0,0,0.2); transition: opacity 0.3s; opacity: 0;';
             document.body.appendChild(toast);
         }
+        toast.style.background = color;
         toast.innerText = msg;
         toast.style.opacity = '1';
         setTimeout(() => { toast.style.opacity = '0'; }, 3000);
@@ -1499,8 +2203,8 @@ window.JCRDBTools = {
         if (!this.isUnlocked) {
             // Locked UI - Place padlock directly in the mount
             mount.innerHTML = `
-                <button id="jcr-priv-unlock-btn" style="${btnStyle} border-color:transparent; background:transparent; font-size:1.2em; padding: 0 5px; opacity: 0.5; transition: opacity 0.2s;" title="Ativar Ferramentas de Banco de Dados" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.5'">
-                    🔒
+                <button id="jcr-priv-unlock-btn" style="${btnStyle} border-color:transparent; background:transparent; font-size:1.8em; height:auto; padding: 0 5px;" title="Ativar Ferramentas de Banco de Dados">
+                    🗄️
                 </button>
             `;
             document.getElementById('jcr-priv-unlock-btn').onclick = () => this.promptUnlock();
@@ -1516,7 +2220,7 @@ window.JCRDBTools = {
                     </button>
                     <button id="jcr-priv-save" style="${btnStyle}" title="Salvar/Atualizar CV atual no Banco">💾 Salvar</button>
                     <button id="jcr-priv-view" style="${btnStyle} border-color:#2196F3; color:#1976D2;" title="Visualizar Banco de CVs">👁️ View DB</button>
-                    <button id="jcr-priv-lock" style="${btnStyle} border-color:transparent; background:transparent;" title="Bloquear ferramentas">🔓</button>
+                    <button id="jcr-priv-lock" style="${btnStyle} border-color:transparent; background:transparent;" title="Ocultar ferramentas">🗄️</button>
                 </div>
             `;
 
