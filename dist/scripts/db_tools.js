@@ -2146,6 +2146,7 @@ window.JCRDBTools = {
                     const currentDB = await this.getDB();
                     let addedCount = 0;
                     let updatedCount = 0;
+                    let skippedCount = 0;
                     const toUpsert = [];
                     const toRemoveOldKey = [];
 
@@ -2155,6 +2156,12 @@ window.JCRDBTools = {
                         const existingIndex = currentDB.findIndex(cv => this.cvMatches(cv, importedCV.name, importedCV.lattesId));
                         if (existingIndex >= 0) {
                             const existing = currentDB[existingIndex];
+                            const existingDate = existing.dateAdded ? new Date(existing.dateAdded) : new Date(0);
+                            const importedDate = importedCV.dateAdded ? new Date(importedCV.dateAdded) : new Date(0);
+                            if (importedDate <= existingDate) {
+                                skippedCount++;
+                                continue; // Keep the newer local version
+                            }
                             if (this._cvStorageKey(existing) !== this._cvStorageKey(importedCV)) {
                                 toRemoveOldKey.push(existing);
                             }
@@ -2169,7 +2176,8 @@ window.JCRDBTools = {
 
                     if (toRemoveOldKey.length > 0) await this.removeCVs(toRemoveOldKey);
                     await this.saveCVs(toUpsert);
-                    alert(`Importação concluída com sucesso!\n\nCVs adicionados: ${addedCount}\nCVs atualizados: ${updatedCount}`);
+                    const skippedMsg = skippedCount > 0 ? `\nCVs mantidos (versão local mais recente): ${skippedCount}` : '';
+                    alert(`Importação concluída com sucesso!\n\nCVs adicionados: ${addedCount}\nCVs atualizados: ${updatedCount}${skippedMsg}`);
                     resolve();
                 } catch (error) {
                     alert("Erro ao ler o arquivo JSON: " + error.message);
