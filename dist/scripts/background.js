@@ -118,7 +118,7 @@ function extractMetrics() {
                             resolve({ success: true, stats, url: pageUrl });
                         }
                     } else if (attempts > 50) { // 25 seconds timeout
-                        console.error(`[RID Extraction Script] Timeout on ${pageUrl}. Title: ${pageTitle}`);
+                        console.warn(`[RID Extraction Script] Timeout on ${pageUrl}. Title: ${pageTitle}`);
                         clearInterval(interval);
                         resolve({ 
                             success: false, 
@@ -129,13 +129,13 @@ function extractMetrics() {
                         });
                     }
                 } catch (e) {
-                    console.error(`[RID Extraction Script] Error during interval:`, e);
+                    console.warn(`[RID Extraction Script] Error during interval:`, e);
                     clearInterval(interval);
                     resolve({ success: false, error: e.message, url: pageUrl });
                 }
             }, 500);
         } catch (e) {
-            console.error(`[RID Extraction Script] Fatal error:`, e);
+            console.warn(`[RID Extraction Script] Fatal error:`, e);
             resolve({ success: false, error: e.message, url: pageUrl });
         }
     });
@@ -170,7 +170,7 @@ function extractMetrics() {
                     }, (results) => {
                         if (chrome.runtime.lastError || !results || !results[0]) {
                             const err = chrome.runtime.lastError?.message || "Execution failed";
-                            console.error("[RID Extraction Service Worker] Error:", err);
+                            console.warn("[RID Extraction Service Worker] Error:", err);
                             sendResponse({ success: false, error: err });
                         } else {
                             console.log(`[RID Extraction Service Worker] Success:`, results[0].result);
@@ -196,7 +196,7 @@ function extractMetrics() {
             // Safety timeout
             setTimeout(() => {
                 if (!extractionStarted) {
-                    console.error("[RID Extraction Service Worker] Tab load timeout (30s).");
+                    console.warn("[RID Extraction Service Worker] Tab load timeout (30s).");
                     sendResponse({ success: false, error: "Tab load timeout (30s)." });
                     cleanup(tabId, listener);
                 }

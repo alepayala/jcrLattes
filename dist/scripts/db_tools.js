@@ -25,6 +25,8 @@
 window.JCRDBTools = {
     isUnlocked: true,
     autoSave: false,
+    reportFiltersCollapsed: false,
+    dbPrintOrientation: 'landscape', // melhor padrão para a tabela larga do banco
     dbKey: 'jcr_cv_database', // chave legada (array único); migrada para chaves por CV
     cvKeyPrefix: 'jcr_cv:',
     settingsKey: 'jcr_private_settings',
@@ -221,6 +223,8 @@ window.JCRDBTools = {
                     if (result && result[this.settingsKey]) {
                         this.isUnlocked = result[this.settingsKey].isUnlocked !== undefined ? result[this.settingsKey].isUnlocked : true;
                         this.autoSave = result[this.settingsKey].autoSave !== undefined ? result[this.settingsKey].autoSave : false;
+                        this.reportFiltersCollapsed = result[this.settingsKey].reportFiltersCollapsed === true;
+                        this.dbPrintOrientation = result[this.settingsKey].dbPrintOrientation === 'portrait' ? 'portrait' : 'landscape';
                     }
                     resolve();
                 });
@@ -236,7 +240,9 @@ window.JCRDBTools = {
             chrome.storage.local.set({
                 [this.settingsKey]: {
                     isUnlocked: this.isUnlocked,
-                    autoSave: this.autoSave
+                    autoSave: this.autoSave,
+                    reportFiltersCollapsed: this.reportFiltersCollapsed,
+                    dbPrintOrientation: this.dbPrintOrientation
                 }
             });
         } catch (e) { /* extension context invalidated */ }
@@ -431,6 +437,23 @@ window.JCRDBTools = {
         if (!silent) this.showToast('CV Salvo no Banco de Dados!');
     },
 
+    // Abre o relatório individual do CV atualmente exibido na página do Lattes
+    viewCurrentReport: function () {
+        if (this.lastArgs) {
+            this.extractData(this.lastArgs.nameLink, this.lastArgs.stats, this.lastArgs.lattesInfo, this.lastArgs.ridStats);
+        }
+        if (!this.currentCvData) {
+            alert('Os dados do CV ainda estão sendo carregados. Tente novamente em instantes.');
+            return;
+        }
+        const newTab = window.open('', '_blank');
+        if (!newTab) {
+            alert('Por favor, permita pop-ups para abrir o relatório.');
+            return;
+        }
+        this.renderCVReport(this.currentCvData, newTab);
+    },
+
     deleteSingleCV: async function (name, lattesId = '') {
         const db = await this.getDB();
         const existing = db.find(cv => this.cvMatches(cv, name, lattesId));
@@ -598,12 +621,39 @@ window.JCRDBTools = {
                     .numeric-cell { text-align: center; }
                     tr:hover { background-color: #f9f9f9; }
                     .name-cell { min-width: 150px; }
+
+                    @media print {
+                        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                        body { background: #fff !important; padding: 0 !important; }
+                        .header { box-shadow: none; padding: 0 0 10px 0; }
+                        .header > div { display: none !important; }            /* botões do topo */
+                        .group-summary { display: none !important; }           /* bloco de resumo do grupo */
+                        .table-container { box-shadow: none; overflow: visible; }
+
+                        /* Coluna de checkboxes (primeira) e de ações (última) */
+                        th:first-child, td:first-child,
+                        th:last-child, td:last-child { display: none !important; }
+
+                        /* Ícones e controles dentro da tabela */
+                        .sort-indicator, .stale-icon, .rid-link-cell a,
+                        #bulk-id-input, #bulk-id-select, .custom-id-select { display: none !important; }
+                        .custom-id-input { border: none !important; background: transparent !important; padding: 0 !important; }
+
+                        tr { break-inside: avoid; page-break-inside: avoid; }
+                        thead { display: table-header-group; }
+                        table { font-size: 8pt; }
+                    }
                 </style>
             </head>
             <body>
+                <style id="print-orientation-style">@page { size: ${this.dbPrintOrientation}; }</style>
                 <div class="header">
                     <h1>JCR Lattes - Banco de CVs (${db.length})</h1>
                     <div>
+                        <select id="print-orientation-select" title="Orientação da página na impressão" style="padding: 7px; margin-right: 10px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;">
+                            <option value="landscape"${this.dbPrintOrientation === 'landscape' ? ' selected' : ''}>🖨️ Paisagem</option>
+                            <option value="portrait"${this.dbPrintOrientation === 'portrait' ? ' selected' : ''}>🖨️ Retrato</option>
+                        </select>
                         <button id="refreshBtn" class="btn btn-refresh">🔄 Atualizar Lista</button>
                         <button id="exportBtn" class="btn btn-export">📊 Exportar (CSV)</button>
                         <button id="exportJsonBtn" class="btn btn-export" style="background-color: #f39c12;">📥 Backup (JSON)</button>
@@ -622,7 +672,7 @@ window.JCRDBTools = {
                 db.flatMap(cv => (cv.customId || '').split(',').map(s => s.trim()).filter(s => s !== ''))
             )).sort();
             let dropdownOptionsHtml = `<option value="">&#9660;</option>`;
-            let groupOptions = `<option value="">-- Selecione um Grupo --</option>`;
+            let groupOptions = `<option value="">-- Selecione um Grupo --</option><option value="__selecionados__">✔ CVs selecionados</option>`;
             uniqueIds.forEach(id => {
                 const safeId = this._esc(id);
                 dropdownOptionsHtml += `<option value="${safeId}">${safeId}</option>`;
@@ -812,6 +862,18 @@ window.JCRDBTools = {
             });
         }
 
+        // Orientação da impressão: atualiza a regra @page e persiste a escolha.
+        // (Fixar @page direto no CSS travaria o seletor do diálogo de impressão do Chrome.)
+        const orientationSelect = newTab.document.getElementById('print-orientation-select');
+        if (orientationSelect) {
+            orientationSelect.addEventListener('change', (e) => {
+                this.dbPrintOrientation = e.target.value === 'portrait' ? 'portrait' : 'landscape';
+                const styleEl = newTab.document.getElementById('print-orientation-style');
+                if (styleEl) styleEl.textContent = `@page { size: ${this.dbPrintOrientation}; }`;
+                this.saveSettings();
+            });
+        }
+
         const clearBtn = newTab.document.getElementById('clearBtn');
         if (clearBtn) {
             clearBtn.addEventListener('click', () => {
@@ -859,7 +921,7 @@ window.JCRDBTools = {
             const groupSelect = newTab.document.getElementById('group-id-select');
             if (groupSelect) {
                 const currentVal = groupSelect.value;
-                let groupOptions = `<option value="">-- Selecione um Grupo --</option>`;
+                let groupOptions = `<option value="">-- Selecione um Grupo --</option><option value="__selecionados__"${currentVal === '__selecionados__' ? ' selected' : ''}>✔ CVs selecionados</option>`;
                 uniqueIds.forEach(id => {
                     const safeId = this._esc(id);
                     const selected = id === currentVal ? ' selected' : '';
@@ -1175,11 +1237,34 @@ window.JCRDBTools = {
             await new Promise(r => setTimeout(r, 50));
 
             const db = await this.getDB();
-            const groupCvs = db.filter(cv => {
-                const ids = (cv.customId || '').split(',').map(s => s.trim());
-                return ids.includes(groupId);
+            const isSelectionGroup = groupId === '__selecionados__';
+            let groupCvs;
+            if (isSelectionGroup) {
+                const selected = selectedCheckboxData();
+                groupCvs = db.filter(cv => selected.some(s => this.cvMatches(cv, s.name, s.lattesId)));
+                if (groupCvs.length === 0) {
+                    newTab.alert('Selecione pelo menos um CV nos checkboxes da tabela.');
+                    groupActions.style.display = 'none';
+                    groupStats.style.display = 'none';
+                    newTab.currentGroupCvData = null;
+                    const sel = newTab.document.getElementById('group-id-select');
+                    if (sel) sel.value = '';
+                    return;
+                }
+            } else {
+                groupCvs = db.filter(cv => {
+                    const ids = (cv.customId || '').split(',').map(s => s.trim());
+                    return ids.includes(groupId);
+                });
+            }
+
+            // Ações de ID de grupo (exportar/renomear/limpar/excluir) não se aplicam
+            // à seleção via checkboxes — só o relatório fica disponível.
+            ['group-btn-export-json', 'group-btn-rename', 'group-btn-clear', 'group-btn-delete'].forEach(id => {
+                const btn = newTab.document.getElementById(id);
+                if (btn) btn.style.display = isSelectionGroup ? 'none' : '';
             });
-            
+
             let allPubs = [];
             let allPatents = [];
             let allEvents = [];
@@ -1215,7 +1300,7 @@ window.JCRDBTools = {
             });
 
             const groupCvData = {
-                name: `Grupo: ${groupId} (${groupCvs.length} membros)`,
+                name: `Grupo: ${isSelectionGroup ? 'Seleção' : groupId} (${groupCvs.length} membros)`,
                 lattesId: '',
                 dateAdded: new Date().toISOString(),
                 publications: uniquePubs,
@@ -1466,42 +1551,72 @@ window.JCRDBTools = {
             }
         }
 
+        const filtersCollapsed = this.reportFiltersCollapsed === true;
+
+        // Linha-resumo dos filtros, impressa no lugar do bloco interativo
+        const jcrHidden = [];
+        if (!state.showHighJcr) jcrHidden.push('Alto');
+        if (!state.showMidJcr) jcrHidden.push('Médio');
+        if (!state.showLowJcr) jcrHidden.push('Baixo');
+        if (!state.showNoJcr) jcrHidden.push('Sem JCR');
+        const authHidden = [];
+        if (!state.showAuthorFirst) authHidden.push('1º Autor');
+        if (!state.showAuthorLast) authHidden.push('Último Autor');
+        if (!state.showAuthorOthers) authHidden.push('Outros');
+        if (!state.showAuthorGc) authHidden.push('GC (et al)');
+        const printFiltersSummary =
+            `Limiares: Alto ≥ ${state.highJcr} · Médio ≥ ${state.lowJcr}` +
+            ` | JCR: ${jcrHidden.length === 0 ? 'todas as faixas' : 'oculto — ' + jcrHidden.join(', ')}` +
+            ` | Autoria: ${authHidden.length === 0 ? 'todos' : 'oculto — ' + authHidden.join(', ')}`;
+
         const headerHTML = `
             <div style="background: ${COLORS.backgroundSubHeader}; padding: 15px; border-bottom: 1px solid ${COLORS.border}; margin-bottom: 15px; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h2 style="margin: 0; color: ${COLORS.footerText};">Relatório: ${this._esc(cvData.name)}</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h2 style="margin: 0; color: ${COLORS.footerText};">Relatório: ${this._esc(cvData.name)}</h2>
+                        <div style="margin-top: 4px; color: #666; font-size: 0.85em;">
+                            ${cvData.name.startsWith('Grupo:') ? '' : `ID Lattes: <a href="http://lattes.cnpq.br/${this._esc(cvData.lattesId)}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(cvData.lattesId)}</a> &nbsp;&middot;&nbsp; `}Sincronizado em: ${new Date(cvData.dateAdded).toLocaleDateString()}
+                        </div>
+                    </div>
                     <div>
                         ${navButtonsHTML}
+                        <button id="btn-print-report" style="padding: 8px 15px; background: #7f8c8d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="Imprime as seções abertas, com tabelas e listas em toda a extensão">🖨️ Imprimir</button>
                         <button id="btn-back-db" style="padding: 8px 15px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">⬅️ Voltar</button>
                     </div>
                 </div>
-                
-                <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9em;">
-                    <div style="flex: 1; min-width: 200px; border-right: 1px solid #ddd; padding-right: 15px;">
-                        <div style="font-weight: bold; margin-bottom: 8px;">JCR Limiares:</div>
-                        <div style="margin-bottom: 5px;">Alto >= <input type="number" id="inp-high-jcr" value="${state.highJcr}" step="0.5" style="width: 50px;"></div>
-                        <div>Médio >= <input type="number" id="inp-low-jcr" value="${state.lowJcr}" step="0.5" style="width: 50px;"></div>
-                        <div style="margin-top: 10px; font-weight: bold;">Mostrar/Ocultar JCR:</div>
-                        <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-high" ${state.showHighJcr ? 'checked' : ''}> Alto</label><br>
-                        <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-mid" ${state.showMidJcr ? 'checked' : ''}> Médio</label><br>
-                        <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-low" ${state.showLowJcr ? 'checked' : ''}> Baixo</label><br>
-                        <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-none" ${state.showNoJcr ? 'checked' : ''}> Sem JCR</label>
-                    </div>
-                    
-                    <div style="flex: 1; min-width: 200px; border-right: 1px solid #ddd; padding-right: 15px;">
-                        <div style="font-weight: bold; margin-bottom: 8px;">Filtro de Autoria:</div>
-                        <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-first" ${state.showAuthorFirst ? 'checked' : ''}> 1º Autor</label><br>
-                        <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-last" ${state.showAuthorLast ? 'checked' : ''}> Último Autor</label><br>
-                        <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-others" ${state.showAuthorOthers ? 'checked' : ''}> Outros</label><br>
-                        <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-gc" ${state.showAuthorGc ? 'checked' : ''}> Grandes Colaborações (et al)</label>
-                    </div>
-                    
-                    <div style="flex: 1; min-width: 200px;">
-                        <div style="font-weight: bold; margin-bottom: 8px;">Período Customizado:</div>
-                        <div>Anos: <input type="number" id="inp-custom-years" value="${state.customYears}" min="0" style="width: 50px;"></div>
-                        <div style="margin-top: 20px; color: #666; font-size: 0.9em;">
-                            ${cvData.name.startsWith('Grupo:') ? '' : `ID Lattes: <a href="http://lattes.cnpq.br/${this._esc(cvData.lattesId)}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(cvData.lattesId)}</a><br>`}
-                            Sincronizado em: ${new Date(cvData.dateAdded).toLocaleDateString()}
+            </div>
+
+            <div id="print-filters-summary" style="display: none; color: #555; font-size: 0.85em; margin: 8px 0; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px;">${printFiltersSummary}</div>
+
+            <div class="collapsible-section" id="sec-report-filters">
+                <div class="collapsible-header" id="header-report-filters">
+                    <h3>Limiares e Filtros</h3>
+                    <span class="toggle-icon">${filtersCollapsed ? '[+]' : '[-]'}</span>
+                </div>
+                <div class="collapsible-content" id="content-report-filters"${filtersCollapsed ? ' style="display: none;"' : ''}>
+                    <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9em;">
+                        <div style="flex: 1; min-width: 200px; border-right: 1px solid #ddd; padding-right: 15px;">
+                            <div style="font-weight: bold; margin-bottom: 8px;">JCR Limiares:</div>
+                            <div style="margin-bottom: 5px;">Alto >= <input type="number" id="inp-high-jcr" value="${state.highJcr}" step="0.5" style="width: 50px;"></div>
+                            <div>Médio >= <input type="number" id="inp-low-jcr" value="${state.lowJcr}" step="0.5" style="width: 50px;"></div>
+                            <div style="margin-top: 10px; font-weight: bold;">Mostrar/Ocultar JCR:</div>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-high" ${state.showHighJcr ? 'checked' : ''}> Alto</label><br>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-mid" ${state.showMidJcr ? 'checked' : ''}> Médio</label><br>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-low" ${state.showLowJcr ? 'checked' : ''}> Baixo</label><br>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-none" ${state.showNoJcr ? 'checked' : ''}> Sem JCR</label>
+                        </div>
+
+                        <div style="flex: 1; min-width: 200px; border-right: 1px solid #ddd; padding-right: 15px;">
+                            <div style="font-weight: bold; margin-bottom: 8px;">Filtro de Autoria:</div>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-first" ${state.showAuthorFirst ? 'checked' : ''}> 1º Autor</label><br>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-last" ${state.showAuthorLast ? 'checked' : ''}> Último Autor</label><br>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-others" ${state.showAuthorOthers ? 'checked' : ''}> Outros</label><br>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-gc" ${state.showAuthorGc ? 'checked' : ''}> Grandes Colaborações (et al)</label>
+                        </div>
+
+                        <div style="flex: 1; min-width: 200px;">
+                            <div style="font-weight: bold; margin-bottom: 8px;">Período Customizado:</div>
+                            <div>Anos: <input type="number" id="inp-custom-years" value="${state.customYears}" min="0" style="width: 50px;"></div>
                         </div>
                     </div>
                 </div>
@@ -1675,6 +1790,35 @@ window.JCRDBTools = {
                         margin-bottom: 20px;
                     }
                     .toggle-icon { font-weight: bold; color: #3498db; font-family: monospace; }
+
+                    @media print {
+                        /* Preserva cores de fundo (barras dos gráficos, faixas JCR) */
+                        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+                        body { background: #fff !important; padding: 0 !important; }
+                        .container { max-width: none !important; box-shadow: none !important; padding: 0 !important; }
+
+                        /* Oculta controles interativos e o bloco de filtros */
+                        #btn-back-db, #btn-prev-cv, #btn-next-cv, #btn-print-report,
+                        #sec-report-filters, .toggle-icon, .y-icon,
+                        #header-pub-list input, #header-pub-list button,
+                        #header-journal-list input, #header-journal-list button,
+                        .btn-view-member-report { display: none !important; }
+
+                        /* Linha-resumo dos filtros: aparece somente na impressão */
+                        #print-filters-summary { display: block !important; }
+
+                        /* Libera contêineres com scroll: imprime o conteúdo completo */
+                        .collapsible-content div { max-height: none !important; overflow: visible !important; }
+
+                        /* Quebras de página: não parte linhas nem deixa títulos órfãos */
+                        tr, .collapsible-header { break-inside: avoid; page-break-inside: avoid; }
+                        thead { display: table-header-group; }
+
+                        /* Tabelas largas: fonte reduzida para caber na página */
+                        table { font-size: 8.5pt; }
+                        .collapsible-header { cursor: default; }
+                    }
                 </style>
             </head>
             <body>
@@ -1811,6 +1955,11 @@ window.JCRDBTools = {
         // Re-attach all event listeners
         const doc = newTab.document;
         
+        const btnPrint = doc.getElementById('btn-print-report');
+        if (btnPrint) {
+            btnPrint.addEventListener('click', () => newTab.print());
+        }
+
         doc.getElementById('btn-back-db').addEventListener('click', () => {
             if (parentGroupData) {
                 this.renderCVReport(parentGroupData, newTab);
@@ -1895,6 +2044,17 @@ window.JCRDBTools = {
                 }
             });
         });
+
+        // Lembra o estado (aberto/recolhido) do bloco "Limiares e Filtros".
+        // Registrado após o handler genérico acima, para ler o estado já alternado.
+        const filtersHeader = doc.getElementById('header-report-filters');
+        if (filtersHeader) {
+            filtersHeader.addEventListener('click', () => {
+                const content = doc.getElementById('content-report-filters');
+                this.reportFiltersCollapsed = !!content && content.style.display === 'none';
+                this.saveSettings();
+            });
+        }
 
         const headerPubList = doc.getElementById('header-pub-list');
         const contentPubList = doc.getElementById('content-pub-list');
@@ -2212,6 +2372,14 @@ window.JCRDBTools = {
     renderUI: function (mountId) {
         const mount = document.getElementById(mountId);
         if (!mount) return;
+
+        // Evita re-render se a UI já reflete o estado atual: reescrever o innerHTML
+        // a cada reprocessamento faz os botões piscarem e o layout "tremer".
+        const alreadyUnlocked = !!mount.querySelector('#jcr-priv-save');
+        const alreadyLocked   = !!mount.querySelector('#jcr-priv-unlock-btn');
+        const autoSaveBtn = mount.querySelector('#jcr-priv-autosave');
+        const autoSaveMatches = !!autoSaveBtn && autoSaveBtn.innerText.includes(this.autoSave ? 'ON' : 'OFF');
+        if ((this.isUnlocked && alreadyUnlocked && autoSaveMatches) || (!this.isUnlocked && alreadyLocked)) return;
 
         // Base styles for buttons
         const btnStyle = 'cursor:pointer; font-size:0.85em; padding:3px 8px; border:1px solid #ccc; border-radius:4px; background:#fff; color:#333; display:inline-flex; align-items:center; height:24px; font-weight:500;';

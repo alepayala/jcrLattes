@@ -1152,20 +1152,38 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   }
 
   const headerHTML = `
+    <style>
+      .jcr-icon-toggle, .jcr-icon-btn {
+        cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+        width: 30px; height: 30px; border: 1px solid #ccc; border-radius: 6px;
+        background: #fff; font-size: 16px; padding: 0; transition: background 0.2s;
+      }
+      .jcr-icon-toggle:hover, .jcr-icon-btn:hover { background: #eef1f4; }
+      .jcr-icon-toggle input { display: none; }
+      /* Marcado = recurso oculto: ícone esmaecido (estado "off") */
+      .jcr-icon-toggle input:checked ~ .jcr-icon-face { filter: grayscale(1); opacity: 0.35; }
+    </style>
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 10px; background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border}; border-radius: 4px;">
       <h2 style="margin: 0; font-size: 1.25em; color: ${COLORS.footerText}; font-weight: bold;">JCR Lattes Report <span id="jcr-report-name" style="color: #326C99; font-weight: 900; margin-left: 5px;">- ${escHtml(nameLink.name)}</span></h2>
-      <div style="display: flex; gap: 20px; align-items: center;">
+      <div style="display: flex; gap: 8px; align-items: center;">
         <span id="jcr-db-tools-mount" style="display: inline-flex; gap: 8px; margin-right: 10px;"></span>
-        <label style="cursor: pointer; display: inline-flex; align-items: center; font-size: 0.95em; font-weight: bold; color: ${COLORS.footerText};">
-          <input type="checkbox" id="toggle-disable-report" style="margin-right: 6px; width: 15px; height: 15px;"> Ocultar Tabelas e Gráficos
+        <label class="jcr-icon-toggle" title="Mostrar/Ocultar Tabelas e Gráficos do relatório">
+          <input type="checkbox" id="toggle-disable-report">
+          <span class="jcr-icon-face">📈</span>
         </label>
-        <label style="cursor: pointer; display: inline-flex; align-items: center; font-size: 0.95em; font-weight: bold; color: ${COLORS.footerText};">
-          <input type="checkbox" id="toggle-disable-extra-info" style="margin-right: 6px; width: 15px; height: 15px;"> Ocultar Anotações Adicionais
+        <label class="jcr-icon-toggle" title="Mostrar/Ocultar Anotações Adicionais (fator de impacto, autoria, separadores de ano)">
+          <input type="checkbox" id="toggle-disable-extra-info">
+          <span class="jcr-icon-face">🏷️</span>
         </label>
-        <span style="cursor: help; font-size: 1.2em; display: inline-flex; align-items: center;" title="ATENÇÃO AOS RELATÓRIOS:&#10;&#10;• A extração depende da formatação do Lattes; preenchimentos atípicos podem gerar erros.&#10;• O carregamento do CV é dinâmico e o script aguarda por essas atualizações, tornando-se suscetível a oscilações na conexão com o servidor.&#10;• As informações extraídas do ResearcherID também podem sofrer falhas. Preferencialmente, esteja logado na Web of Science ou use acesso institucional.&#10;• Relatórios de grupos com muitos CVs são demorados. Se o navegador alertar inatividade, selecione 'Aguardar' e tenha paciência.">⚠️</span>
+        <button id="btn-view-cv-report" class="jcr-icon-btn" title="Abrir relatório individual deste CV">📊</button>
       </div>
     </div>
   `;
+
+  // Preserva os botões do banco de dados já renderizados: o innerHTML abaixo
+  // apaga o mount, e o re-render dos botões é assíncrono (loadSettings/RID).
+  // Sem isso, os ícones somem/reaparecem a cada reprocessamento e a página "treme".
+  const prevDbMount = document.getElementById('jcr-db-tools-mount');
 
   alertDiv.innerHTML = headerHTML + `
     <div id="jcr-report-content">
@@ -1178,6 +1196,11 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       </div>
     </div>
   `;
+
+  if (prevDbMount && prevDbMount.childNodes.length > 0) {
+    const newMount = alertDiv.querySelector('#jcr-db-tools-mount');
+    if (newMount) newMount.replaceWith(prevDbMount);
+  }
 
   const reportContent = alertDiv.querySelector('#jcr-report-content');
 
@@ -1467,6 +1490,16 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       }
       style.innerHTML = disableExtraInfoCb.checked ? '.jcr-lattes-annotation { display: none !important; }' : '';
       saveSettings();
+    });
+  }
+
+  // Botão do relatório individual do CV atual
+  const viewCvReportBtn = document.getElementById('btn-view-cv-report');
+  if (viewCvReportBtn) {
+    viewCvReportBtn.addEventListener('click', () => {
+      if (window.JCRDBTools && typeof window.JCRDBTools.viewCurrentReport === 'function') {
+        window.JCRDBTools.viewCurrentReport();
+      }
     });
   }
 
