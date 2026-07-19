@@ -45,9 +45,9 @@ O repositório inclui:
 
 ---
 
-## 🐍 Parser Python & Grafo de Colaboração (`parse_jcr_backup.py`)
+## 🐍 Parser Python & Grafo de Colaboração (`tools/parse_jcr_backup.py`)
 
-O repositório inclui um script em Python desenvolvido para analisar o banco de dados JSON exportado pela extensão e gerar visualizações complexas de rede.
+O repositório inclui um script em Python (na pasta `tools/`) desenvolvido para analisar o banco de dados JSON exportado pela extensão e gerar visualizações complexas de rede.
 
 ### Requisitos:
 ```bash
@@ -57,8 +57,9 @@ pip install networkx matplotlib
 ### Uso Básico:
 Exporte o backup JSON através do painel da extensão (o arquivo baixado será algo como `jcr_lattes_database_backup.json`).
 
-Execute o script passando o arquivo JSON exportado:
+Execute o script (de dentro da pasta `tools/`) passando o arquivo JSON exportado:
 ```bash
+cd tools
 python parse_jcr_backup.py jcr_lattes_database_backup.json --graph
 ```
 
@@ -69,7 +70,7 @@ Isso irá:
 4. Gerar um **Grafo de Rede de Colaboração (network_graph.png)** visualizando as pontes e a densidade das publicações em conjunto.
 
 ### Opções Avançadas de Grafo
-Você pode customizar a geração através do arquivo `config.json` ou passando parâmetros via linha de comando:
+Você pode customizar a geração através do arquivo `tools/config.json` ou passando parâmetros via linha de comando:
 * `--target-custom-id "SIGLA"`: Filtra e gera o grafo *apenas* para os currículos que possuam este ID customizado.
 * `--ignore-isolated`: Oculta pesquisadores sem conexões (publicações em comum) da imagem.
 * `--target-researcher "Nome"`: Gera um Ego-Graph (raio 1) focado apenas neste pesquisador específico e seus colaboradores diretos.

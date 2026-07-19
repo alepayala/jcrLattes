@@ -13,6 +13,7 @@ venv/
 network_graph.png
 jcr_lattes_database_backup.json
 *.html
+test_pages/
 
 # IDEs and Editors
 .vscode/
