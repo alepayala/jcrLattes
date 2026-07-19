@@ -1,4 +1,4 @@
-JCRLattes - Versão 1.5.7
+JCRLattes - Versão 1.5.8
 
 Resumo:
 Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes e orientações em segundos.
@@ -23,6 +23,8 @@ Principais Funcionalidades:
 2. Gerenciamento e Banco de Dados Local:
 * Banco de Dados de Currículos: Salve múltiplos currículos Lattes localmente no seu navegador para consultas futuras e análises comparativas, com visualização nativa do Índice H e total de citações diretamente na listagem.
 * Consolidação Instantânea de Grupos: Atribua IDs customizados aos currículos para compilar métricas integradas em tempo real. 
+* Relatório de Seleção: Gere o resumo e o relatório consolidado apenas dos currículos marcados na tabela, sem precisar criar um ID de grupo — ideal para análises pontuais.
+* Salvamento Simultâneo Confiável: Cada currículo é armazenado individualmente no banco local. Atualize vários CVs em abas paralelas (inclusive com Auto-Save) sem risco de um sobrescrever o outro.
 * Deduplicação Inteligente: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria/colaboração repetidos entre os membros, gerando métricas reais e não infladas da produção coletiva.
 * Acesso Direto Integrado: Atalho flutuante injetado na incômoda tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
 * Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status (⚠️ atualização necessária / 🔄 atualizado) na coluna de ações, com botão direto para abrir o Lattes. O ícone de ação global se adapta automaticamente ao conjunto selecionado.
@@ -39,6 +41,9 @@ Principais Funcionalidades:
 4. Usabilidade e Apresentação:
 * Divisão Cronológica Visual: Insere separadores anuais elegantes na lista de publicações do currículo Lattes para facilitar a leitura.
 * Filtros Interativos Rápidos: Oculte seções inteiras ou filtre publicações por faixa de JCR, papel de autoria ou grandes colaborações com apenas um clique.
+* Relatório Individual com Um Clique: Ícone dedicado no cabeçalho do currículo abre instantaneamente o relatório completo do CV em exibição, sem passar pelo banco de dados.
+* Versão de Impressão: Botão de impressão nos relatórios individuais e de grupo. As seções abertas são impressas por completo (listas e tabelas sem cortes de rolagem), com gráficos coloridos, linha-resumo dos limiares/filtros aplicados e cabeçalhos de tabela repetidos a cada página. A tabela do banco de CVs também tem impressão otimizada, com seletor de orientação (paisagem/retrato).
+* Cabeçalho Compacto: Controles do currículo convertidos em ícones com estado ligado/desligado, e bloco de limiares e filtros dos relatórios colapsável — a extensão lembra suas preferências entre sessões.
 * Design Premium: Interface moderna, limpa e responsiva que se integra de maneira nativa e elegante ao layout da Plataforma Lattes.
 
 Privacidade e Segurança Absoluta:
@@ -60,7 +65,7 @@ Como Usar:
 
 Código Fonte & Comunidade:
 O JCRLattes é um projeto de código aberto! Acesse o nosso repositório oficial no GitHub para baixar o script de geração de grafos (Parser Python), reportar problemas, contribuir com código ou ler a documentação completa:
-🔗 https://github.com/alepayala/JCRLattes
+🔗 https://github.com/alepayala/jcrLattes
 
 --------------------------------------------------
 Eleve o nível de sua gestão acadêmica e análise de produção científica com o JCRLattes.
