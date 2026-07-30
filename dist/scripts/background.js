@@ -141,6 +141,27 @@ function extractMetrics() {
     });
 }
 
+// Ferramentas de Banco de Dados (DB) devem vir habilitadas por padrão. Instalações antigas
+// podem ter 'isUnlocked: false' persistido no storage; forçamos a reativação uma única vez
+// nesta atualização (chave de migração dedicada evita reforçar caso o usuário desative de novo).
+const DB_FORCE_ENABLE_MIGRATION_KEY = 'jcr_db_force_enable_1_5_9';
+
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason !== 'update' && details.reason !== 'install') return;
+
+    chrome.storage.local.get(['jcr_private_settings', DB_FORCE_ENABLE_MIGRATION_KEY], (result) => {
+        if (result[DB_FORCE_ENABLE_MIGRATION_KEY]) return;
+
+        const settings = result.jcr_private_settings || {};
+        settings.isUnlocked = true;
+
+        chrome.storage.local.set({
+            jcr_private_settings: settings,
+            [DB_FORCE_ENABLE_MIGRATION_KEY]: true
+        });
+    });
+});
+
  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'fetch_rid_stats' && request.url) {
         console.log(`[RID Extraction Service Worker] Request started for URL: ${request.url}`);
