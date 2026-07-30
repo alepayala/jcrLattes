@@ -144,7 +144,7 @@ function extractMetrics() {
 // Ferramentas de Banco de Dados (DB) devem vir habilitadas por padrão. Instalações antigas
 // podem ter 'isUnlocked: false' persistido no storage; forçamos a reativação uma única vez
 // nesta atualização (chave de migração dedicada evita reforçar caso o usuário desative de novo).
-const DB_FORCE_ENABLE_MIGRATION_KEY = 'jcr_db_force_enable_1_5_9';
+const DB_FORCE_ENABLE_MIGRATION_KEY = 'jcr_db_force_enable_1_5_10';
 
 chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason !== 'update' && details.reason !== 'install') return;
