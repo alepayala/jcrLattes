@@ -565,15 +565,6 @@ window.JCRReportUtils = {
               <td style="padding: 8px; text-align: center;">${getVal(all, 'scopus', 'hIndex')}</td>
             </tr>
             <tr style="border-bottom: 1px solid #ddd;">
-              <td style="padding: 8px; text-align: left;">Últimos 5 anos</td>
-              <td style="padding: 8px; text-align: center;">${recent.total.count}</td>
-              <td style="padding: 8px; text-align: center;">${recent.total.countWithJcr}</td>
-              <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${getVal(recent, 'wos', 'sum')}</td>
-              <td style="padding: 8px; text-align: center;">${getVal(recent, 'wos', 'hIndex')}</td>
-              <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${getVal(recent, 'scopus', 'sum')}</td>
-              <td style="padding: 8px; text-align: center;">${getVal(recent, 'scopus', 'hIndex')}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid #ddd;">
               <td style="padding: 8px; text-align: left;">Últimos 10 anos</td>
               <td style="padding: 8px; text-align: center;">${last10.total.count}</td>
               <td style="padding: 8px; text-align: center;">${last10.total.countWithJcr}</td>
@@ -581,6 +572,15 @@ window.JCRReportUtils = {
               <td style="padding: 8px; text-align: center;">${getVal(last10, 'wos', 'hIndex')}</td>
               <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${getVal(last10, 'scopus', 'sum')}</td>
               <td style="padding: 8px; text-align: center;">${getVal(last10, 'scopus', 'hIndex')}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 8px; text-align: left;">Últimos 5 anos</td>
+              <td style="padding: 8px; text-align: center;">${recent.total.count}</td>
+              <td style="padding: 8px; text-align: center;">${recent.total.countWithJcr}</td>
+              <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${getVal(recent, 'wos', 'sum')}</td>
+              <td style="padding: 8px; text-align: center;">${getVal(recent, 'wos', 'hIndex')}</td>
+              <td style="padding: 8px; border-left: 1px solid #eee; text-align: center;">${getVal(recent, 'scopus', 'sum')}</td>
+              <td style="padding: 8px; text-align: center;">${getVal(recent, 'scopus', 'hIndex')}</td>
             </tr>
             <tr style="border-bottom: 1px solid #ddd;">
               <td style="padding: 8px; text-align: left;">${stats.customYears} ${stats.customYears == 1 || stats.customYears == 0 ? 'ano' : 'anos'}</td>
@@ -634,8 +634,8 @@ window.JCRReportUtils = {
               <td style="padding: 8px; text-align: left;">${this._esc(cat)}</td>
               <td style="padding: 8px; text-align: center; border-left: 1px solid #eee;">${inCourse}</td>
               <td style="padding: 8px; text-align: center; border-left: 1px solid #eee;">${totalConcluded}</td>
-              <td style="padding: 8px; text-align: center;">${countRecent}</td>
               <td style="padding: 8px; text-align: center;">${countLast10}</td>
+              <td style="padding: 8px; text-align: center;">${countRecent}</td>
               <td style="padding: 8px; text-align: center;">${countCustom}</td>
             </tr>
           `;
@@ -649,8 +649,8 @@ window.JCRReportUtils = {
                   <th style="padding: 8px; text-align: left;">Orientações</th>
                   <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Em Andamento</th>
                   <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Concluídas</th>
-                  <th style="padding: 8px; text-align: center;">5 Anos</th>
                   <th style="padding: 8px; text-align: center;">10 Anos</th>
+                  <th style="padding: 8px; text-align: center;">5 Anos</th>
                   <th style="padding: 8px; text-align: center;">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
                 </tr>
               </thead>
@@ -771,8 +771,8 @@ window.JCRReportUtils = {
                         <td style="padding: 6px 8px 6px 40px; text-align: left; font-size: 0.9em; color: #555;">└ ${this._esc(areaNode.name)}</td>
                         <td style="padding: 6px 8px; text-align: center; border-left: 1px solid #eee;">${areaNode.inCourse}</td>
                         <td style="padding: 6px 8px; text-align: center; border-left: 1px solid #eee;">${areaNode.concluded}</td>
-                        <td style="padding: 6px 8px; text-align: center;">${areaNode.recent}</td>
                         <td style="padding: 6px 8px; text-align: center;">${areaNode.last10}</td>
+                        <td style="padding: 6px 8px; text-align: center;">${areaNode.recent}</td>
                         <td style="padding: 6px 8px; text-align: center;">${areaNode.custom}</td>
                       </tr>
                     `;
@@ -797,8 +797,8 @@ window.JCRReportUtils = {
                 </td>
                 <td style="padding: 6px 8px; text-align: center; border-left: 1px solid #eee;">${iInCourse}</td>
                 <td style="padding: 6px 8px; text-align: center; border-left: 1px solid #eee;">${iConcluded}</td>
-                <td style="padding: 6px 8px; text-align: center;">${iRecent}</td>
                 <td style="padding: 6px 8px; text-align: center;">${iLast10}</td>
+                <td style="padding: 6px 8px; text-align: center;">${iRecent}</td>
                 <td style="padding: 6px 8px; text-align: center;">${iCustom}</td>
               </tr>
             `;
@@ -832,8 +832,8 @@ window.JCRReportUtils = {
             </td>
             <td style="padding: 8px; text-align: center; border-left: 1px solid #ccc; font-weight: bold;">${tInCourse}</td>
             <td style="padding: 8px; text-align: center; border-left: 1px solid #ccc; font-weight: bold;">${tConcluded}</td>
-            <td style="padding: 8px; text-align: center; font-weight: bold;">${tRecent}</td>
             <td style="padding: 8px; text-align: center; font-weight: bold;">${tLast10}</td>
+            <td style="padding: 8px; text-align: center; font-weight: bold;">${tRecent}</td>
             <td style="padding: 8px; text-align: center; font-weight: bold;">${tCustom}</td>
           </tr>
         `;
@@ -848,8 +848,8 @@ window.JCRReportUtils = {
               <th style="padding: 8px; text-align: left;">Orientações</th>
               <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Em Andamento</th>
               <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Concluídas</th>
-              <th style="padding: 8px; text-align: center;">5 Anos</th>
               <th style="padding: 8px; text-align: center;">10 Anos</th>
+              <th style="padding: 8px; text-align: center;">5 Anos</th>
               <th style="padding: 8px; text-align: center;">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
             </tr>
           </thead>
@@ -874,8 +874,8 @@ window.JCRReportUtils = {
         <tr style="border-bottom: 1px solid #ddd;">
           <td style="padding: 8px; text-align: left;">${this._esc(status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.all, status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.last10, status)}</td>
+          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.custom, status)}</td>
         </tr>
       `;
@@ -885,8 +885,8 @@ window.JCRReportUtils = {
       <tr style="border-bottom: 1px solid #ddd; background-color: ${this.COLORS.backgroundSubHeader}; font-weight: bold;">
         <td style="padding: 8px; text-align: left;">Total</td>
         <td style="padding: 8px; text-align: center;">${stats.all.patents.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.recent.patents.total}</td>
         <td style="padding: 8px; text-align: center;">${stats.last10.patents.total}</td>
+        <td style="padding: 8px; text-align: center;">${stats.recent.patents.total}</td>
         <td style="padding: 8px; text-align: center;">${stats.custom.patents.total}</td>
       </tr>
     `;
@@ -898,8 +898,8 @@ window.JCRReportUtils = {
             <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
               <th style="padding: 8px; text-align: left;">Patentes</th>
               <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Total</th>
-              <th style="padding: 8px; text-align: center;">5 Anos</th>
               <th style="padding: 8px; text-align: center;">10 Anos</th>
+              <th style="padding: 8px; text-align: center;">5 Anos</th>
               <th style="padding: 8px; text-align: center;">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
             </tr>
           </thead>
@@ -924,8 +924,8 @@ window.JCRReportUtils = {
         <tr style="border-bottom: 1px solid #ddd;">
           <td style="padding: 8px; text-align: left;">${this._esc(type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.all, type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.last10, type)}</td>
+          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.custom, type)}</td>
         </tr>
       `;
@@ -935,8 +935,8 @@ window.JCRReportUtils = {
       <tr style="border-bottom: 1px solid #ddd; background-color: ${this.COLORS.backgroundSubHeader}; font-weight: bold;">
         <td style="padding: 8px; text-align: left;">Total</td>
         <td style="padding: 8px; text-align: center;">${stats.all.events.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.recent.events.total}</td>
         <td style="padding: 8px; text-align: center;">${stats.last10.events.total}</td>
+        <td style="padding: 8px; text-align: center;">${stats.recent.events.total}</td>
         <td style="padding: 8px; text-align: center;">${stats.custom.events.total}</td>
       </tr>
     `;
@@ -948,8 +948,8 @@ window.JCRReportUtils = {
             <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
               <th style="padding: 8px; text-align: left;">Participação em Eventos</th>
               <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Total</th>
-              <th style="padding: 8px; text-align: center;">5 Anos</th>
               <th style="padding: 8px; text-align: center;">10 Anos</th>
+              <th style="padding: 8px; text-align: center;">5 Anos</th>
               <th style="padding: 8px; text-align: center;">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
             </tr>
           </thead>

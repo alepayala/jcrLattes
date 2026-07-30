@@ -1666,8 +1666,8 @@ window.JCRDBTools = {
                 </thead>
                 <tbody>
                     ${window.JCRReportUtils.generateRow(`Total (${minYear} - ${maxYear})`, stats.all)}
-                    ${window.JCRReportUtils.generateRow(`5 anos (${startYearRecent} - ${maxYear})`, stats.recent)}
                     ${window.JCRReportUtils.generateRow(`10 anos (${startYearLast10} - ${maxYear})`, stats.last10)}
+                    ${window.JCRReportUtils.generateRow(`5 anos (${startYearRecent} - ${maxYear})`, stats.recent)}
                     ${window.JCRReportUtils.generateRow(`${state.customYears} ${state.customYears == 1 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`, stats.custom)}
                 </tbody>
             </table>
