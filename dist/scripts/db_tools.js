@@ -1484,7 +1484,10 @@ window.JCRDBTools = {
                 showAuthorFirst: true,
                 showAuthorLast: true,
                 showAuthorOthers: true,
-                showAuthorGc: true
+                showAuthorGc: true,
+                showPubListJcr: true,
+                showPubListDoi: true,
+                showPubListCitations: true
             };
         }
         
@@ -1801,9 +1804,14 @@ window.JCRDBTools = {
                         /* Oculta controles interativos e o bloco de filtros */
                         #btn-back-db, #btn-prev-cv, #btn-next-cv, #btn-print-report,
                         #sec-report-filters, .toggle-icon, .y-icon,
-                        #header-pub-list input, #header-pub-list button,
-                        #header-journal-list input, #header-journal-list button,
+                        .no-print,
                         .btn-view-member-report { display: none !important; }
+
+                        /* Mantém "Período (anos)" e "Mín. artigos" legíveis, só remove o estilo de campo */
+                        #header-pub-list input, #header-journal-list input {
+                            border: none !important; background: transparent !important; padding: 0 !important;
+                            -webkit-appearance: none; appearance: textfield;
+                        }
 
                         /* Linha-resumo dos filtros: aparece somente na impressão */
                         #print-filters-summary { display: block !important; }
@@ -1906,9 +1914,14 @@ window.JCRDBTools = {
                         <div class="collapsible-header" id="header-pub-list">
                             <div style="display: flex; align-items: center; gap: 15px;">
                                 <h3 style="margin: 0;">Lista de Publicações</h3>
-                                <div style="font-size: 0.9em; font-weight: normal; margin-top: 2px;" onclick="event.stopPropagation();">
-                                    Período (anos): <input type="number" id="inp-pub-list-years" value="${state.pubListYears !== undefined ? state.pubListYears : 5}" min="0" style="width: 50px; padding: 2px;">
-                                    <button id="btn-pub-list-update" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                <div style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;" onclick="event.stopPropagation();">
+                                    <span>Período (anos): <input type="number" id="inp-pub-list-years" value="${state.pubListYears !== undefined ? state.pubListYears : 5}" min="0" style="width: 50px; padding: 2px;"></span>
+                                    <button id="btn-pub-list-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                    <span class="no-print" style="display: flex; align-items: center; gap: 10px; color: #555;">
+                                        <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-jcr" ${state.showPubListJcr !== false ? 'checked' : ''}> JCR</label>
+                                        <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-doi" ${state.showPubListDoi !== false ? 'checked' : ''}> DOI</label>
+                                        <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-cit" ${state.showPubListCitations !== false ? 'checked' : ''}> Citações</label>
+                                    </span>
                                 </div>
                             </div>
                             <span class="toggle-icon">[+]</span>
@@ -1928,7 +1941,7 @@ window.JCRDBTools = {
                                 <div style="font-size: 0.9em; font-weight: normal; margin-top: 2px;" onclick="event.stopPropagation();">
                                     Período (anos): <input type="number" id="inp-journal-years" value="${state.journalYears !== undefined ? state.journalYears : 5}" min="0" style="width: 50px; padding: 2px;">
                                     &nbsp;Mín. artigos: <input type="number" id="inp-journal-min-papers" value="${state.minJournalPapers !== undefined ? state.minJournalPapers : 1}" min="1" style="width: 40px; padding: 2px;">
-                                    <button id="btn-journal-update" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                    <button id="btn-journal-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
                                 </div>
                             </div>
                             <span class="toggle-icon">[+]</span>
@@ -2110,20 +2123,26 @@ window.JCRDBTools = {
                 cleanRef = `<b>${index + 1}.</b> ` + cleanRef;
                 
                 let extraInfo = [];
-                if (pub.jif > 0) {
+                if (state.showPubListJcr !== false && pub.jif > 0) {
                     let jcrColor = '#555';
                     const jifVal = parseFloat(pub.jif) || 0;
                     if (jifVal >= state.highJcr) jcrColor = window.JCRReportUtils.COLORS.highJcr;
                     else if (jifVal >= state.lowJcr) jcrColor = window.JCRReportUtils.COLORS.midJcr;
                     else jcrColor = window.JCRReportUtils.COLORS.lowJcr;
-                    
+
                     extraInfo.push(`<strong style="color: ${jcrColor};">JCR: ${jifVal.toFixed(3)}</strong>`);
                 }
-                if (pub.doi) {
+                if (state.showPubListCitations !== false && ((pub.wosCitations || 0) > 0 || (pub.scopusCitations || 0) > 0)) {
+                    const citParts = [];
+                    if (pub.wosCitations > 0) citParts.push(`WoS: ${pub.wosCitations}`);
+                    if (pub.scopusCitations > 0) citParts.push(`Scopus: ${pub.scopusCitations}`);
+                    extraInfo.push(`Citações: ${citParts.join(' / ')}`);
+                }
+                if (state.showPubListDoi !== false && pub.doi) {
                     const safeDoi = this._esc(pub.doi);
                     extraInfo.push(`DOI: <a href="https://doi.org/${safeDoi}" target="_blank" style="color: #1565C0; text-decoration: none;">${safeDoi}</a>`);
                 }
-                
+
                 const extraHtml = extraInfo.length > 0 ? `<div style="font-size: 0.9em; margin-top: 4px; color: #555;">${extraInfo.join(' | ')}</div>` : '';
                 
                 html += `<div style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #ddd; text-align: left;">
@@ -2155,6 +2174,21 @@ window.JCRDBTools = {
                 headerPubList.querySelector('.toggle-icon').textContent = '[-]';
             });
         }
+
+        const chkPubShowJcr = doc.getElementById('chk-pub-show-jcr');
+        const chkPubShowDoi = doc.getElementById('chk-pub-show-doi');
+        const chkPubShowCit = doc.getElementById('chk-pub-show-cit');
+        [
+            [chkPubShowJcr, 'showPubListJcr'],
+            [chkPubShowDoi, 'showPubListDoi'],
+            [chkPubShowCit, 'showPubListCitations']
+        ].forEach(([chk, key]) => {
+            if (!chk) return;
+            chk.addEventListener('change', () => {
+                state[key] = chk.checked;
+                if (isPubListGenerated) generatePubList();
+            });
+        });
 
         // Journal table
         const headerJournalList = doc.getElementById('header-journal-list');
@@ -2234,6 +2268,22 @@ window.JCRDBTools = {
                 headerJournalList.querySelector('.toggle-icon').textContent = '[-]';
             });
         }
+
+        // Lista de Publicações e Publicações por Periódico começam recolhidas e só são geradas
+        // sob demanda. Sem isto, imprimir sem antes abri-las manualmente resulta na seção vazia
+        // (só o título, sem lista) — então expandimos e geramos ambas antes de qualquer impressão,
+        // seja pelo botão da página ou por Ctrl+P do navegador.
+        newTab.addEventListener('beforeprint', () => {
+            if (!isPubListGenerated) generatePubList();
+            if (contentPubList) contentPubList.style.display = 'block';
+            const pubIcon = headerPubList && headerPubList.querySelector('.toggle-icon');
+            if (pubIcon) pubIcon.textContent = '[-]';
+
+            if (!isJournalGenerated) generateJournalList();
+            if (contentJournalList) contentJournalList.style.display = 'block';
+            const journalIcon = headerJournalList && headerJournalList.querySelector('.toggle-icon');
+            if (journalIcon) journalIcon.textContent = '[-]';
+        });
     },
 
     exportCSV: async function () {
