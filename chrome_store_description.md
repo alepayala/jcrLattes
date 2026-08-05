@@ -1,7 +1,7 @@
-JCRLattes - Versão 1.5.10
+JCRLattes - Versão 1.6.0
 
 Resumo:
-Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes e orientações em segundos.
+Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes, autoria e orientações em segundos.
 
 --------------------------------------------------
 
@@ -17,6 +17,9 @@ Principais Funcionalidades:
 * Anotação de Fator de Impacto (JCR): Exibe o Fator de Impacto (JCR) mais recente e a contagem de autores logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual (Alto, Médio, Baixo, Sem JCR).
 * Histograma de Distribuição JCR: Gráfico interativo que revela o perfil de qualidade da sua produção ao longo do tempo.
 * Métricas de Produção por Ano: Visualize a evolução da sua carreira com barras empilhadas que mostram o impacto acumulado anualmente.
+* Segunda Linha de Gráficos Visualmente Rica:
+  - Histograma por Rank de Autoria: Análise da distribuição de publicações por posição de autoria (1º, 2º, 3º, ...), com colunas especiais para Último Autor (`Ult`) e Grandes Colaborações (`GC`), escala máxima fixada pelo histograma e sub-barras empilhadas de cores JCR proporcionais à altura efetiva da coluna.
+  - Orientações por Ano: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde, Doutorado em Azul, Mestrado em Laranja), complementado por colunas especiais ao final para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
 * Tabelas Estatísticas Dinâmicas: Tabelas com Somatórios (Sigma) e Médias (Mu) automáticas para períodos de 5 anos, 10 anos ou intervalos customizados (ex: triênio/quadriênio de avaliação).
 * Citação e Índice H: Consolidação automática do Índice H e número de citações para Web of Science e Scopus.
 
@@ -26,16 +29,17 @@ Principais Funcionalidades:
 * Relatório de Seleção: Gere o resumo e o relatório consolidado apenas dos currículos marcados na tabela, sem precisar criar um ID de grupo — ideal para análises pontuais.
 * Salvamento Simultâneo Confiável: Cada currículo é armazenado individualmente no banco local. Atualize vários CVs em abas paralelas (inclusive com Auto-Save) sem risco de um sobrescrever o outro.
 * Deduplicação Inteligente: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria/colaboração repetidos entre os membros, gerando métricas reais e não infladas da produção coletiva.
-* Acesso Direto Integrado: Atalho flutuante injetado na incômoda tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
+* Acesso Direto Integrado: Atalho flutuante injetado na tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
 * Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status (⚠️ atualização necessária / 🔄 atualizado) na coluna de ações, com botão direto para abrir o Lattes. O ícone de ação global se adapta automaticamente ao conjunto selecionado.
 * Atualização Simplificada (Update): Um botão de atualização rápida permite abrir o currículo Lattes em uma nova aba para reprocessar e sincronizar os dados mais recentes.
 * Backup e Portabilidade: Exporte todo o seu banco de dados em formato JSON para restaurá-lo em outros dispositivos ou exporte os dados tabulados em CSV para análise no Microsoft Excel ou ferramentas estatísticas. Na importação, o sistema compara automaticamente as versões e mantém sempre o registro mais recente.
 
 3. Análise de Autoria, Patentes, Orientações e Eventos:
-* Análise Avançada de Autoria: Identificação automatizada do papel do pesquisador como Primeiro Autor (1º) ou Último Autor (Últ) em cada publicação.
+* Seletor de Rank de Autoria Customizado: Defina a posição de autoria desejada (1º, 2º, etc.) para contagem e métricas de autoria na tabela do Lattes, no Gerenciador de Banco de Dados e nos relatórios de grupo, atualizando dynamicamente os cabeçalhos das tabelas (ex: 2º Autor, 3º Autor).
+* Análise Avançada de Autoria: Identificação automatizada do papel do pesquisador como Primeiro Autor (1º), Autor em Rank Específico ou Último Autor (`Ult`) em cada publicação.
 * Média Real de Coautores: Cálculo da média de coautores por artigo, com opção de desconsiderar Grandes Colaborações (artigos com "et al." ou consórcios multicêntricos) para evitar distorções estatísticas.
 * Portfólio de Inovação e Patentes: Gestão e contagem estruturada de patentes classificadas por status (Depósito, Concessão, etc.).
-* Painel de Orientações: Resumo consolidado de orientações concluídas e em andamento divididas por nível acadêmico (Doutorado, Mestrado, etc.).
+* Painel de Orientações Detalhado: Resumo consolidado e gráfico de orientações concluídas e em andamento divididas por nível acadêmico (Pós-doutorado, Doutorado, Mestrado, Iniciação Científica, etc.).
 * Participação em Eventos: Extração e compilação de dados sobre participação em eventos, ativada automaticamente caso o currículo seja aberto utilizando a opção "Carregar informações complementares".
 
 4. Usabilidade e Apresentação:

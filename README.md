@@ -1,6 +1,6 @@
 # JCRLattes
 
-**Versão 1.5.10**
+**Versão 1.6.0**
 
 O JCRLattes é a ferramenta definitiva para pesquisadores, acadêmicos, coordenadores de pós-graduação e avaliadores que buscam eficiência na análise da Plataforma Lattes. 
 
@@ -18,6 +18,9 @@ O repositório inclui:
 * **Anotação de Fator de Impacto (JCR)**: Exibe o Fator de Impacto (JCR) mais recente e a contagem de autores logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual.
 * **Histograma de Distribuição JCR**: Gráfico interativo que revela o perfil de qualidade da sua produção ao longo do tempo.
 * **Métricas de Produção por Ano**: Visualize a evolução da sua carreira com barras empilhadas que mostram o impacto acumulado anualmente.
+* **Segunda Linha de Gráficos**:
+  - **Distribuição por Rank de Autoria**: Histograma da distribuição por posição de autoria (`1º`, `2º`, ...), com colunas especiais para Último Autor (`Ult`) e Grandes Colaborações (`GC`), escala máxima fixada pelo histograma e barras empilhadas de cores JCR proporcionais.
+  - **Orientações por Ano**: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde, Doutorado em Azul, Mestrado em Laranja), complementado por colunas para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
 * **Tabelas Estatísticas Dinâmicas**: Tabelas com Somatórios e Médias automáticas para períodos customizados.
 * **Citação e Índice H**: Consolidação automática do Índice H e número de citações para Web of Science e Scopus.
 
@@ -28,10 +31,11 @@ O repositório inclui:
 * **Backup e Portabilidade**: Exporte todo o seu banco de dados em formato JSON ou exporte os dados tabulados em CSV para análise.
 
 ### 3. Análise Acadêmica Avançada
-* **Papel de Autoria**: Identificação automatizada como Primeiro Autor (1º) ou Último Autor (Últ) em cada publicação.
+* **Seletor de Rank de Autoria Customizável**: Defina a posição de autoria a ser analisada (1º, 2º, etc.) com atualização dinâmica de cabeçalhos e contagens em todo o sistema.
+* **Papel de Autoria**: Identificação automatizada como Autor no Rank Selecionado ou Último Autor (`Ult`) em cada publicação.
 * **Média Real de Coautores**: Cálculo da média de coautores por artigo, com opção de desconsiderar Grandes Colaborações (consórcios).
 * **Portfólio de Inovação e Patentes**: Gestão de patentes classificadas por status (Depósito, Concessão).
-* **Painel de Orientações**: Resumo consolidado de orientações (Doutorado, Mestrado, Iniciação Científica, etc).
+* **Painel de Orientações**: Resumo consolidado e gráficos de orientações (Pós-doutorado, Doutorado, Mestrado, Iniciação Científica, etc.).
 
 ---
 

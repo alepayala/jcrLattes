@@ -727,9 +727,16 @@ window.JCRDBTools = {
 
             let theadHtml = `<tr>`;
             theadHtml += `<th style="width: 30px; text-align: center;"><input type="checkbox" id="selectAllCheckbox" title="Selecionar Todos"></th>`;
+            const targetRank = (this.reportState && this.reportState.targetAuthorRank) ? parseInt(this.reportState.targetAuthorRank) : 1;
             this.METRICS_CONFIG.forEach(m => {
                 const arrow = this.sortConfig.key === m.key ? (this.sortConfig.ascending ? ' ▲' : ' ▼') : '';
-                const titleAttr = m.title ? ` title="${m.title}"` : '';
+                let label = m.label;
+                let title = m.title;
+                if (m.key === 'firstAuthorCount') {
+                    label = `${targetRank}º Autor`;
+                    title = `Total de artigos como ${targetRank}º autor`;
+                }
+                const titleAttr = title ? ` title="${title}"` : '';
                 let classes = ['sortable-header'];
                 if (m.division) classes.push('division-left');
                 if (m.numeric) classes.push('numeric-cell');
@@ -737,14 +744,14 @@ window.JCRDBTools = {
                 
                 if (m.key === 'customId') {
                     theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>
-                        ${m.label}<span class="sort-indicator">${arrow}</span><br>
+                        ${label}<span class="sort-indicator">${arrow}</span><br>
                         <div style="display: flex; gap: 2px; margin-top: 4px;">
                             <input type="text" id="bulk-id-input" placeholder="Lote..." style="width: 100%; min-width: 60px; padding: 2px 4px; font-weight: normal; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;">
                             <select id="bulk-id-select" style="width: 24px; border: 1px solid #ccc; border-radius: 3px; background: white;" title="Selecionar ID Existente">${dropdownOptionsHtml}</select>
                         </div>
                     </th>`;
                 } else {
-                    theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>${m.label}<span class="sort-indicator">${arrow}</span></th>`;
+                    theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>${label}<span class="sort-indicator">${arrow}</span></th>`;
                 }
             });
             theadHtml += `<th class="division-left" style="font-size: 0.85em; text-align: center; white-space: nowrap;">
@@ -772,6 +779,19 @@ window.JCRDBTools = {
                     if (m.key === 'name') {
                         const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
                         tbodyHtml += `<td${classAttr}><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong></td>`;
+                    } else if (m.key === 'firstAuthorCount') {
+                        let count = 0;
+                        if (cv.publications && Array.isArray(cv.publications)) {
+                            count = cv.publications.filter(p => {
+                                if (targetRank === 1) {
+                                    return p.authorRank === 1 || (p.authorRank === undefined && p.isFirstAuthor);
+                                }
+                                return p.authorRank === targetRank;
+                            }).length;
+                        } else {
+                            count = cv.firstAuthorCount || 0;
+                        }
+                        tbodyHtml += `<td${classAttr}>${count}</td>`;
                     } else if (m.key === 'researcherIdLink') {
                         const safeRid = this._safeUrl(val);
                         if (safeRid) {
@@ -1474,6 +1494,7 @@ window.JCRDBTools = {
                 highJcr: parseFloat(cvData.highJcr || 7.0),
                 lowJcr: parseFloat(cvData.lowJcr || 1.5),
                 customYears: 1,
+                targetAuthorRank: 1,
                 pubListYears: 5,
                 journalYears: 5,
                 minJournalPapers: 1,
@@ -1493,6 +1514,7 @@ window.JCRDBTools = {
         
         newTab.reportState = this.reportState;
         const state = newTab.reportState;
+        const targetRank = parseInt(state.targetAuthorRank) || 1;
         const startYearRecent = currentYear - 5;
         const startYearLast10 = currentYear - 10;
         const startYearCustom = currentYear - state.customYears;
@@ -1514,7 +1536,12 @@ window.JCRDBTools = {
             if (category === 'low' && !state.showLowJcr) return false;
             if (category === 'noJcr' && !state.showNoJcr) return false;
             
-            let isFirst = pub.isFirstAuthor !== undefined ? pub.isFirstAuthor : pub.authorRank === 1;
+            let isFirst = false;
+            if (targetRank === 1) {
+                isFirst = pub.isFirstAuthor !== undefined ? pub.isFirstAuthor : pub.authorRank === 1;
+            } else {
+                isFirst = pub.authorRank === targetRank;
+            }
             let isLast = pub.isLastAuthor !== undefined ? pub.isLastAuthor : (pub.authorRank === pub.authorCount && !pub.hasEtAl && pub.authorCount > 1);
             let isGc = pub.hasEtAl;
             let isOther = !isFirst && !isLast && !isGc;
@@ -1530,7 +1557,7 @@ window.JCRDBTools = {
         // Recalculate stats for the report
         const stats = window.JCRReportUtils.calculateReportStats(
             filteredPublications, rawPatents, rawEvents, supervisions, declaredCitations,
-            currentYear, state.customYears, startYearRecent, startYearLast10, startYearCustom, state.highJcr, state.lowJcr
+            currentYear, state.customYears, startYearRecent, startYearLast10, startYearCustom, state.highJcr, state.lowJcr, targetRank
         );
 
         const COLORS = window.JCRReportUtils.COLORS;
@@ -1563,7 +1590,7 @@ window.JCRDBTools = {
         if (!state.showLowJcr) jcrHidden.push('Baixo');
         if (!state.showNoJcr) jcrHidden.push('Sem JCR');
         const authHidden = [];
-        if (!state.showAuthorFirst) authHidden.push('1º Autor');
+        if (!state.showAuthorFirst) authHidden.push(`${targetRank}º Autor`);
         if (!state.showAuthorLast) authHidden.push('Último Autor');
         if (!state.showAuthorOthers) authHidden.push('Outros');
         if (!state.showAuthorGc) authHidden.push('GC (et al)');
@@ -1611,10 +1638,11 @@ window.JCRDBTools = {
 
                         <div style="flex: 1; min-width: 200px; border-right: 1px solid #ddd; padding-right: 15px;">
                             <div style="font-weight: bold; margin-bottom: 8px;">Filtro de Autoria:</div>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-first" ${state.showAuthorFirst ? 'checked' : ''}> 1º Autor</label><br>
+                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-first" ${state.showAuthorFirst ? 'checked' : ''}> <span id="lbl-auth-first">${targetRank}º Autor</span></label><br>
                             <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-last" ${state.showAuthorLast ? 'checked' : ''}> Último Autor</label><br>
                             <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-others" ${state.showAuthorOthers ? 'checked' : ''}> Outros</label><br>
                             <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-gc" ${state.showAuthorGc ? 'checked' : ''}> Grandes Colaborações (et al)</label>
+                            <div style="margin-top: 8px; font-weight: bold;">Rank do Autor: <input type="number" id="inp-target-author-rank" value="${targetRank}" min="1" max="99" style="width: 45px; text-align: center;"></div>
                         </div>
 
                         <div style="flex: 1; min-width: 200px;">
@@ -1650,7 +1678,7 @@ window.JCRDBTools = {
                     <tr style="background-color: ${COLORS.backgroundSubHeader}; border-bottom: 1px solid ${COLORS.border}; font-size: 0.85em;">
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center;">Soma</th>
                         <th style="padding: 4px; text-align: center;">Média</th>
-                        <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};">1o</th>
+                        <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};">${targetRank}o</th>
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};">Últ.</th>
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};">N Aut</th>
                         
@@ -1686,6 +1714,8 @@ window.JCRDBTools = {
 
         const histogramHTML = window.JCRReportUtils.generateHistogramHTML(filteredPublications, state.highJcr, state.lowJcr);
         const papersPerYearHTML = window.JCRReportUtils.generatePapersPerYearGraphHTML(filteredPublications, state.highJcr, state.lowJcr);
+        const authorRankHistogramHTML = window.JCRReportUtils.generateAuthorRankHistogramHTML(filteredPublications, state.highJcr, state.lowJcr, state.showAuthorLast, state.showAuthorGc);
+        const supervisionsPerYearHTML = window.JCRReportUtils.generateSupervisionsPerYearGraphHTML(supervisions);
 
         let membersTableHTML = '';
         if (cvData.groupMembers && cvData.groupMembers.length > 0) {
@@ -1896,12 +1926,22 @@ window.JCRDBTools = {
                             <span class="toggle-icon">[-]</span>
                         </div>
                         <div class="collapsible-content">
-                            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                                <div style="flex: 1; min-width: 400px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: #fff;">
-                                    ${histogramHTML}
+                            <div style="display: flex; flex-direction: column; gap: 20px;">
+                                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                                    <div style="flex: 1; min-width: 400px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: #fff;">
+                                        ${histogramHTML}
+                                    </div>
+                                    <div style="flex: 1; min-width: 400px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: #fff;">
+                                        ${papersPerYearHTML}
+                                    </div>
                                 </div>
-                                <div style="flex: 1; min-width: 400px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: #fff;">
-                                    ${papersPerYearHTML}
+                                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                                    <div style="flex: 1; min-width: 400px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: #fff;">
+                                        ${authorRankHistogramHTML}
+                                    </div>
+                                    <div style="flex: 1; min-width: 400px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: #fff;">
+                                        ${supervisionsPerYearHTML}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2019,6 +2059,8 @@ window.JCRDBTools = {
             state.lowJcr = parseFloat(doc.getElementById('inp-low-jcr').value) || 1.5;
             const customYearsVal = parseInt(doc.getElementById('inp-custom-years').value, 10);
             state.customYears = isNaN(customYearsVal) ? 1 : customYearsVal;
+            const targetRankVal = parseInt(doc.getElementById('inp-target-author-rank')?.value, 10);
+            state.targetAuthorRank = isNaN(targetRankVal) || targetRankVal < 1 ? 1 : targetRankVal;
             state.showHighJcr = doc.getElementById('chk-jcr-high').checked;
             state.showMidJcr = doc.getElementById('chk-jcr-mid').checked;
             state.showLowJcr = doc.getElementById('chk-jcr-low').checked;
@@ -2031,8 +2073,9 @@ window.JCRDBTools = {
             this.renderCVReport(cvData, newTab, sortedDb, parentGroupData);
         };
 
-        ['inp-high-jcr', 'inp-low-jcr', 'inp-custom-years'].forEach(id => {
-            doc.getElementById(id).addEventListener('change', reRender);
+        ['inp-high-jcr', 'inp-low-jcr', 'inp-custom-years', 'inp-target-author-rank'].forEach(id => {
+            const el = doc.getElementById(id);
+            if (el) el.addEventListener('change', reRender);
         });
 
         ['chk-jcr-high', 'chk-jcr-mid', 'chk-jcr-low', 'chk-jcr-none', 

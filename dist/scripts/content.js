@@ -15,10 +15,12 @@ const SETTINGS_KEY = 'jcr_lattes_settings';
 let jcrTablesState = { publicacoes: false, citacoes: false, orientacoes: false, patentes: false, eventos: false, opcoes: false, graficos: false };
 
 async function saveSettings() {
+  const rankInputVal = parseInt(document.getElementById('target-author-rank-input')?.value);
   const settings = {
     highJcr: parseFloat(document.getElementById('high-jcr-input')?.value) || 7,
     lowJcr: parseFloat(document.getElementById('low-jcr-input')?.value) || 1.5,
     customYears: parseInt(document.getElementById('custom-year-input')?.value) || 1,
+    targetAuthorRank: !isNaN(rankInputVal) ? rankInputVal : 1,
     colors: {
       high: document.getElementById('color-jcr-high')?.value || COLORS.highJcr,
       mid: document.getElementById('color-jcr-mid')?.value || COLORS.midJcr,
@@ -338,6 +340,11 @@ async function processLattesPage(nameLink) {
   const customInput = document.getElementById('custom-year-input');
   if (customInput && !isNaN(parseInt(customInput.value))) customYears = parseInt(customInput.value);
 
+  // Target author rank
+  let targetAuthorRank = saved?.targetAuthorRank ?? 1;
+  const rankInput = document.getElementById('target-author-rank-input');
+  if (rankInput && !isNaN(parseInt(rankInput.value))) targetAuthorRank = parseInt(rankInput.value);
+
   // Wrap updates in updateSafe to prevent infinite loop
   await updateSafe(async () => {
     try {
@@ -357,12 +364,12 @@ async function processLattesPage(nameLink) {
 
         const finalStats = window.JCRReportUtils.calculateReportStats(
           lattesInfo, patents, events, supervisions, extractDeclaredCitations(),
-          currentYear, customYears, startYearRecent, startYearLast10, startYearCustom, highJcr, lowJcr
+          currentYear, customYears, startYearRecent, startYearLast10, startYearCustom, highJcr, lowJcr, targetAuthorRank
         );
         const minYear = finalStats.minYear;
         const maxYear = finalStats.maxYear;
 
-        await injectReportTable(finalStats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo);
+        await injectReportTable(finalStats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank);
       }
     } finally {
       hideLoading();
@@ -629,6 +636,7 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
     pubElem.setAttribute('data-is-first', pubInfo.isFirstAuthor);
     pubElem.setAttribute('data-is-last', pubInfo.isLastAuthor);
     pubElem.setAttribute('data-is-gc', pubInfo.hasEtAl);
+    pubElem.setAttribute('data-author-rank', pubInfo.authorRank);
 
     if (pubElemLastItem) {
       const pubInfoString = decodeHtmlEntities(pubElemLastItem.getAttribute('cvuri'));
@@ -795,7 +803,7 @@ function injectYearSeparator(pubElem, year) {
 
 
 
-async function injectReportTable(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo) {
+async function injectReportTable(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank = 1) {
   // get main content div (absent na versão impressa do CV)
   const mainContentDiv = document.getElementsByClassName('main-content')[0];
   if (!mainContentDiv) {
@@ -845,7 +853,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
             <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: #ffffff;" title="Soma total dos Fatores de Impacto">Σ</th>
             <th style="padding: 4px; text-align: center; background-color: #ffffff;" title="Média do Fator de Impacto (Soma / Artigos com JCR)">μ</th>
             
-            <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Quantidade de artigos como Primeiro Autor">1o</th>
+            <th id="th-author-rank-header" style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Quantidade de artigos como ${targetAuthorRank}º Autor">${targetAuthorRank}o</th>
             <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Quantidade de artigos como Último Autor">Últ</th>
             <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Média de autores por artigo (exclui Grandes Colaborações)">μ</th>
             <!-- High Sub-headers -->
@@ -1223,7 +1231,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   const identificationSections = splitIndex > 0 ? sections.slice(0, splitIndex) : [];
   const otherSections = splitIndex > -1 ? sections.slice(splitIndex) : sections;
 
-  const togglesHTML = generateSectionToggles(identificationSections, otherSections);
+  const togglesHTML = generateSectionToggles(identificationSections, otherSections, targetAuthorRank);
 
   // Append toggles to the reportContent
   const toggleContainer = document.createElement('div');
@@ -1233,6 +1241,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
   const histogramHTML = window.JCRReportUtils.generateHistogramHTML(lattesInfo, highJcr, lowJcr);
   const papersPerYearHTML = window.JCRReportUtils.generatePapersPerYearGraphHTML(lattesInfo, highJcr, lowJcr);
+  const authorRankHistogramHTML = window.JCRReportUtils.generateAuthorRankHistogramHTML(lattesInfo, highJcr, lowJcr, true, true);
+  const supervisionsPerYearHTML = window.JCRReportUtils.generateSupervisionsPerYearGraphHTML(stats.supervisions);
 
   toggleContainer.innerHTML = `
     <div style="width: 100%;">
@@ -1251,13 +1261,21 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
           <tbody id="tbody-graficos" style="display: ${jcrTablesState.graficos ? 'none' : ''};">
             <tr>
               <td style="padding: 0; text-align: left;">
-                <div style="padding: 10px; background-color: ${COLORS.backgroundSubHeader}; font-size: 0.9em; color: ${COLORS.footerText};">
+                <div style="padding: 10px; background-color: ${COLORS.backgroundSubHeader}; font-size: 0.9em; color: ${COLORS.footerText}; display: flex; flex-direction: column; gap: 10px;">
                   <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                     <div style="flex: 1; min-width: 300px;" id="histogram-container">
                         ${histogramHTML}
                     </div>
                     <div style="flex: 1; min-width: 300px;" id="papers-year-container">
                         ${papersPerYearHTML}
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 300px;" id="author-rank-histogram-container">
+                        ${authorRankHistogramHTML}
+                    </div>
+                    <div style="flex: 1; min-width: 300px;" id="supervisions-year-container">
+                        ${supervisionsPerYearHTML}
                     </div>
                   </div>
                 </div>
@@ -1273,10 +1291,12 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   // --- Cache DB Elements ---
   const cachedPubElems = Array.from(document.querySelectorAll('.artigo-completo')).map(el => {
     const yearStr = el.getAttribute('data-year');
+    const rankStr = el.getAttribute('data-author-rank');
     return {
       el: el,
       level: el.getAttribute('data-jcr-level'),
       year: yearStr ? parseInt(yearStr) : NaN,
+      authorRank: rankStr ? parseInt(rankStr) : -1,
       isFirst: el.getAttribute('data-is-first') === 'true',
       isLast: el.getAttribute('data-is-last') === 'true',
       isGc: el.getAttribute('data-is-gc') === 'true'
@@ -1513,7 +1533,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   }
 
   // Listeners for Inputs
-  ['high-jcr-input', 'low-jcr-input', 'custom-year-input'].forEach(id => {
+  ['high-jcr-input', 'low-jcr-input', 'custom-year-input', 'target-author-rank-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', () => {
       saveSettings();
@@ -1597,15 +1617,22 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       const matchesPeriod = isNaN(pub.year) || pub.year >= cutoffYear;
 
       let matchesRole = false;
+      const targetRank = parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1;
       if (pub.isGc) {
         // GC papers are controlled independently by the GC checkbox
         matchesRole = selectedRoles.gc;
       } else {
-        // Non-GC papers are controlled by the First, Last, and Others checkboxes
-        if (pub.isFirst && selectedRoles.first) matchesRole = true;
+        // Non-GC papers are controlled by the First/Rank, Last, and Others checkboxes
+        let isTargetRank = false;
+        if (targetRank === 1) {
+          isTargetRank = pub.isFirst;
+        } else {
+          isTargetRank = pub.authorRank === targetRank;
+        }
+        if (isTargetRank && selectedRoles.first) matchesRole = true;
         if (pub.isLast && selectedRoles.last) matchesRole = true;
 
-        const isOther = !pub.isFirst && !pub.isLast;
+        const isOther = !isTargetRank && !pub.isLast;
         if (isOther && selectedRoles.others) matchesRole = true;
       }
 
@@ -1644,17 +1671,27 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
     });
 
 
-    // Update graphs based on period filter ONLY if changed
+    // Update graphs based on period filter and role options
+    const filteredLattesInfo = lattesInfo.filter(pub => isNaN(pub.year) || pub.year >= cutoffYear);
     if (cutoffYear !== lastGraphCutoffYear) {
       lastGraphCutoffYear = cutoffYear;
       const histogramContainer = document.getElementById('histogram-container');
       const papersYearContainer = document.getElementById('papers-year-container');
-      if (histogramContainer || papersYearContainer) {
-        // Filter lattesInfo to only include the ones in the selected period
-        const filteredLattesInfo = lattesInfo.filter(pub => isNaN(pub.year) || pub.year >= cutoffYear);
-        if (histogramContainer) histogramContainer.innerHTML = window.JCRReportUtils.generateHistogramHTML(filteredLattesInfo, highJcr, lowJcr);
-        if (papersYearContainer) papersYearContainer.innerHTML = window.JCRReportUtils.generatePapersPerYearGraphHTML(filteredLattesInfo, highJcr, lowJcr);
+      const supervisionsYearContainer = document.getElementById('supervisions-year-container');
+
+      if (histogramContainer) histogramContainer.innerHTML = window.JCRReportUtils.generateHistogramHTML(filteredLattesInfo, highJcr, lowJcr);
+      if (papersYearContainer) papersYearContainer.innerHTML = window.JCRReportUtils.generatePapersPerYearGraphHTML(filteredLattesInfo, highJcr, lowJcr);
+      if (supervisionsYearContainer && stats && stats.supervisions) {
+        const rawFiltered = (stats.supervisions.raw || []).filter(item => isNaN(item.year) || item.year >= cutoffYear);
+        supervisionsYearContainer.innerHTML = window.JCRReportUtils.generateSupervisionsPerYearGraphHTML(rawFiltered);
       }
+    }
+
+    const authorRankHistogramContainer = document.getElementById('author-rank-histogram-container');
+    if (authorRankHistogramContainer) {
+      const showLast = selectedRoles ? selectedRoles.last !== false : true;
+      const showGc = selectedRoles ? selectedRoles.gc !== false : true;
+      authorRankHistogramContainer.innerHTML = window.JCRReportUtils.generateAuthorRankHistogramHTML(filteredLattesInfo, highJcr, lowJcr, showLast, showGc);
     }
 
     const tbody = document.getElementById('tbody-publicacoes');
@@ -1671,6 +1708,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       let tableStats = stats;
 
       if (isTableFiltered) {
+        const targetRank = parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1;
         const filteredForStats = lattesInfo.filter(pub => {
           let category = 'noJcr';
           let ifVal = 0;
@@ -1688,11 +1726,16 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
           if (pub.hasEtAl) {
             passesRole = selectedRoles.gc;
           } else {
-            let isFirst = pub.isFirstAuthor !== undefined ? pub.isFirstAuthor : (pub.authorRank === 1);
+            let isTargetRank = false;
+            if (targetRank === 1) {
+              isTargetRank = pub.isFirstAuthor !== undefined ? pub.isFirstAuthor : (pub.authorRank === 1);
+            } else {
+              isTargetRank = pub.authorRank === targetRank;
+            }
             let isLast = pub.isLastAuthor !== undefined ? pub.isLastAuthor : (pub.authorRank === pub.authorCount && pub.authorCount > 1 && !pub.hasEtAl);
-            if (isFirst && selectedRoles.first) passesRole = true;
+            if (isTargetRank && selectedRoles.first) passesRole = true;
             if (isLast && selectedRoles.last) passesRole = true;
-            const isOther = !isFirst && !isLast;
+            const isOther = !isTargetRank && !isLast;
             if (isOther && selectedRoles.others) passesRole = true;
           }
 
@@ -1704,7 +1747,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
         tableStats = window.JCRReportUtils.calculateReportStats(
             filteredForStats, stats.patents, stats.events, stats.supervisions, stats.declaredCitations,
-            currentYear, currentCustomYears, startYearRecent, startYearLast10, startYearCustom, highJcr, lowJcr
+            currentYear, currentCustomYears, startYearRecent, startYearLast10, startYearCustom, highJcr, lowJcr, targetRank
         );
       }
 
@@ -1902,7 +1945,7 @@ function getSections() {
   return sections;
 }
 
-function generateSectionToggles(identificationSections, otherSections) {
+function generateSectionToggles(identificationSections, otherSections, targetAuthorRank = 1) {
   let html = `
     <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
       <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
@@ -2010,7 +2053,7 @@ function generateSectionToggles(identificationSections, otherSections) {
           <div style="display: flex; flex-direction: column; gap: 5px;">
             <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
               <input type="checkbox" id="toggle-author-first" checked style="margin-right: 5px;">
-              1o Autor
+              <span id="lbl-toggle-author-first">${targetAuthorRank}º Autor</span>
             </label>
             <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
               <input type="checkbox" id="toggle-author-last" checked style="margin-right: 5px;">
@@ -2024,6 +2067,10 @@ function generateSectionToggles(identificationSections, otherSections) {
               <input type="checkbox" id="toggle-author-gc" checked style="margin-right: 5px;">
               GC (et al.)
             </label>
+            <div style="margin-top: 6px; display: flex; align-items: center; gap: 5px; font-size: 0.95em;">
+              <label for="target-author-rank-input" style="font-weight: bold;">Rank do Autor:</label>
+              <input type="number" id="target-author-rank-input" value="${targetAuthorRank}" min="1" max="99" style="width: 45px; padding: 2px; text-align: center;">
+            </div>
           </div>
         </div>
 

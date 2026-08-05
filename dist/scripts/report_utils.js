@@ -23,7 +23,8 @@ window.JCRReportUtils = {
     highJcr: '#2E7D32',
     midJcr: '#1565C0',
     lowJcr: '#E65100',
-    noJcr: '#C62828'
+    noJcr: '#C62828',
+    posDoc: '#6A1B9A'
   },
 
   JOURNAL_STRIP_SUFFIXES: ['(print)', '(online)','(Cambridge. Online)','(Impresso)','(Internet)','(Philadelphia, PA)','(New York)','(São Paulo. Impresso)','(London. 1996. Print)'],
@@ -50,7 +51,7 @@ window.JCRReportUtils = {
     return `rgb(${r}, ${g}, ${b})`;
   },
 
-  calculateReportStats: function(publications, patents, events, supervisions, declaredCitations, currentYear, customYears, startYearRecent, startYearLast10, startYearCustom, highJcr, lowJcr) {
+  calculateReportStats: function(publications, patents, events, supervisions, declaredCitations, currentYear, customYears, startYearRecent, startYearLast10, startYearCustom, highJcr, lowJcr, targetAuthorRank = 1) {
     const createStatObj = () => ({ count: 0, sum: 0 });
     const createCitationObj = () => ({ wos: [], scopus: [] });
     const createPatentObj = () => ({ total: 0, statusCounts: {} });
@@ -79,6 +80,8 @@ window.JCRReportUtils = {
     let minYear = currentYear;
     let maxYear = currentYear;
 
+    const targetRank = parseInt(targetAuthorRank) || 1;
+
     if (publications && Array.isArray(publications)) {
       for (const pub of publications) {
         if (!isNaN(pub.year)) {
@@ -88,9 +91,14 @@ window.JCRReportUtils = {
         
         const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
         
-        let isFirstAuthor = pub.isFirstAuthor;
-        if (isFirstAuthor === undefined) {
+        let isFirstAuthor = false;
+        if (targetRank === 1) {
+          isFirstAuthor = pub.isFirstAuthor;
+          if (isFirstAuthor === undefined) {
             isFirstAuthor = pub.authorRank === 1;
+          }
+        } else {
+          isFirstAuthor = pub.authorRank === targetRank;
         }
         
         let isLastAuthor = pub.isLastAuthor;
@@ -486,6 +494,408 @@ window.JCRReportUtils = {
     return `
       <div style="height: 100%; display: flex; flex-direction: column; padding: 15px; margin-top: 10px; background-color: ${this.COLORS.backgroundSubHeader}; border-top: 1px solid ${this.COLORS.border}; box-sizing: border-box;">
         <div style="font-weight: bold; margin-bottom: 25px; color: ${this.COLORS.footerText};">Publicações por Ano</div>
+        <div style="display: flex; align-items: flex-end; flex-grow: 1; min-height: 150px; padding-bottom: 10px; border-bottom: 1px solid ${this.COLORS.border};">
+          ${barsHTML}
+        </div>
+      </div>
+    `;
+  },
+
+  generateAuthorRankHistogramHTML: function(publications, highVal = 7.0, lowVal = 1.5, showLast = true, showGc = true) {
+    highVal = parseFloat(highVal);
+    lowVal = parseFloat(lowVal);
+
+    const rankData = {};
+    const lastData = { high: 0, mid: 0, low: 0, none: 0, total: 0 };
+    const gcData = { high: 0, mid: 0, low: 0, none: 0, total: 0 };
+    let maxRankFound = 1;
+
+    publications.forEach(pub => {
+      let category = 'none';
+      const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+      
+      if (impactFactorStr !== null && impactFactorStr !== undefined && impactFactorStr !== '' && impactFactorStr !== 0) {
+        const ifVal = parseFloat(impactFactorStr);
+        if (ifVal > 0) {
+          if (ifVal >= highVal) category = 'high';
+          else if (ifVal >= lowVal) category = 'mid';
+          else category = 'low';
+        }
+      }
+
+      if (pub.hasEtAl) {
+        gcData[category]++;
+        gcData.total++;
+      } else {
+        let rank = pub.authorRank;
+        if (rank === undefined || rank === null || rank < 1) {
+          rank = pub.isFirstAuthor ? 1 : 1;
+        }
+        if (rank > maxRankFound) maxRankFound = rank;
+
+        if (!rankData[rank]) {
+          rankData[rank] = { high: 0, mid: 0, low: 0, none: 0, total: 0 };
+        }
+        rankData[rank][category]++;
+        rankData[rank].total++;
+
+        let isLast = pub.isLastAuthor;
+        if (isLast === undefined) {
+          isLast = pub.authorCount > 1 && rank === pub.authorCount;
+        }
+        if (isLast) {
+          lastData[category]++;
+          lastData.total++;
+        }
+      }
+    });
+
+    if (publications.length === 0) {
+      return `
+        <div style="height: 100%; display: flex; flex-direction: column; padding: 15px; margin-top: 10px; background-color: ${this.COLORS.backgroundSubHeader}; border-top: 1px solid ${this.COLORS.border}; box-sizing: border-box;">
+          <div style="font-weight: bold; margin-bottom: 8px; color: ${this.COLORS.footerText};">Distribuição por Rank de Autoria</div>
+          <div style="display: flex; flex-grow: 1; align-items: center; justify-content: center; color: #666; font-size: 0.9em;">Sem dados de publicações</div>
+        </div>
+      `;
+    }
+
+    const rankColumns = [];
+    const limitRank = Math.max(5, Math.min(maxRankFound, 15));
+    for (let r = 1; r <= limitRank; r++) {
+      rankColumns.push({
+        key: `rank_${r}`,
+        label: `${r}º`,
+        title: `${r}º Autor`,
+        isSpecial: false,
+        data: rankData[r] || { high: 0, mid: 0, low: 0, none: 0, total: 0 }
+      });
+    }
+
+    const histogramMax = Math.max(0, ...rankColumns.map(c => c.data.total));
+    const scaleMax = histogramMax > 0 ? histogramMax : Math.max(1, lastData.total, gcData.total);
+
+    const columns = [...rankColumns];
+
+    if (showLast !== false) {
+      columns.push({
+        key: 'last',
+        label: 'Ult',
+        title: 'Último Autor',
+        isSpecial: true,
+        data: lastData
+      });
+    }
+
+    if (showGc !== false) {
+      columns.push({
+        key: 'gc',
+        label: 'GC',
+        title: 'Grandes Colaborações (et al.)',
+        isSpecial: true,
+        data: gcData
+      });
+    }
+
+    let barsHTML = '';
+    columns.forEach(col => {
+      const data = col.data;
+      let hH = 0, mH = 0, lH = 0, nH = 0;
+
+      if (col.isSpecial && data.total > scaleMax) {
+        const colTotal = data.total > 0 ? data.total : 1;
+        hH = (data.high / colTotal) * 100;
+        mH = (data.mid / colTotal) * 100;
+        lH = (data.low / colTotal) * 100;
+        nH = (data.none / colTotal) * 100;
+      } else {
+        hH = scaleMax > 0 ? (data.high / scaleMax) * 100 : 0;
+        mH = scaleMax > 0 ? (data.mid / scaleMax) * 100 : 0;
+        lH = scaleMax > 0 ? (data.low / scaleMax) * 100 : 0;
+        nH = scaleMax > 0 ? (data.none / scaleMax) * 100 : 0;
+      }
+
+      const isCapped = col.isSpecial && data.total > scaleMax;
+
+      barsHTML += `
+        <div style="display: flex; flex-direction: column; justify-content: flex-end; align-items: center; flex: 1; margin: 0 2px; height: 100%; min-width: 15px;">
+          <div style="font-size: 0.75em; color: ${isCapped ? '#d32f2f' : '#666'}; font-weight: ${isCapped ? 'bold' : 'normal'}; margin-bottom: 2px;" title="${data.total} publicações">${data.total > 0 ? data.total : ''}</div>
+          <div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 2px 2px 0 0; overflow: hidden; border: 1px solid rgba(0,0,0,0.05); border-bottom: none;" title="${col.title}: ${data.total} publicações (${data.high} alto, ${data.mid} médio, ${data.low} baixo, ${data.none} sem JCR)">
+            <div style="height: ${hH}%; background-color: ${this.GRAPH_COLORS.highJcr}; width: 100%; ${hH > 0 && (mH > 0 || lH > 0 || nH > 0) ? 'border-bottom: 1px solid white;' : ''}"></div>
+            <div style="height: ${mH}%; background-color: ${this.GRAPH_COLORS.midJcr}; width: 100%; ${mH > 0 && (lH > 0 || nH > 0) ? 'border-bottom: 1px solid white;' : ''}"></div>
+            <div style="height: ${lH}%; background-color: ${this.GRAPH_COLORS.lowJcr}; width: 100%; ${lH > 0 && nH > 0 ? 'border-bottom: 1px solid white;' : ''}"></div>
+            <div style="height: ${nH}%; background-color: ${this.GRAPH_COLORS.noJcr}; width: 100%;"></div>
+            ${data.total === 0 ? '<div style="height: 1px; background-color: transparent; width: 100%;"></div>' : ''}
+          </div>
+          <div style="font-size: 0.7em; color: #666; margin-top: 4px; white-space: nowrap; height: 14px; line-height: 14px; text-align: center;">${col.label}</div>
+        </div>
+      `;
+    });
+
+    return `
+      <div style="height: 100%; display: flex; flex-direction: column; padding: 15px; margin-top: 10px; background-color: ${this.COLORS.backgroundSubHeader}; border-top: 1px solid ${this.COLORS.border}; box-sizing: border-box;">
+        <div style="font-weight: bold; margin-bottom: 25px; color: ${this.COLORS.footerText};">Distribuição por Rank de Autoria</div>
+        <div style="display: flex; align-items: flex-end; flex-grow: 1; min-height: 150px; padding-bottom: 10px; border-bottom: 1px solid ${this.COLORS.border};">
+          ${barsHTML}
+        </div>
+      </div>
+    `;
+  },
+
+  generateSupervisionsPerYearGraphHTML: function(supervisionsInput) {
+    let rawItems = [];
+    if (Array.isArray(supervisionsInput)) {
+      rawItems = supervisionsInput;
+    } else if (supervisionsInput && Array.isArray(supervisionsInput.raw)) {
+      rawItems = supervisionsInput.raw;
+    }
+
+    const itemsByYear = {};
+    const inProgressData = {
+      doutorado: { total: 0, coor: 0 },
+      posdoc: { total: 0, coor: 0 },
+      mestrado: { total: 0, coor: 0 },
+      total: 0
+    };
+    const icData = { total: 0, coor: 0 };
+    const outrasData = { total: 0, coor: 0, subTypes: {} };
+    let minYear = Infinity;
+    let maxYear = new Date().getFullYear();
+
+    const getSupervisionType = (item) => {
+      const cat = (item.category || '').toLowerCase();
+      const ref = (item.reference || '').toLowerCase();
+
+      if (cat.includes('doutorado') && !cat.includes('pos-doutorado') && !cat.includes('pós-doutorado') && !cat.includes('pos doutorado') && !cat.includes('pós doutorado')) {
+        return 'doutorado';
+      }
+      if (cat.includes('pos-doutorado') || cat.includes('pós-doutorado') || cat.includes('pos doutorado') || cat.includes('pós doutorado') || ref.includes('pós-doutorado') || ref.includes('pos-doutorado')) {
+        return 'posdoc';
+      }
+      if (cat.includes('mestrado')) {
+        return 'mestrado';
+      }
+      if (cat.includes('iniciação científica') || cat.includes('iniciacao cientifica') || cat.includes('ic') || ref.includes('iniciação científica') || ref.includes('iniciacao cientifica')) {
+        return 'ic';
+      }
+      return 'outras';
+    };
+
+    const isCoorientacao = (item) => {
+      const cat = (item.category || '');
+      const ref = (item.reference || '');
+      return cat.includes('Coorientador') || cat.includes('Co-orientador') || ref.includes('Coorientador') || ref.includes('Co-orientador');
+    };
+
+    const getOutrasSubtypeLabel = (item) => {
+      const cat = (item.category || '').toLowerCase();
+      const ref = (item.reference || '').toLowerCase();
+
+      if (cat.includes('trabalho de conclusão') || cat.includes('graduação') || cat.includes('tcc') || ref.includes('graduação')) {
+        return 'TCC / Graduação';
+      }
+      if (cat.includes('especialização') || cat.includes('especializacao') || cat.includes('aperfeiçoamento')) {
+        return 'Especialização / Aperfeiçoamento';
+      }
+      if (cat.includes('outra natureza') || ref.includes('outra natureza')) {
+        return 'Outra natureza';
+      }
+      let cleanCat = item.category ? item.category.replace(/\s*\(Coorientador\)/gi, '').trim() : 'Outras';
+      return cleanCat || 'Outras';
+    };
+
+    rawItems.forEach(item => {
+      const type = getSupervisionType(item);
+      if (!type) return;
+
+      const isCo = isCoorientacao(item);
+      const isEmAndamento = item.status === 'Em andamento' || (item.status !== 'Concluída' && isNaN(item.year));
+
+      if (type === 'ic') {
+        icData.total++;
+        if (isCo) icData.coor++;
+      } else if (type === 'outras') {
+        outrasData.total++;
+        if (isCo) outrasData.coor++;
+        const sub = getOutrasSubtypeLabel(item);
+        outrasData.subTypes[sub] = (outrasData.subTypes[sub] || 0) + 1;
+      } else if (isEmAndamento) {
+        inProgressData[type].total++;
+        if (isCo) inProgressData[type].coor++;
+        inProgressData.total++;
+      } else {
+        let year = item.year;
+        if (isNaN(year) && item.reference) {
+          const matches = item.reference.match(/\b(?:19|20)\d{2}\b/g);
+          if (matches && matches.length > 0) {
+            year = parseInt(matches[matches.length - 1]);
+          }
+        }
+
+        if (isNaN(year) || year < 1900 || year > maxYear + 1) return;
+
+        if (year < minYear) minYear = year;
+        if (year > maxYear) maxYear = year;
+
+        if (!itemsByYear[year]) {
+          itemsByYear[year] = {
+            doutorado: { total: 0, coor: 0 },
+            posdoc: { total: 0, coor: 0 },
+            mestrado: { total: 0, coor: 0 },
+            total: 0
+          };
+        }
+
+        itemsByYear[year][type].total++;
+        if (isCo) itemsByYear[year][type].coor++;
+        itemsByYear[year].total++;
+      }
+    });
+
+    if (minYear === Infinity && inProgressData.total === 0 && icData.total === 0 && outrasData.total === 0) {
+      return `
+        <div style="height: 100%; display: flex; flex-direction: column; padding: 15px; margin-top: 10px; background-color: ${this.COLORS.backgroundSubHeader}; border-top: 1px solid ${this.COLORS.border}; box-sizing: border-box;">
+          <div style="font-weight: bold; margin-bottom: 8px; color: ${this.COLORS.footerText};">Orientações por Ano</div>
+          <div style="display: flex; flex-grow: 1; align-items: center; justify-content: center; color: #666; font-size: 0.9em;">Sem dados de orientações</div>
+        </div>
+      `;
+    }
+
+    const years = [];
+    if (minYear !== Infinity) {
+      for (let y = minYear; y <= maxYear; y++) {
+        years.push(y);
+      }
+    }
+
+    const histogramMax = Math.max(0, ...years.map(y => itemsByYear[y] ? itemsByYear[y].total : 0));
+    const scaleMax = histogramMax > 0 ? histogramMax : Math.max(1, inProgressData.total, icData.total, outrasData.total);
+
+    const span = maxYear - minYear;
+    let labelInterval = 1;
+    if (span > 10) labelInterval = 5;
+    if (span > 25) labelInterval = 10;
+
+    let barsHTML = '';
+    years.forEach(year => {
+      const data = itemsByYear[year] || {
+        doutorado: { total: 0, coor: 0 },
+        posdoc: { total: 0, coor: 0 },
+        mestrado: { total: 0, coor: 0 },
+        total: 0
+      };
+
+      const dH = scaleMax > 0 ? (data.doutorado.total / scaleMax) * 100 : 0;
+      const pH = scaleMax > 0 ? (data.posdoc.total / scaleMax) * 100 : 0;
+      const mH = scaleMax > 0 ? (data.mestrado.total / scaleMax) * 100 : 0;
+
+      const showLabel = (year === minYear || year === maxYear || year % labelInterval === 0);
+
+      const tooltipParts = [];
+      if (data.posdoc.total > 0) {
+        tooltipParts.push(`${data.posdoc.total} Pós-doutorado${data.posdoc.coor > 0 ? ' (' + data.posdoc.coor + ' Coor.)' : ''}`);
+      }
+      if (data.doutorado.total > 0) {
+        tooltipParts.push(`${data.doutorado.total} Doutorado${data.doutorado.coor > 0 ? ' (' + data.doutorado.coor + ' Coor.)' : ''}`);
+      }
+      if (data.mestrado.total > 0) {
+        tooltipParts.push(`${data.mestrado.total} Mestrado${data.mestrado.coor > 0 ? ' (' + data.mestrado.coor + ' Coor.)' : ''}`);
+      }
+
+      const tooltipText = tooltipParts.length > 0
+        ? `Ano ${year}: ${data.total} orientações (${tooltipParts.join(', ')})`
+        : `Ano ${year}: 0 orientações`;
+
+      barsHTML += `
+        <div style="display: flex; flex-direction: column; justify-content: flex-end; align-items: center; flex: 1; margin: 0 1px; height: 100%; min-width: 4px;">
+          <div style="font-size: 0.7em; color: #666; margin-bottom: 2px;">${data.total > 0 ? data.total : ''}</div>
+          <div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 2px 2px 0 0; overflow: hidden; border: 1px solid rgba(0,0,0,0.05); border-bottom: none;" title="${tooltipText}">
+            <div style="height: ${pH}%; background-color: ${this.GRAPH_COLORS.highJcr}; width: 100%; ${pH > 0 && (dH > 0 || mH > 0) ? 'border-bottom: 1px solid white;' : ''}"></div>
+            <div style="height: ${dH}%; background-color: ${this.GRAPH_COLORS.midJcr}; width: 100%; ${dH > 0 && mH > 0 ? 'border-bottom: 1px solid white;' : ''}"></div>
+            <div style="height: ${mH}%; background-color: ${this.GRAPH_COLORS.lowJcr}; width: 100%;"></div>
+            ${data.total === 0 ? '<div style="height: 1px; background-color: transparent; width: 100%;"></div>' : ''}
+          </div>
+          <div style="font-size: 0.65em; color: #666; margin-top: 4px; white-space: nowrap; height: 12px; line-height: 12px; text-align: center;">${showLabel ? year : ''}</div>
+        </div>
+      `;
+    });
+
+    // Append Special Column: EA (Orientações em Andamento - Pós-Graduação)
+    const inProgCapped = inProgressData.total > scaleMax;
+    let ipDH = 0, ipPH = 0, ipMH = 0;
+
+    if (inProgCapped) {
+      const ipColTotal = inProgressData.total > 0 ? inProgressData.total : 1;
+      ipPH = (inProgressData.posdoc.total / ipColTotal) * 100;
+      ipDH = (inProgressData.doutorado.total / ipColTotal) * 100;
+      ipMH = (inProgressData.mestrado.total / ipColTotal) * 100;
+    } else {
+      ipPH = scaleMax > 0 ? (inProgressData.posdoc.total / scaleMax) * 100 : 0;
+      ipDH = scaleMax > 0 ? (inProgressData.doutorado.total / scaleMax) * 100 : 0;
+      ipMH = scaleMax > 0 ? (inProgressData.mestrado.total / scaleMax) * 100 : 0;
+    }
+
+    const ipTooltipParts = [];
+    if (inProgressData.posdoc.total > 0) {
+      ipTooltipParts.push(`${inProgressData.posdoc.total} Pós-doutorado${inProgressData.posdoc.coor > 0 ? ' (' + inProgressData.posdoc.coor + ' Coor.)' : ''}`);
+    }
+    if (inProgressData.doutorado.total > 0) {
+      ipTooltipParts.push(`${inProgressData.doutorado.total} Doutorado${inProgressData.doutorado.coor > 0 ? ' (' + inProgressData.doutorado.coor + ' Coor.)' : ''}`);
+    }
+    if (inProgressData.mestrado.total > 0) {
+      ipTooltipParts.push(`${inProgressData.mestrado.total} Mestrado${inProgressData.mestrado.coor > 0 ? ' (' + inProgressData.mestrado.coor + ' Coor.)' : ''}`);
+    }
+
+    const ipTooltipText = `Orientações em Andamento (EA): ${inProgressData.total}${ipTooltipParts.length > 0 ? ' (' + ipTooltipParts.join(', ') + ')' : ''}`;
+
+    barsHTML += `
+      <div style="display: flex; flex-direction: column; justify-content: flex-end; align-items: center; flex: 1; margin: 0 2px; height: 100%; min-width: 15px;">
+        <div style="font-size: 0.75em; color: ${inProgCapped ? '#d32f2f' : '#666'}; font-weight: ${inProgCapped ? 'bold' : 'normal'}; margin-bottom: 2px;" title="${ipTooltipText}">${inProgressData.total > 0 ? inProgressData.total : ''}</div>
+        <div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 2px 2px 0 0; overflow: hidden; border: 1px solid rgba(0,0,0,0.05); border-bottom: none;" title="${ipTooltipText}">
+          <div style="height: ${ipPH}%; background-color: ${this.GRAPH_COLORS.highJcr}; width: 100%; ${ipPH > 0 && (ipDH > 0 || ipMH > 0) ? 'border-bottom: 1px solid white;' : ''}"></div>
+          <div style="height: ${ipDH}%; background-color: ${this.GRAPH_COLORS.midJcr}; width: 100%; ${ipDH > 0 && ipMH > 0 ? 'border-bottom: 1px solid white;' : ''}"></div>
+          <div style="height: ${ipMH}%; background-color: ${this.GRAPH_COLORS.lowJcr}; width: 100%;"></div>
+          ${inProgressData.total === 0 ? '<div style="height: 1px; background-color: transparent; width: 100%;"></div>' : ''}
+        </div>
+        <div style="font-size: 0.7em; color: #666; margin-top: 4px; white-space: nowrap; height: 14px; line-height: 14px; text-align: center;" title="Em Andamento">EA</div>
+      </div>
+    `;
+
+    // Append Special Column: IC (Iniciação Científica)
+    const icCapped = icData.total > scaleMax;
+    const icHeightPercent = icCapped ? 100 : (scaleMax > 0 ? (icData.total / scaleMax) * 100 : 0);
+    const icTitleText = `Iniciação Científica (IC): ${icData.total} orientações${icData.coor > 0 ? ' (' + icData.coor + ' Coor.)' : ''}`;
+
+    barsHTML += `
+      <div style="display: flex; flex-direction: column; justify-content: flex-end; align-items: center; flex: 1; margin: 0 2px; height: 100%; min-width: 15px;">
+        <div style="font-size: 0.75em; color: ${icCapped ? '#d32f2f' : '#666'}; font-weight: ${icCapped ? 'bold' : 'normal'}; margin-bottom: 2px;" title="${icTitleText}">${icData.total > 0 ? icData.total : ''}</div>
+        <div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 2px 2px 0 0; overflow: hidden; border: 1px solid rgba(0,0,0,0.05); border-bottom: none;" title="${icTitleText}">
+          <div style="height: ${icHeightPercent}%; background-color: ${this.GRAPH_COLORS.noJcr}; width: 100%; min-height: ${icData.total > 0 ? 1 : 0}px;"></div>
+        </div>
+        <div style="font-size: 0.7em; color: #666; margin-top: 4px; white-space: nowrap; height: 14px; line-height: 14px; text-align: center;">IC</div>
+      </div>
+    `;
+
+    // Append Special Column: Outras (Outras orientações)
+    const outrasCapped = outrasData.total > scaleMax;
+    const outrasHeightPercent = outrasCapped ? 100 : (scaleMax > 0 ? (outrasData.total / scaleMax) * 100 : 0);
+    const subBreakdown = Object.entries(outrasData.subTypes).map(([k, v]) => `${v} ${k}`).join(', ');
+    let outrasTitleText = `Outras orientações: ${outrasData.total}`;
+    if (subBreakdown) outrasTitleText += ` (${subBreakdown})`;
+    if (outrasData.coor > 0) outrasTitleText += ` [${outrasData.coor} Coor.]`;
+
+    barsHTML += `
+      <div style="display: flex; flex-direction: column; justify-content: flex-end; align-items: center; flex: 1; margin: 0 2px; height: 100%; min-width: 15px;">
+        <div style="font-size: 0.75em; color: ${outrasCapped ? '#d32f2f' : '#666'}; font-weight: ${outrasCapped ? 'bold' : 'normal'}; margin-bottom: 2px;" title="${outrasTitleText}">${outrasData.total > 0 ? outrasData.total : ''}</div>
+        <div style="width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; border-radius: 2px 2px 0 0; overflow: hidden; border: 1px solid rgba(0,0,0,0.05); border-bottom: none;" title="${outrasTitleText}">
+          <div style="height: ${outrasHeightPercent}%; background-color: #7F8C8D; width: 100%; min-height: ${outrasData.total > 0 ? 1 : 0}px;"></div>
+        </div>
+        <div style="font-size: 0.7em; color: #666; margin-top: 4px; white-space: nowrap; height: 14px; line-height: 14px; text-align: center;" title="Outras Orientações">Out.</div>
+      </div>
+    `;
+
+    return `
+      <div style="height: 100%; display: flex; flex-direction: column; padding: 15px; margin-top: 10px; background-color: ${this.COLORS.backgroundSubHeader}; border-top: 1px solid ${this.COLORS.border}; box-sizing: border-box;">
+        <div style="font-weight: bold; margin-bottom: 25px; color: ${this.COLORS.footerText};">Orientações por Ano</div>
         <div style="display: flex; align-items: flex-end; flex-grow: 1; min-height: 150px; padding-bottom: 10px; border-bottom: 1px solid ${this.COLORS.border};">
           ${barsHTML}
         </div>
