@@ -1,6 +1,6 @@
 # JCRLattes
 
-**Versão 1.6.0**
+**Versão 1.7.0**
 
 O JCRLattes é a ferramenta definitiva para pesquisadores, acadêmicos, coordenadores de pós-graduação e avaliadores que buscam eficiência na análise da Plataforma Lattes. 
 

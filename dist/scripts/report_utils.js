@@ -51,6 +51,7 @@ window.JCRReportUtils = {
     return `rgb(${r}, ${g}, ${b})`;
   },
 
+
   calculateReportStats: function(publications, patents, events, supervisions, declaredCitations, currentYear, customYears, startYearRecent, startYearLast10, startYearCustom, highJcr, lowJcr, targetAuthorRank = 1) {
     const createStatObj = () => ({ count: 0, sum: 0 });
     const createCitationObj = () => ({ wos: [], scopus: [] });
@@ -1195,12 +1196,14 @@ window.JCRReportUtils = {
             tLast10 += iLast10;
             tCustom += iCustom;
 
-            const instToggleScript = showAreas 
-                ? `onclick="const els = document.querySelectorAll('.child-of-${instId}'); els.forEach(el => { el.style.display = el.style.display === 'none' ? 'table-row' : 'none'; }); const icon = this.querySelector('.inst-icon'); if(icon) icon.textContent = icon.textContent === '▶' ? '▼' : '▶';"` 
-                : '';
+            // Handlers inline (onclick="...") foram substituídos por data-attributes:
+            // a CSP de páginas de extensão (MV3) bloqueia atributos de evento inline,
+            // o que quebrava a árvore de orientações quando o relatório é aberto em db.html.
+            // Os listeners são anexados em db_tools.js (attachSupervisionTreeHandlers).
+            const instToggleAttrs = showAreas ? ` data-sup-inst="${instId}"` : '';
 
             instRows += `
-              <tr class="child-of-${typeId}" style="border-bottom: 1px solid #eee; display: none; background-color: #fdfdfd; ${showAreas ? 'cursor: pointer;' : ''}" ${instToggleScript}>
+              <tr class="child-of-${typeId}" style="border-bottom: 1px solid #eee; display: none; background-color: #fdfdfd; ${showAreas ? 'cursor: pointer;' : ''}"${instToggleAttrs}>
                 <td style="padding: 6px 8px 6px 25px; text-align: left; font-size: 0.95em;">
                   ${showAreas ? '<span class="inst-icon" style="display:inline-block; width: 15px; font-size:0.8em; color:#888;">▶</span>' : '<span style="display:inline-block; width: 15px;"></span>'}
                   ${this._esc(instNode.name)}
@@ -1218,24 +1221,10 @@ window.JCRReportUtils = {
             }
         });
 
-        const typeToggleScript = `onclick="
-            const els = document.querySelectorAll('.child-of-${typeId}'); 
-            const isExpanding = this.querySelector('.type-icon').textContent === '▶';
-            if (!isExpanding) {
-                // hide all descendants
-                document.querySelectorAll('.child-of-${typeId}, .child-of-${typeId}-all').forEach(el => el.style.display = 'none');
-                // reset institution icons
-                document.querySelectorAll('.child-of-${typeId} .inst-icon').forEach(icon => icon.textContent = '▶');
-            } else {
-                // show direct children
-                els.forEach(el => el.style.display = 'table-row');
-            }
-            const icon = this.querySelector('.type-icon'); 
-            if(icon) icon.textContent = isExpanding ? '▼' : '▶';
-        "`;
+        const typeToggleAttrs = ` data-sup-type="${typeId}"`;
 
         rows += `
-          <tr style="border-bottom: 1px solid #ddd; background-color: #fff; cursor: pointer;" ${typeToggleScript}>
+          <tr style="border-bottom: 1px solid #ddd; background-color: #fff; cursor: pointer;"${typeToggleAttrs}>
             <td style="padding: 8px; text-align: left; font-weight: bold;">
               <span class="type-icon" style="display:inline-block; width: 15px; font-size:0.8em; color:#555;">▶</span>
               ${this._esc(typeNode.name)}
@@ -1369,6 +1358,253 @@ window.JCRReportUtils = {
         </table>
       </div>
     `;
+  },
+
+  // Converte HTML de terceiros em um documento autossuficiente e inerte:
+  // remove scripts/handlers, injeta CSP, charset, <base>, estilos de fallback
+  // e torna absolutas as URLs relativas de assets.
+  // Compartilhado entre piccTools (efomento) e o salvamento de CVs (Lattes).
+  // Embute os elementos gráficos do HTML como data: URIs e inlineia as folhas de estilo,
+  // para que a cópia salva continue renderizando sem acesso à rede.
+  // fetchBinary(url) -> Promise<{base64, mime}|null> ; fetchText(url) -> Promise<string|null>
+  // (o chamador fornece essas funções, normalmente encaminhando ao service worker).
+  embedAssets: async function (htmlText, baseUrl, fetchBinary, fetchText) {
+    if (!htmlText) return '';
+
+    const toAbs = (u) => { try { return new URL(u, baseUrl).href; } catch (e) { return null; } };
+    const isFetchable = (u) => !!u && /^https?:/i.test(u);
+    const cache = new Map();
+
+    const asDataUri = async (rawUrl) => {
+      if (!rawUrl || /^\s*(data:|about:|javascript:|#)/i.test(rawUrl)) return null;
+      const url = toAbs(rawUrl.trim());
+      if (!isFetchable(url)) return null;
+      if (cache.has(url)) return cache.get(url);
+      let out = null;
+      try {
+        const res = await fetchBinary(url);
+        if (res && res.base64) {
+          const mime = (res.mime || '').split(';')[0].trim() || 'image/png';
+          out = `data:${mime};base64,${res.base64}`;
+        }
+      } catch (e) { /* asset indisponível: mantém a URL original */ }
+      cache.set(url, out);
+      return out;
+    };
+
+    // ---- 1. Folhas de estilo externas viram <style> inline ----
+    if (typeof fetchText === 'function') {
+      const linkRe = /<link\b[^>]*>/gi;
+      const links = htmlText.match(linkRe) || [];
+      for (const tag of links) {
+        if (!/rel\s*=\s*["']?stylesheet/i.test(tag)) continue;
+        const hrefM = tag.match(/href\s*=\s*["']([^"']+)["']/i);
+        if (!hrefM) continue;
+        const cssUrl = toAbs(hrefM[1]);
+        if (!isFetchable(cssUrl)) continue;
+        let css = null;
+        try { css = await fetchText(cssUrl); } catch (e) {}
+        if (!css) continue;
+        // url(...) relativas dentro do CSS passam a absolutas
+        css = css.replace(/url\(\s*(["']?)([^"')]+)\1\s*\)/gi, (m, q, u) => {
+          if (/^(data:|https?:)/i.test(u)) return m;
+          const abs = (() => { try { return new URL(u, cssUrl).href; } catch (e) { return null; } })();
+          return abs ? `url("${abs}")` : m;
+        });
+        htmlText = htmlText.replace(tag, `<style data-inlined-from="${cssUrl.replace(/"/g, '&quot;')}">\n${css}\n</style>`);
+      }
+    }
+
+    // ---- 2. <img src> vira data: URI ----
+    const srcRe = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])([^"']+)\2/gi;
+    const urls = new Set();
+    let m;
+    while ((m = srcRe.exec(htmlText)) !== null) urls.add(m[3]);
+
+    for (const u of urls) await asDataUri(u);
+
+    htmlText = htmlText.replace(srcRe, (full, prefix, quote, url) => {
+      const abs = toAbs(url.trim());
+      const data = abs ? cache.get(abs) : null;
+      return data ? `${prefix}${quote}${data}${quote}` : full;
+    });
+
+    return htmlText;
+  },
+
+  // options.fallbackStyles = false preserva a aparência original do documento
+  // (usado ao salvar o CV Lattes; os estilos de fallback são pensados para pareceres do CNPq).
+  makeSelfContainedHtml: function(htmlText, baseUrl, options) {
+    const useFallbackStyles = !(options && options.fallbackStyles === false);
+    if (!htmlText) return '';
+    try {
+        let baseOrigin = 'https://chagas.cnpq.br';
+        let baseHref = 'https://chagas.cnpq.br/chagas/';
+        if (baseUrl) {
+            try {
+                const base = new URL(baseUrl);
+                baseOrigin = base.origin;
+                baseHref = `${base.origin}${base.pathname}`;
+            } catch (e) {}
+        }
+
+        // 0. Sanitização: o HTML vem de terceiros (CNPq) e depois é aberto via blob URL
+        // e salvo em disco. Remove scripts, handlers inline e conteúdo embutido ativo,
+        // e trava a execução com uma CSP no próprio documento.
+        htmlText = htmlText
+            // <script>...</script> e <script src=...>
+            .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+            .replace(/<script\b[^>]*\/?>/gi, '')
+            // conteúdo ativo embutido
+            .replace(/<(iframe|frame|object|embed|applet)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+            .replace(/<(iframe|frame|object|embed|applet)\b[^>]*\/?>/gi, '')
+            // handlers de evento inline: onclick="...", onload='...', onerror=...
+            .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '')
+            .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '')
+            .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+            // URLs javascript: em href/src
+            .replace(/(href|src)\s*=\s*"\s*javascript:[^"]*"/gi, '$1="#"')
+            .replace(/(href|src)\s*=\s*'\s*javascript:[^']*'/gi, "$1='#'");
+
+        const cspMeta = `<meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'">`;
+        if (/<head[^>]*>/i.test(htmlText)) {
+            htmlText = htmlText.replace(/(<head[^>]*>)/i, `$1
+${cspMeta}`);
+        } else {
+            htmlText = `${cspMeta}
+${htmlText}`;
+        }
+
+        // 1. Ensure <meta charset="utf-8"> is present so browsers render Latin characters (ç, ã, é) correctly
+        if (/<meta[^>]+charset=/i.test(htmlText)) {
+            htmlText = htmlText.replace(/<meta[^>]+charset=["']?[^\s"'/>]+["']?[^>]*>/gi, '<meta charset="utf-8">');
+        } else if (/<head[^>]*>/i.test(htmlText)) {
+            htmlText = htmlText.replace(/(<head[^>]*>)/i, '$1\n    <meta charset="utf-8">');
+        } else {
+            htmlText = `<meta charset="utf-8">\n${htmlText}`;
+        }
+
+        // 2. Insert <base href="..."> into <head> if missing so relative fonts/assets load
+        if (!/<base\s+/i.test(htmlText)) {
+            const baseTag = `<base href="${baseHref}">`;
+            if (/<head[^>]*>/i.test(htmlText)) {
+                htmlText = htmlText.replace(/(<head[^>]*>)/i, `$1\n    ${baseTag}`);
+            } else {
+                htmlText = `${baseTag}\n${htmlText}`;
+            }
+        }
+
+        // 3. Inject fallback/default styling for CNPq Parecer Ad-Hoc tables, fieldsets, fonts and form fields
+        const fallbackStyles = `
+            <style id="picctools-fallback-styles">
+                html {
+                    background-color: #f4f4f9 !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+                    background-color: #ffffff !important;
+                    color: #2c3e50 !important;
+                    max-width: 1200px !important;
+                    margin: 20px auto !important;
+                    padding: 25px 35px !important;
+                    line-height: 1.6 !important;
+                    border-radius: 8px !important;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
+                    box-sizing: border-box !important;
+                }
+                .container, #main-container, #conteudo, fieldset, form, table.parecer, div.parecer {
+                    background: #ffffff !important;
+                    border: 1px solid #dcdfe6 !important;
+                    border-radius: 8px !important;
+                    padding: 20px 25px !important;
+                    margin-bottom: 25px !important;
+                }
+                fieldset {
+                    border: 1px solid #4A90E2 !important;
+                    border-radius: 8px !important;
+                    margin-top: 15px !important;
+                    margin-bottom: 20px !important;
+                    padding: 15px 20px !important;
+                }
+                legend {
+                    font-weight: bold !important;
+                    color: #1565C0 !important;
+                    padding: 4px 12px !important;
+                    background: #E3F2FD !important;
+                    border-radius: 4px !important;
+                    border: 1px solid #BBDEFB !important;
+                    font-size: 1.05em !important;
+                }
+                h1, h2, h3, h4, .titulo, .subtitulo {
+                    color: #0D47A1 !important;
+                    border-bottom: 2px solid #1976D2 !important;
+                    padding-bottom: 6px !important;
+                    margin-top: 15px !important;
+                    font-family: inherit !important;
+                }
+                table {
+                    width: 100% !important;
+                    border-collapse: collapse !important;
+                    margin: 15px 0 !important;
+                    font-size: 0.95em !important;
+                    background: #ffffff !important;
+                }
+                th, td {
+                    padding: 10px 12px !important;
+                    border: 1px solid #e0e0e0 !important;
+                    text-align: left !important;
+                    vertical-align: top !important;
+                }
+                th {
+                    background-color: #E3F2FD !important;
+                    color: #0D47A1 !important;
+                    font-weight: bold !important;
+                }
+                tr:nth-child(even) td {
+                    background-color: #f9fbfd !important;
+                }
+                .label, label, .campo-label, td.label {
+                    font-weight: bold !important;
+                    color: #1565C0 !important;
+                }
+                .valor, .campo-valor, td.valor {
+                    color: #2c3e50 !important;
+                }
+                input[type="text"], textarea, select {
+                    font-family: inherit !important;
+                    border: 1px solid #ccc !important;
+                    border-radius: 4px !important;
+                    padding: 6px 10px !important;
+                    background: #fdfdfd !important;
+                }
+            </style>
+        `;
+
+        if (/<head[^>]*>/i.test(htmlText)) {
+            if (useFallbackStyles) htmlText = htmlText.replace(/(<\/head>)/i, `${fallbackStyles}\n$1`);
+        } else if (useFallbackStyles) {
+            htmlText = `${fallbackStyles}\n${htmlText}`;
+        }
+
+        // 4. Convert relative CSS stylesheets, icons, fonts, and image attributes (href, src) to absolute URLs
+        htmlText = htmlText.replace(/(href|src)=["']([^"']+)["']/gi, (match, attr, val) => {
+            if (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('data:') || val.startsWith('javascript:')) {
+                return match;
+            }
+            try {
+                const absUrl = new URL(val, baseHref).href;
+                return `${attr}="${absUrl}"`;
+            } catch (e) {
+                return match;
+            }
+        });
+    } catch (e) {
+        console.warn("[JCRLattes] Erro ao preparar HTML autosustentável:", e);
+    }
+    return htmlText;
+
   },
 
   _esc: function(str) {

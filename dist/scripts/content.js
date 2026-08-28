@@ -13,6 +13,9 @@ const observerConfig = {
 
 const SETTINGS_KEY = 'jcr_lattes_settings';
 let jcrTablesState = { publicacoes: false, citacoes: false, orientacoes: false, patentes: false, eventos: false, opcoes: false, graficos: false };
+// Secoes do CV recolhidas pelo usuario (clique no titulo). Chave = id da ancora da secao,
+// que e estavel entre curriculos, entao o estado vale para os proximos CVs abertos.
+let jcrSectionsCollapsed = {};
 
 async function saveSettings() {
   const rankInputVal = parseInt(document.getElementById('target-author-rank-input')?.value);
@@ -30,9 +33,8 @@ async function saveSettings() {
     toggles: {
       disableReport: document.getElementById('toggle-disable-report')?.checked ?? false,
       disableExtraInfo: document.getElementById('toggle-disable-extra-info')?.checked ?? false,
-      identification: document.getElementById('toggle-group-identification')?.checked ?? true,
       tables: jcrTablesState,
-      sections: {},
+      sectionsCollapsed: { ...jcrSectionsCollapsed },
       jcr: {
         high: document.getElementById('toggle-jcr-high')?.checked ?? true,
         mid: document.getElementById('toggle-jcr-mid')?.checked ?? true,
@@ -48,12 +50,6 @@ async function saveSettings() {
       }
     }
   };
-
-  // Capture individual section toggles
-  document.querySelectorAll('input[id^="toggle-section-"]').forEach(cb => {
-    const id = cb.id.replace('toggle-section-', '');
-    settings.toggles.sections[id] = cb.checked;
-  });
 
   return new Promise((resolve) => {
     try {
@@ -230,38 +226,36 @@ function getLattesNameAndLink() {
   // Use textContent for name
   let name = nameElem.textContent.trim();
 
-  // Extract Fellowship (Bolsa) Information
+  // Extract Fellowship (Bolsa) Information from top header badge
   let fellowshipText = '';
   let fellowshipString = '';
   
-  // Usually the second h2.nome or div.nome contains the fellowship
+  // Look exclusively at the second h2.nome or div.nome at the top header of the CV
   const allNames = document.querySelectorAll("h2[class='nome'], div[class='nome']");
   if (allNames.length > 1) {
-    // Check if the second one looks like a fellowship
     const secondElem = allNames[1];
     fellowshipText = secondElem.textContent.trim();
   }
 
   if (fellowshipText) {
-    const fellowshipsDict = {
-      "Produtividade em Pesquisa do CNPq": "PQ",
-      "Produtividade em Desenvolvimento Tecnológico e Extensão Inovadora do CNPq": "DT",
-      "Produtividade Desen. Tec. e Extensão Inovadora do CNPq": "DT"
-    };
-
     let acronim = "";
-    for (const [key, value] of Object.entries(fellowshipsDict)) {
-      if (fellowshipText.includes(key)) {
-        acronim = value;
-        break;
-      }
+    if (fellowshipText.includes("Produtividade em Pesquisa")) {
+      acronim = "PQ";
+    } else if (fellowshipText.includes("Produtividade em Desenvolvimento Tecnológico") || fellowshipText.includes("Desen. Tec.")) {
+      acronim = "DT";
     }
 
     if (acronim) {
-      // Extract Level (e.g. "Nível 1B")
-      const levelMatch = fellowshipText.match(/N[íi]vel\s+([A-Z0-9]+)/i);
-      const level = levelMatch ? levelMatch[1] : "";
-      fellowshipString = level ? `${acronim}-${level}` : acronim;
+      // Level matching: 1A, 1B, 1C, 1D, 2, A, B, C, SR
+      let level = "";
+      const nivelExplicitMatch = fellowshipText.match(/N[íi]vel\s*[:-]?\s*(1A|1B|1C|1D|1|2|3|A|B|C|SR)\b/i);
+      if (nivelExplicitMatch) {
+        level = nivelExplicitMatch[1].toUpperCase();
+      } else {
+        const levelMatch = fellowshipText.match(/\b(1A|1B|1C|1D|1|2|3|A|B|C|SR)\b/i);
+        level = levelMatch ? levelMatch[1].toUpperCase() : "";
+      }
+      fellowshipString = level ? `${acronim} ${level}` : acronim;
     }
   }
 
@@ -299,6 +293,10 @@ async function processLattesPage(nameLink) {
 
   if (saved?.toggles?.tables) {
     jcrTablesState = { ...jcrTablesState, ...saved.toggles.tables };
+  }
+
+  if (saved?.toggles?.sectionsCollapsed) {
+    jcrSectionsCollapsed = { ...saved.toggles.sectionsCollapsed };
   }
 
   if (saved?.colors) {
@@ -370,11 +368,148 @@ async function processLattesPage(nameLink) {
         const maxYear = finalStats.maxYear;
 
         await injectReportTable(finalStats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank);
+        await checkAndUpdateProponenteLattesId(nameLink, finalStats, supervisions, patents, lattesInfo);
+      } else {
+        await checkAndUpdateProponenteLattesId(nameLink, null, supervisions, patents, []);
       }
     } finally {
       hideLoading();
     }
   });
+}
+
+async function checkAndUpdateProponenteLattesId(nameLink, finalStats = null, supervisions = null, patents = null, lattesInfo = []) {
+  if (!nameLink || !nameLink.name || !window.JCRDBTools) return;
+
+  const targetName = nameLink.name.trim();
+  const lattesId = (nameLink.link || '').match(/\b\d{16}\b/)?.[0] || '';
+  const cvBolsa = (nameLink.fellowshipString || '').replace('-', ' ').trim();
+  if (!targetName) return;
+
+  try {
+    const db = (await window.JCRDBTools.getDB(true)) || [];
+
+    let piccCvData = null;
+    if (window.JCRDBTools.currentCvData && window.JCRDBTools.currentCvData.name) {
+      piccCvData = Object.assign({}, window.JCRDBTools.currentCvData);
+    } else if (finalStats && lattesInfo && typeof window.JCRDBTools.extractData === 'function') {
+      window.JCRDBTools.extractData(nameLink, finalStats, lattesInfo, null);
+      if (window.JCRDBTools.currentCvData) {
+        piccCvData = Object.assign({}, window.JCRDBTools.currentCvData);
+      }
+    }
+
+    if (!piccCvData) {
+      piccCvData = {
+        name: targetName,
+        lattesId: lattesId,
+        cvLink: nameLink.link || (lattesId ? `http://lattes.cnpq.br/${lattesId}` : ''),
+        fellowshipString: cvBolsa || (nameLink.fellowshipString || ''),
+        totalPapers: finalStats ? (finalStats.totalPapers || 0) : 0,
+        papersWithJcr: finalStats ? (finalStats.papersWithJcr || 0) : 0,
+        highJcrCount: finalStats ? (finalStats.highJcrCount || 0) : 0,
+        lowJcrCount: finalStats ? (finalStats.lowJcrCount || 0) : 0,
+        firstAuthorCount: finalStats ? (finalStats.firstAuthorCount || 0) : 0,
+        lastAuthorCount: finalStats ? (finalStats.lastAuthorCount || 0) : 0,
+        gcCount: finalStats ? (finalStats.gcCount || 0) : 0,
+        totalPhdOrientations: supervisions ? (supervisions.phdCount || 0) : 0,
+        totalMscOrientations: supervisions ? (supervisions.mscCount || 0) : 0,
+        totalPatents: patents ? (patents.totalCount || 0) : 0,
+        wosHIndex: finalStats ? (finalStats.wosHIndex || 0) : 0,
+        wosCitations: finalStats ? (finalStats.wosCitations || 0) : 0,
+        dateAdded: new Date().toISOString(),
+        publications: [],
+        rawPatents: [],
+        rawEvents: [],
+        supervisions: {}
+      };
+    }
+
+    if (cvBolsa) piccCvData.fellowshipString = cvBolsa;
+    if (lattesId && !piccCvData.lattesId) piccCvData.lattesId = lattesId;
+    if (nameLink.link) piccCvData.cvLink = nameLink.link;
+    piccCvData.hasFullCv = true;
+
+    // Check if matching proposal entry has a frozen cvCongelado URL
+    let frozenUrl = '';
+    db.forEach(entry => {
+      if (entry.proponente && entry.proponente.name && window.JCRDBTools.cvMatches(piccCvData, entry.proponente.name, entry.proponente.lattesId)) {
+        if (entry.proponente.cvCongelado) frozenUrl = entry.proponente.cvCongelado;
+        else if (entry.proponente.cvLink && !entry.proponente.cvLink.includes('lattes.cnpq.br')) frozenUrl = entry.proponente.cvLink;
+      }
+      if (Array.isArray(entry.teamMembers)) {
+        entry.teamMembers.forEach(tm => {
+          if (tm && tm.name && window.JCRDBTools.cvMatches(piccCvData, tm.name, tm.lattesId)) {
+            if (tm.cvCongelado) frozenUrl = tm.cvCongelado;
+            else if (tm.cvLink && !tm.cvLink.includes('lattes.cnpq.br')) frozenUrl = tm.cvLink;
+          }
+        });
+      }
+    });
+    if (frozenUrl) {
+      piccCvData.cvCongelado = frozenUrl;
+    }
+
+    // ALWAYS save full CV object to dedicated piccTools CV DB (jcr_picc_cv:) and general DB (jcr_cv:)
+    if (window.JCRDBTools.savePiccCV) {
+      await window.JCRDBTools.savePiccCV(piccCvData);
+    }
+    if (window.JCRDBTools.saveCurrentCv) {
+      await window.JCRDBTools.saveCurrentCv(true);
+    }
+
+    // Update matching proposal entries with Lattes ID and Fellowship string
+    let updatedEntries = [];
+    db.forEach(entry => {
+      if (entry.isProcesso || entry.processId) {
+        let modified = false;
+
+        // 1. Proponente match
+        if (entry.proponente && entry.proponente.name) {
+          if (window.JCRDBTools.cvMatches({ name: targetName, lattesId }, entry.proponente.name, entry.proponente.lattesId)) {
+            if (lattesId && (!entry.proponente.lattesId || entry.proponente.lattesId !== lattesId)) {
+              entry.proponente.lattesId = lattesId;
+              if (!entry.lattesId) entry.lattesId = lattesId;
+              modified = true;
+            }
+            if (cvBolsa && entry.proponente.bolsa !== cvBolsa) {
+              entry.proponente.bolsa = cvBolsa;
+              modified = true;
+            }
+          }
+        }
+
+        // 2. Team Members match
+        if (Array.isArray(entry.teamMembers)) {
+          entry.teamMembers.forEach(member => {
+            if (member && member.name) {
+              if (window.JCRDBTools.cvMatches({ name: targetName, lattesId }, member.name, member.lattesId)) {
+                if (lattesId && (!member.lattesId || member.lattesId !== lattesId)) {
+                  member.lattesId = lattesId;
+                  modified = true;
+                }
+                if (cvBolsa && member.bolsa !== cvBolsa) {
+                  member.bolsa = cvBolsa;
+                  modified = true;
+                }
+              }
+            }
+          });
+        }
+
+        if (modified) updatedEntries.push(entry);
+      }
+    });
+
+    if (updatedEntries.length > 0) {
+      await window.JCRDBTools.saveCVs(updatedEntries);
+      console.log(`[JCRLattes] Processos do piccTools atualizados no Banco de Dados para: ${targetName}`);
+    }
+
+    console.log(`[JCRLattes] CV completo de ${targetName} salvo com sucesso na base de CVs do piccTools!`, piccCvData);
+  } catch (e) {
+    console.warn('[JCRLattes] Erro ao atualizar CV do piccTools na DB:', e);
+  }
 }
 
 // Annotate and extract journal info form Lattes page
@@ -872,8 +1007,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
         </thead>
         <tbody id="tbody-publicacoes" style="display: ${jcrTablesState.publicacoes ? 'none' : ''};">
           ${window.JCRReportUtils.generateRow(`Total (${minYear} - ${maxYear})`, stats.all)}
-          ${window.JCRReportUtils.generateRow(`5 anos (${startYearRecent} - ${maxYear})`, stats.recent)}
           ${window.JCRReportUtils.generateRow(`10 anos (${startYearLast10} - ${maxYear})`, stats.last10)}
+          ${window.JCRReportUtils.generateRow(`5 anos (${startYearRecent} - ${maxYear})`, stats.recent)}
           ${window.JCRReportUtils.generateRow(`<input type="number" id="custom-year-input" value="${customYears}" min="0" style="width: 40px; padding: 2px; text-align: center;"> ${customYears == 1 || customYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`, stats.custom)}
         </tbody>
       </table>
@@ -930,18 +1065,18 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
              <td style="padding: 8px; text-align: center;">${stats.all.citations.scopus.hIndex}</td>
           </tr>
           <tr style="border-bottom: 1px solid #ddd;">
-             <td style="padding: 8px; text-align: left;">5 anos (${startYearRecent} - ${maxYear})</td>
-             <td style="padding: 8px; text-align: center;">${stats.recent.citations.wos.sum}</td>
-             <td style="padding: 8px; text-align: center;">${stats.recent.citations.wos.hIndex}</td>
-             <td style="padding: 8px; text-align: center;">${stats.recent.citations.scopus.sum}</td>
-             <td style="padding: 8px; text-align: center;">${stats.recent.citations.scopus.hIndex}</td>
-          </tr>
-          <tr style="border-bottom: 1px solid #ddd;">
              <td style="padding: 8px; text-align: left;">10 anos (${startYearLast10} - ${maxYear})</td>
              <td style="padding: 8px; text-align: center;">${stats.last10.citations.wos.sum}</td>
              <td style="padding: 8px; text-align: center;">${stats.last10.citations.wos.hIndex}</td>
              <td style="padding: 8px; text-align: center;">${stats.last10.citations.scopus.sum}</td>
              <td style="padding: 8px; text-align: center;">${stats.last10.citations.scopus.hIndex}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #ddd;">
+             <td style="padding: 8px; text-align: left;">5 anos (${startYearRecent} - ${maxYear})</td>
+             <td style="padding: 8px; text-align: center;">${stats.recent.citations.wos.sum}</td>
+             <td style="padding: 8px; text-align: center;">${stats.recent.citations.wos.hIndex}</td>
+             <td style="padding: 8px; text-align: center;">${stats.recent.citations.scopus.sum}</td>
+             <td style="padding: 8px; text-align: center;">${stats.recent.citations.scopus.hIndex}</td>
           </tr>
           <tr style="border-bottom: 1px solid #ddd;">
              <td style="padding: 8px; text-align: left;">${customYears} ${customYears == 1 || customYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})</td>
@@ -1014,8 +1149,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
                     <td style="padding: 8px; text-align: left;">${escHtml(type)}</td>
                     <td style="padding: 8px; text-align: center;">${inCourseCount}</td>
                     <td style="padding: 8px; text-align: center;"><strong>${concludedCount}</strong></td>
-                    <td style="padding: 8px; text-align: center;">${count5}</td>
                     <td style="padding: 8px; text-align: center;">${count10}</td>
+                    <td style="padding: 8px; text-align: center;">${count5}</td>
                     <td style="padding: 8px; text-align: center;">${countCustom}</td>
                 </tr>
               `;
@@ -1031,8 +1166,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
                     </th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Total de orientações atualmente em curso">Em Andamento</th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Total histórico de orientações concluídas">Concluídas</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Orientações concluídas nos últimos 5 anos">5 Anos</th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Orientações concluídas nos últimos 10 anos">10 Anos</th>
+                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Orientações concluídas nos últimos 5 anos">5 Anos</th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Orientações concluídas nos últimos ${customYears} anos">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
                   </tr>
                 </thead>
@@ -1067,8 +1202,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
         <tr style="border-bottom: 1px solid #ddd;">
           <td style="padding: 8px; text-align: left;">${escHtml(status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.all, status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.last10, status)}</td>
+          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, status)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.custom, status)}</td>
         </tr>
       `;
@@ -1079,8 +1214,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       <tr style="border-bottom: 1px solid #ddd; background-color: ${COLORS.backgroundSubHeader}; font-weight: bold;">
         <td style="padding: 8px; text-align: left;">Total</td>
         <td style="padding: 8px; text-align: center;">${stats.all.patents.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.recent.patents.total}</td>
         <td style="padding: 8px; text-align: center;">${stats.last10.patents.total}</td>
+        <td style="padding: 8px; text-align: center;">${stats.recent.patents.total}</td>
         <td style="padding: 8px; text-align: center;">${stats.custom.patents.total}</td>
       </tr>
     `;
@@ -1094,8 +1229,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
                       <span class="toggle-table-btn" data-target="patentes" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.patentes ? '[+]' : '[-]'}</span> Patentes
                     </th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Total de patentes (todos os anos)">Total (${minYear} - ${maxYear})</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Patentes registradas nos últimos 5 anos">5 Anos (${startYearRecent} - ${maxYear})</th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Patentes registradas nos últimos 10 anos">10 Anos (${startYearLast10} - ${maxYear})</th>
+                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Patentes registradas nos últimos 5 anos">5 Anos (${startYearRecent} - ${maxYear})</th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Patentes registradas nos últimos ${customYears} anos">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'} (${startYearCustom} - ${maxYear})</th>
                   </tr>
                 </thead>
@@ -1120,8 +1255,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
         <tr style="border-bottom: 1px solid #ddd;">
           <td style="padding: 8px; text-align: left;">${escHtml(type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.all, type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.last10, type)}</td>
+          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, type)}</td>
           <td style="padding: 8px; text-align: center;">${getCount(stats.custom, type)}</td>
         </tr>
       `;
@@ -1131,8 +1266,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       <tr style="border-bottom: 1px solid #ddd; background-color: ${COLORS.backgroundSubHeader}; font-weight: bold;">
         <td style="padding: 8px; text-align: left;">Total</td>
         <td style="padding: 8px; text-align: center;">${stats.all.events.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.recent.events.total}</td>
         <td style="padding: 8px; text-align: center;">${stats.last10.events.total}</td>
+        <td style="padding: 8px; text-align: center;">${stats.recent.events.total}</td>
         <td style="padding: 8px; text-align: center;">${stats.custom.events.total}</td>
       </tr>
     `;
@@ -1146,8 +1281,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
                       <span class="toggle-table-btn" data-target="eventos" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.eventos ? '[+]' : '[-]'}</span> Participação em Eventos
                     </th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Total de participações em eventos (todos os anos)">Total (${minYear} - ${maxYear})</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Participações em eventos nos últimos 5 anos">5 Anos (${startYearRecent} - ${maxYear})</th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Participações em eventos nos últimos 10 anos">10 Anos (${startYearLast10} - ${maxYear})</th>
+                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Participações em eventos nos últimos 5 anos">5 Anos (${startYearRecent} - ${maxYear})</th>
                     <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Participações em eventos nos últimos ${customYears} anos">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'} (${startYearCustom} - ${maxYear})</th>
                   </tr>
                 </thead>
@@ -1215,23 +1350,14 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   // --- Section Toggles ---
   const sections = getSections();
   sections.forEach(s => {
-    s.element.style.display = ''; // Reset visibility to match default checked state of toggles
+    s.element.style.display = '';
     if (s.footerElement) s.footerElement.style.display = '';
   });
 
-  // Find the index of the first "Produção" section to determine the split
-  let splitIndex = sections.findIndex(section =>
-    (section.label && section.label.toLowerCase().includes('produção')) ||
-    (section.label && section.label.toLowerCase().includes('produções')) ||
-    (section.id && section.id.toLowerCase().includes('producao'))
-  );
+  // Titulos das secoes viram controles de recolher/expandir (substituem os checkboxes)
+  setupCollapsibleSections(sections);
 
-  if (splitIndex === -1) splitIndex = 0;
-
-  const identificationSections = splitIndex > 0 ? sections.slice(0, splitIndex) : [];
-  const otherSections = splitIndex > -1 ? sections.slice(splitIndex) : sections;
-
-  const togglesHTML = generateSectionToggles(identificationSections, otherSections, targetAuthorRank);
+  const togglesHTML = generateSectionToggles(targetAuthorRank);
 
   // Append toggles to the reportContent
   const toggleContainer = document.createElement('div');
@@ -1334,25 +1460,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
 
 
-    // 1. Identification
-    const identCb = document.getElementById('toggle-group-identification');
-    if (identCb) {
-      identCb.checked = saved.toggles.identification;
-      identificationSections.forEach(section => {
-        section.element.style.display = (isReportHidden || identCb.checked) ? '' : 'none';
-        if (section.footerElement) section.footerElement.style.display = section.element.style.display;
-      });
-    }
-
-    // 2. Sections
-    otherSections.forEach(section => {
-      const cb = document.getElementById(`toggle-section-${section.id}`);
-      if (cb && saved.toggles.sections[section.id] !== undefined) {
-        cb.checked = saved.toggles.sections[section.id];
-        section.element.style.display = (isReportHidden || cb.checked) ? '' : 'none';
-        if (section.footerElement) section.footerElement.style.display = section.element.style.display;
-      }
-    });
+    // (As secoes do CV agora sao recolhidas pelo proprio titulo — ver setupCollapsibleSections)
 
     // 3. JCR Levels
     ['high', 'mid', 'low', 'none'].forEach(level => {
@@ -1408,19 +1516,29 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   refreshPubFilters();
 
   // Table Toggle Listeners
+  // O clique em qualquer ponto do cabecalho colapsa/expande a tabela, nao apenas no [-].
   document.querySelectorAll('.toggle-table-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    const targetId = btn.getAttribute('data-target');
+    // celula do cabecalho (fallback para o proprio icone, se a estrutura mudar)
+    const header = btn.closest('th') || btn.parentElement || btn;
+    header.style.cursor = 'pointer';
+    header.style.userSelect = 'none';
+
+    header.addEventListener('click', (e) => {
+      // nao interfere com os controles que ficam dentro do cabecalho
+      // (ex.: limiares de JCR, caixa "Filtrar", campo de anos)
+      if (e.target !== header && e.target.closest && e.target.closest('input, select, label, a, button')) return;
+
       e.stopPropagation();
-      const targetId = e.target.getAttribute('data-target');
       const tbody = document.getElementById('tbody-' + targetId);
       if (tbody) {
         if (tbody.style.display === 'none') {
           tbody.style.display = '';
-          e.target.innerText = '[-]';
+          btn.innerText = '[-]';
           jcrTablesState[targetId] = false;
         } else {
           tbody.style.display = 'none';
-          e.target.innerText = '[+]';
+          btn.innerText = '[+]';
           jcrTablesState[targetId] = true;
         }
 
@@ -1466,33 +1584,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       const nameSpan = document.getElementById('jcr-report-name');
       if (nameSpan) nameSpan.style.display = isHidden ? 'none' : '';
 
-      if (isHidden) {
-        // Show all sections when report is hidden
-        identificationSections.forEach(s => {
-          s.element.style.display = '';
-          if (s.footerElement) s.footerElement.style.display = '';
-        });
-        otherSections.forEach(s => {
-          s.element.style.display = '';
-          if (s.footerElement) s.footerElement.style.display = '';
-        });
-      } else {
-        // Restore based on individual checkboxes
-        const identCb = document.getElementById('toggle-group-identification');
-        if (identCb) {
-          identificationSections.forEach(s => {
-            s.element.style.display = identCb.checked ? '' : 'none';
-            if (s.footerElement) s.footerElement.style.display = s.element.style.display;
-          });
-        }
-        otherSections.forEach(s => {
-          const cb = document.getElementById(`toggle-section-${s.id}`);
-          if (cb) {
-            s.element.style.display = cb.checked ? '' : 'none';
-            if (s.footerElement) s.footerElement.style.display = s.element.style.display;
-          }
-        });
-      }
+      // As secoes do CV nao dependem mais deste toggle: elas sao recolhidas/expandidas
+      // pelo proprio titulo, e esse estado e do usuario.
 
       refreshPubFilters();
       saveSettings();
@@ -1542,36 +1635,6 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   });
 
 
-
-  // 1. Identificação Group
-  if (identificationSections.length > 0) {
-    const identCheckbox = document.getElementById('toggle-group-identification');
-    if (identCheckbox) {
-      identCheckbox.addEventListener('change', (e) => {
-        const isReportHidden = document.getElementById('toggle-disable-report')?.checked ?? false;
-        const isVisible = e.target.checked || isReportHidden;
-        identificationSections.forEach(section => {
-          section.element.style.display = isVisible ? '' : 'none';
-          if (section.footerElement) section.footerElement.style.display = section.element.style.display;
-        });
-        saveSettings();
-      });
-    }
-  }
-
-  // 2. Other Sections
-  otherSections.forEach(section => {
-    const checkbox = document.getElementById(`toggle-section-${section.id}`);
-    if (checkbox) {
-      checkbox.addEventListener('change', (e) => {
-        const isReportHidden = document.getElementById('toggle-disable-report')?.checked ?? false;
-        const isVisible = e.target.checked || isReportHidden;
-        section.element.style.display = isVisible ? '' : 'none';
-        if (section.footerElement) section.footerElement.style.display = section.element.style.display;
-        saveSettings();
-      });
-    }
-  });
 
   // 3. Unified Publication Filters (JCR Level + Time Span + Author Role)
   function refreshPubFilters(isFiltrarClick = false) {
@@ -1885,7 +1948,148 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       if (pendingJcr.length === 0 && !window.isFetchingRidStats) {
           hideLoading();
       }
+      // Com a pagina estabilizada, guarda uma copia do CV nas pastas das propostas
+      // em que este pesquisador participa (se houver alguma).
+      saveCvToProposalFolders(nameLink);
   }, 2000); // Give it a bit more time to stabilize
+}
+
+// Monta uma copia autossuficiente do CV: remove a interface injetada pela extensao,
+// embute imagens como data: URIs, inlineia as folhas de estilo e neutraliza scripts.
+async function buildStandaloneCvHtml() {
+  const clone = document.documentElement.cloneNode(true);
+  clone.querySelectorAll(
+    '#annotation-alert-div, #jcr-lattes-loader, #jcr-db-tools-mount, #jcr-lattes-extra-info-style, #jcr-private-toast'
+  ).forEach(el => el.remove());
+
+  // A copia salva deve conter o CV COMPLETO: desfaz na copia (nunca na pagina) tudo o
+  // que os filtros da extensao ocultaram — secoes, publicacoes filtradas por JCR/periodo/
+  // autoria e blocos recolhidos pelos separadores de ano.
+  clone.querySelectorAll(
+    'div.title-wrapper, br.clear, .artigo-completo, .jcr-lattes-year-separator, [data-original-display]'
+  ).forEach(el => {
+    if (el.style && el.style.display === 'none') {
+      el.style.display = el.getAttribute('data-original-display') || '';
+    }
+    el.removeAttribute('data-original-display');
+  });
+
+  // Separadores de ano recolhidos passam a aparecer expandidos na copia
+  clone.querySelectorAll('.jcr-lattes-year-separator[data-collapsed="true"]').forEach(sep => {
+    sep.setAttribute('data-collapsed', 'false');
+    const icone = sep.querySelector('.jcr-collapse-icon');
+    if (icone) icone.textContent = '[-]';
+  });
+
+  let html = '<!DOCTYPE html>' + String.fromCharCode(10) + clone.outerHTML;
+
+  // Os assets sao buscados pelo service worker (evita bloqueios de origem cruzada)
+  const viaBackground = (action) => (url) => new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ action, url }, (res) => {
+        if (chrome.runtime.lastError || !res || !res.success) { resolve(null); return; }
+        resolve(action === 'fetch_arraybuffer' ? { base64: res.base64, mime: res.mime } : res.text);
+      });
+    } catch (e) { resolve(null); }
+  });
+
+  const utils = window.JCRReportUtils;
+  if (utils && typeof utils.embedAssets === 'function') {
+    html = await utils.embedAssets(html, location.href, viaBackground('fetch_arraybuffer'), viaBackground('fetch_url'));
+  }
+  if (utils && typeof utils.makeSelfContainedHtml === 'function') {
+    // fallbackStyles: false preserva a aparencia original do curriculo
+    html = utils.makeSelfContainedHtml(html, location.href, { fallbackStyles: false });
+  }
+  return html;
+}
+
+async function saveCvToProposalFolders(nameLink) {
+  if (window.__jcrCvProposalSaveDone) return;
+  const DB = window.JCRDBTools;
+  if (!DB || typeof DB.findProposalsForResearcher !== 'function') return;
+
+  const lattesId = (DB.currentCvData && DB.currentCvData.lattesId) || '';
+  const nome = (nameLink && nameLink.name) || '';
+  if (!lattesId && !nome) return;
+
+  try {
+    const alvos = await DB.findProposalsForResearcher(lattesId, nome);
+    if (!alvos || alvos.length === 0) return;   // nao pertence a nenhuma proposta: nada a fazer
+
+    window.__jcrCvProposalSaveDone = true;
+    const html = await buildStandaloneCvHtml();
+    const res = await DB.saveCvToMatchingProposals(lattesId, nome, html);
+
+    if (res.propostas.length > 0) {
+      DB.showToast(`CV salvo na pasta de ${res.propostas.length} proposta(s): ${res.propostas.join(', ')}`);
+      console.log('[JCRLattes] CV salvo nas propostas:', res.propostas);
+    }
+  } catch (e) {
+    window.__jcrCvProposalSaveDone = false;   // permite nova tentativa
+    console.warn('JCRLattes: falha ao salvar o CV nas pastas das propostas', e);
+  }
+}
+
+// Torna o titulo de cada secao do CV clicavel para recolher/expandir o seu conteudo.
+// Substitui os antigos checkboxes "Mostrar/Ocultar Secoes". O estado e guardado por id de
+// secao (a ancora do Lattes, estavel entre curriculos) e reaplicado ao abrir outros CVs.
+function setupCollapsibleSections(sections) {
+  sections.forEach(section => {
+    const wrapper = section.element;
+    if (!wrapper || wrapper.getAttribute('data-jcr-collapsible') === 'true') return;
+
+    // O cabecalho pode ser <a name><h1></a> ou apenas <h1>. Na secao "Resumo" o <h1> vem
+    // vazio e oculto (ui-hidden), entao injetamos um titulo proprio para haver onde clicar.
+    let headerHost = wrapper.querySelector('a[name]') || wrapper.querySelector('h1, h2, h3');
+    let clickable = headerHost && headerHost.querySelector('h1, h2, h3') || headerHost;
+
+    const semTitulo = !clickable || !clickable.textContent.trim() ||
+                      (clickable.className || '').includes('ui-hidden');
+    if (semTitulo) {
+      const titulo = document.createElement('h1');
+      titulo.className = 'jcr-section-title';
+      titulo.textContent = section.label || 'Resumo';
+      wrapper.insertBefore(titulo, wrapper.firstChild);
+      headerHost = titulo;
+      clickable = titulo;
+    }
+    if (!clickable) return;
+
+    // Conteudo recolhivel: tudo dentro do wrapper, menos o cabecalho e o separador
+    const conteudo = Array.from(wrapper.children).filter(ch =>
+      ch !== headerHost && !headerHost.contains(ch) && !ch.matches('hr.separator'));
+    if (conteudo.length === 0) return;
+
+    const icone = document.createElement('span');
+    icone.className = 'jcr-section-toggle';
+    icone.style.cssText = `display: inline-block; margin-right: 10px; font-size: 0.6em; font-weight: bold; font-family: monospace; vertical-align: middle; letter-spacing: -0.5px; color: ${COLORS.midJcr};`;
+    clickable.insertBefore(icone, clickable.firstChild);
+
+    clickable.style.cursor = 'pointer';
+    clickable.style.userSelect = 'none';
+    clickable.title = 'Clique para recolher/expandir esta secao';
+
+    const aplicar = (recolhido) => {
+      conteudo.forEach(el => { el.style.display = recolhido ? 'none' : ''; });
+      if (section.footerElement) section.footerElement.style.display = recolhido ? 'none' : '';
+      icone.textContent = recolhido ? '[+]' : '[-]';
+    };
+
+    aplicar(jcrSectionsCollapsed[section.id] === true);
+
+    clickable.addEventListener('click', (e) => {
+      // links internos do cabecalho continuam funcionando
+      if (e.target !== clickable && e.target.closest && e.target.closest('a[href], input, button')) return;
+      e.preventDefault();
+      const recolhido = !(jcrSectionsCollapsed[section.id] === true);
+      jcrSectionsCollapsed[section.id] = recolhido;
+      aplicar(recolhido);
+      saveSettings();
+    });
+
+    wrapper.setAttribute('data-jcr-collapsible', 'true');
+  });
 }
 
 function getSections() {
@@ -1945,7 +2149,7 @@ function getSections() {
   return sections;
 }
 
-function generateSectionToggles(identificationSections, otherSections, targetAuthorRank = 1) {
+function generateSectionToggles(targetAuthorRank = 1) {
   let html = `
     <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
       <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
@@ -1960,34 +2164,11 @@ function generateSectionToggles(identificationSections, otherSections, targetAut
           <tr>
             <td style="padding: 0; text-align: left;">
               <div style="padding: 10px; background-color: ${COLORS.backgroundSubHeader}; font-size: 0.9em; color: ${COLORS.footerText};">
-                <div style="margin-bottom: 8px; font-weight: bold;">Mostrar/Ocultar Seções:</div>
-                <div style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
   `;
-
-  // Identification Group Checkbox
-  if (identificationSections.length > 0) {
-    html += `
-      <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-        <input type="checkbox" id="toggle-group-identification" checked style="margin-right: 5px;">
-        Dados gerais
-      </label>
-    `;
-  }
-
-  // Other Sections Checkboxes
-  const otherCheckboxes = otherSections.map(section => `
-    <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-      <input type="checkbox" id="toggle-section-${section.id}" checked style="margin-right: 5px;">
-      ${escHtml(section.label)}
-    </label>
-  `).join('');
-
-  html += otherCheckboxes;
-  html += `</div>`;
 
   // Production Filters Row
   html += `
-      <div style="margin-top: 15px; border-top: 1px solid ${COLORS.border}; padding-top: 10px; display: flex; gap: 30px; flex-wrap: wrap;">
+      <div style="display: flex; gap: 30px; flex-wrap: wrap;">
         
         <!-- Column 1: Period -->
         <div style="flex: 1; min-width: 200px;">

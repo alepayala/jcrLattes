@@ -28,6 +28,7 @@ window.JCRDBTools = {
     reportFiltersCollapsed: false,
     dbPrintOrientation: 'landscape', // melhor padrão para a tabela larga do banco
     dbKey: 'jcr_cv_database', // chave legada (array único); migrada para chaves por CV
+    procKeyPrefix: 'jcr_proc:',
     cvKeyPrefix: 'jcr_cv:',
     settingsKey: 'jcr_private_settings',
     currentCvData: null,
@@ -48,20 +49,242 @@ window.JCRDBTools = {
         return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     },
 
+    normalizeName: function (str) {
+        if (!str) return '';
+        return String(str)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    },
+
     // True se o CV do banco corresponde ao par (name, lattesId).
     // Quando ambos os lados têm ID Lattes, só o ID decide (evita colisão de homônimos);
     // o nome é usado apenas quando um dos lados não tem ID.
-    cvMatches: function (cv, name, lattesId) {
-        if (lattesId && cv.lattesId) return cv.lattesId === lattesId;
-        return !!name && cv.name === name;
+    cvMatches: function (cv, name, lattesId, processId = '') {
+        if (!cv) return false;
+        if (processId && cv.processId && cv.processId === processId) return true;
+        if (lattesId && cv.lattesId && String(cv.lattesId).trim() === String(lattesId).trim()) return true;
+        if (name && cv.name) {
+            const n1 = this.normalizeName(cv.name);
+            const n2 = this.normalizeName(name);
+            if (n1 && n2) {
+                if (n1 === n2 || n1.includes(n2) || n2.includes(n1)) return true;
+                const tokens1 = n1.split(' ').filter(t => t.length > 2);
+                const tokens2 = n2.split(' ').filter(t => t.length > 2);
+                if (tokens1.length >= 2 && tokens2.length >= 2) {
+                    if (tokens1[0] === tokens2[0] && tokens1[tokens1.length - 1] === tokens2[tokens2.length - 1]) return true;
+                }
+            }
+        }
+        if (name && cv.processId && String(cv.processId).trim() === String(name).trim()) return true;
+        return false;
     },
 
     // Chave de armazenamento individual do CV (preferindo o ID Lattes).
-    // Registros de Processo (piccTools) usam chave própria por processo, para não
-    // colidirem com o CV do proponente nem entre si (mesmo proponente, vários processos).
+    // Registros de Processo (piccTools) usam a chave jcr_proc:proc:<processId>
     _cvStorageKey: function (cv) {
-        if (cv.isProcesso && cv.processId) return this.cvKeyPrefix + 'proc:' + cv.processId;
-        return this.cvKeyPrefix + (cv.lattesId ? 'id:' + cv.lattesId : 'nm:' + (cv.name || ''));
+        if (!cv) return (this.cvKeyPrefix || 'jcr_cv:') + 'unknown';
+        if (cv.isProcesso || cv.processId) {
+            const procId = String(cv.processId || cv.customId || cv.lattesId || 'proc');
+            return (this.procKeyPrefix || 'jcr_proc:') + 'proc:' + procId;
+        }
+        return (this.cvKeyPrefix || 'jcr_cv:') + (cv.lattesId ? 'id:' + cv.lattesId : 'nm:' + (cv.name || ''));
+    },
+
+    piccCvPrefix: 'jcr_picc_cv:',
+
+    // Chave de armazenamento dedicada aos CVs do piccTools
+    _piccCvStorageKey: function (cv) {
+        if (!cv) return 'jcr_picc_cv:unknown';
+        if (cv.lattesId) return this.piccCvPrefix + 'id:' + String(cv.lattesId).trim();
+        const name = (cv.name || '').trim().toLowerCase();
+        return this.piccCvPrefix + 'nm:' + name;
+    },
+
+    // Retorna todos os CVs salvos no banco dedicado do piccTools
+    getPiccCVs: function () {
+        return new Promise((resolve) => {
+            if (!chrome.runtime?.id) { resolve([]); return; }
+            chrome.storage.local.get(null, (allItems) => {
+                if (chrome.runtime.lastError || !allItems) { resolve([]); return; }
+                const list = [];
+                Object.keys(allItems).forEach(k => {
+                    if (k.startsWith(this.piccCvPrefix || 'jcr_picc_cv:')) {
+                        list.push(allItems[k]);
+                    }
+                });
+                resolve(list);
+            });
+        });
+    },
+
+    // Retorna true se o registro de CV possui dados completos analisados (publicações, orientações, estatísticas, etc.)
+    // Retorna false se for apenas um registro básico/esqueleto criado ao importar a proposta
+    isFullCv: function (cv) {
+        if (!cv) return false;
+        if (cv.hasFullCv === true) return true;
+        if (cv.hasFullCv === false) return false;
+
+        // Avaliação de fallback para registros existentes criados antes da flag hasFullCv:
+        if (Array.isArray(cv.publications) && cv.publications.length > 0) return true;
+        if (Array.isArray(cv.rawPatents) && cv.rawPatents.length > 0) return true;
+        if (Array.isArray(cv.rawEvents) && cv.rawEvents.length > 0) return true;
+        if ((cv.totalPapers || 0) > 0 || (cv.papersWithJcr || 0) > 0) return true;
+        if ((cv.wosHIndex || 0) > 0 || (cv.wosCitations || 0) > 0) return true;
+        if (cv.supervisions && (
+            (cv.supervisions.phdCount || 0) > 0 ||
+            (cv.supervisions.mscCount || 0) > 0 ||
+            (Array.isArray(cv.supervisions.phdCompleted) && cv.supervisions.phdCompleted.length > 0) ||
+            (Array.isArray(cv.supervisions.mscCompleted) && cv.supervisions.mscCompleted.length > 0)
+        )) return true;
+        if ((cv.totalPhdOrientations || 0) > 0 || (cv.totalMscOrientations || 0) > 0) return true;
+        if (cv.dateAdded && (cv.publications !== undefined || cv.totalPapers !== undefined)) return true;
+
+        return false;
+    },
+
+    // Salva ou atualiza um CV no banco dedicado do piccTools
+    savePiccCV: function (cvData) {
+        return new Promise((resolve, reject) => {
+            if (!chrome.runtime?.id) { resolve(); return; }
+            if (!cvData) { resolve(); return; }
+            if (this.isFullCv(cvData)) {
+                cvData.hasFullCv = true;
+            }
+            const key = this._piccCvStorageKey(cvData);
+            chrome.storage.local.set({ [key]: cvData }, () => {
+                if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                else resolve();
+            });
+        });
+    },
+
+    // ---------------------------------------------------------------------------
+    // Conteúdos pesados das Propostas (PDF em base64, HTML do CV congelado, HTMLs de
+    // pareceres, anexos em base64) ficam FORA do registro da proposta, em chave própria
+    // jcr_proc_blob:<processId>. Motivo: getDB() faz chrome.storage.local.get(null) e
+    // desserializa tudo; com megabytes de base64 embutidos no registro, toda listagem
+    // pagava esse custo. O visualizador carrega esses conteúdos sob demanda.
+    // ---------------------------------------------------------------------------
+    procBlobPrefix: 'jcr_proc_blob:',
+
+    _procBlobKey: function (processId) {
+        return (this.procBlobPrefix || 'jcr_proc_blob:') + String(processId || 'proc');
+    },
+
+    getProcBlobs: function (processId) {
+        return new Promise((resolve) => {
+            if (!chrome.runtime?.id || !processId) { resolve({}); return; }
+            const key = this._procBlobKey(processId);
+            chrome.storage.local.get(key, (result) => {
+                if (chrome.runtime.lastError || !result) { resolve({}); return; }
+                resolve(result[key] || {});
+            });
+        });
+    },
+
+    // Mescla com o que já existe (não perde conteúdos salvos em execuções anteriores)
+    saveProcBlobs: async function (processId, blobs) {
+        if (!chrome.runtime?.id || !processId || !blobs || Object.keys(blobs).length === 0) return;
+        const key = this._procBlobKey(processId);
+        const existing = await this.getProcBlobs(processId);
+        const merged = Object.assign({}, existing, blobs);
+        await new Promise((resolve, reject) => {
+            chrome.storage.local.set({ [key]: merged }, () => {
+                if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                else resolve();
+            });
+        });
+    },
+
+    // Caminho da pasta da proposta nos Downloads (mesma regra usada pelo piccTools)
+    _projectFolderPath: function (proc) {
+        if (!proc) return 'piccData/processo';
+        const processId = proc.processId || proc.customId || 'processo';
+        const propName = (proc.proponente && proc.proponente.name) ? proc.proponente.name : (proc.name || '');
+        const safeProcessId = String(processId).replace(/[\/\?%*:|"<>]/g, '-').trim();
+        const safePropName = String(propName).replace(/[\/\?%*:|"<>]/g, '').trim();
+        return `piccData/${safePropName ? `${safeProcessId} - ${safePropName}` : safeProcessId}`;
+    },
+
+    // Chave do CV de um pesquisador dentro dos blobs da proposta
+    _memberCvBlobKey: function (lattesId, name) {
+        const id = String(lattesId || '').trim();
+        if (id) return 'memberCv_id:' + id;
+        return 'memberCv_nm:' + String(name || '').trim().toLowerCase();
+    },
+
+    // Localiza as propostas em que o pesquisador aparece (proponente ou equipe)
+    findProposalsForResearcher: async function (lattesId, name) {
+        const id = String(lattesId || '').trim();
+        const nm = String(name || '').trim().toLowerCase();
+        if (!id && !nm) return [];
+        const procs = await this.getDB(true);
+        return procs.filter(proc => {
+            const people = [];
+            if (proc.proponente) people.push(proc.proponente);
+            if (Array.isArray(proc.teamMembers)) people.push(...proc.teamMembers);
+            return people.some(p => p && (
+                (id && p.lattesId && String(p.lattesId).trim() === id) ||
+                (nm && p.name && String(p.name).trim().toLowerCase() === nm)
+            ));
+        });
+    },
+
+    // Salva o CV Lattes aberto na pasta de cada proposta em que o pesquisador participa
+    // e guarda uma cópia nos blobs da proposta para a leitura em modo local.
+    saveCvToMatchingProposals: async function (lattesId, name, htmlText) {
+        const resultado = { propostas: [], erro: null };
+        if (!htmlText || (!lattesId && !name)) return resultado;
+        try {
+            const alvos = await this.findProposalsForResearcher(lattesId, name);
+            if (alvos.length === 0) return resultado;
+
+            const safeId = String(lattesId || name || 'cv').replace(/[\/\?%*:|"<>\s]/g, '_');
+            const blobKey = this._memberCvBlobKey(lattesId, name);
+
+            for (const proc of alvos) {
+                const filename = `${this._projectFolderPath(proc)}/curriculo_lattes_${safeId}.html`;
+                try {
+                    chrome.runtime.sendMessage({ action: 'download_data', data: htmlText, filename }, () => {
+                        if (chrome.runtime.lastError) {
+                            console.warn('[JCRLattes] Falha ao salvar CV na pasta da proposta:', chrome.runtime.lastError.message);
+                        }
+                    });
+                } catch (e) {
+                    console.warn('[JCRLattes] Falha ao solicitar download do CV:', e);
+                }
+                await this.saveProcBlobs(proc.processId, { [blobKey]: htmlText });
+                resultado.propostas.push(proc.processId);
+            }
+        } catch (e) {
+            resultado.erro = e.message;
+            console.warn('[JCRLattes] Erro ao salvar CV nas propostas:', e);
+        }
+        return resultado;
+    },
+
+    // Salva vários CVs do piccTools em UMA única escrita no storage.
+    // Usado pelo fluxo em lote do picc, que antes gravava um a um.
+    savePiccCVs: function (cvArray) {
+        return new Promise((resolve, reject) => {
+            if (!chrome.runtime?.id) { resolve(); return; }
+            if (!Array.isArray(cvArray) || cvArray.length === 0) { resolve(); return; }
+            const toSet = {};
+            cvArray.forEach(cv => {
+                if (!cv || !cv.name) return;
+                if (this.isFullCv(cv)) cv.hasFullCv = true;
+                toSet[this._piccCvStorageKey(cv)] = cv;
+            });
+            if (Object.keys(toSet).length === 0) { resolve(); return; }
+            chrome.storage.local.set(toSet, () => {
+                if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                else resolve();
+            });
+        });
     },
 
     // Escapa e valida uma URL para uso em atributo href ('' se não for http/https)
@@ -83,7 +306,10 @@ window.JCRDBTools = {
 
     METRICS_CONFIG: [
         { key: 'name', label: 'Nome', title: 'Nome do Pesquisador (link para o Lattes)' },
+        { key: 'prioridade', label: 'Prioridade', title: 'Prioridade da Proposta (-, 0, 1, 2, 3, 4)', numeric: true },
+        { key: 'faixa', label: 'Faixa', title: 'Faixa da Proposta (ex: A, B, C)', numeric: true },
         { key: 'fellowshipString', label: 'Bolsa', title: 'Bolsa e Nível' },
+        { key: 'instituicaoExecutora', label: 'Executora/Sede', title: 'Instituição Executora/Sede da proposta (extraída do PDF)' },
         { key: 'totalPapers', label: 'Total Artigos', title: 'Total de artigos completos publicados', numeric: true },
         { key: 'papersWithJcr', label: 'Artigos JCR', title: 'Total de artigos com Fator de Impacto (JCR)', numeric: true },
         { key: 'gcCount', label: 'GC (et al)', title: 'Artigos em Grandes Colaborações (et al.)', numeric: true },
@@ -116,7 +342,7 @@ window.JCRDBTools = {
 
         if (this.isUnlocked) {
             try {
-                const db = await this.getDB();
+                const db = await this.getDB(false);
                 const isAlreadyInDb = db.some(cv =>
                     !cv.isProcesso && this.cvMatches(cv, this.currentCvData.name, this.currentCvData.lattesId)
                 );
@@ -248,7 +474,7 @@ window.JCRDBTools = {
         } catch (e) { /* extension context invalidated */ }
     },
 
-    getDB: async function () {
+    getDB: async function (isProcessoOnly = false) {
         const items = await new Promise((resolve) => {
             try {
                 if (!chrome.runtime?.id) { resolve(null); return; }
@@ -262,21 +488,32 @@ window.JCRDBTools = {
         });
         if (!items) return [];
 
+        const cvPrefix = this.cvKeyPrefix || 'jcr_cv:';
+        const procPrefix = this.procKeyPrefix || 'jcr_proc:';
+
         const db = Object.keys(items)
-            .filter(k => k.startsWith(this.cvKeyPrefix))
+            .filter(k => {
+                if (isProcessoOnly) {
+                    return k.startsWith(procPrefix) || k.startsWith(cvPrefix + 'proc:');
+                }
+                return k.startsWith(cvPrefix) && !k.startsWith(cvPrefix + 'proc:');
+            })
             .map(k => items[k])
-            .filter(cv => cv && cv.name);
+            .filter(cv => {
+                if (!cv) return false;
+                const isProc = !!(cv.isProcesso || cv.processId);
+                return isProcessoOnly ? isProc : !isProc;
+            });
 
         // Migração: formato antigo (array único em dbKey) → uma chave por CV.
-        // Cada CV passa a ser gravado isoladamente, evitando que abas concorrentes
-        // sobrescrevam o banco inteiro umas das outras (last-write-wins).
         const legacy = items[this.dbKey];
         if (Array.isArray(legacy)) {
             for (const cv of legacy) {
-                if (!cv || !cv.name) continue;
-                // Dedupe pela chave de armazenamento: preserva Processos (piccTools)
-                // e CVs do mesmo pesquisador como registros distintos.
-                if (!db.some(c => this._cvStorageKey(c) === this._cvStorageKey(cv))) db.push(cv);
+                if (!cv || (!cv.name && !cv.processId)) continue;
+                const isProc = !!(cv.isProcesso || cv.processId);
+                if ((isProcessoOnly && isProc) || (!isProcessoOnly && !isProc)) {
+                    if (!db.some(c => this._cvStorageKey(c) === this._cvStorageKey(cv))) db.push(cv);
+                }
             }
             try {
                 await this.saveCVs(db);
@@ -331,19 +568,63 @@ window.JCRDBTools = {
         });
     },
 
-    removeCVs: function (cvArray) {
-        return new Promise((resolve, reject) => {
-            try {
-                if (!chrome.runtime?.id) { reject(new Error('Extension context invalidated')); return; }
-                const keys = cvArray.map(cv => this._cvStorageKey(cv));
-                if (keys.length === 0) { resolve(); return; }
-                chrome.storage.local.remove(keys, () => {
-                    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-                    else resolve();
-                });
-            } catch (e) {
-                reject(e);
+    // Remove registros do storage.
+    //
+    // Ao excluir uma Proposta (piccTools), remove também os CVs-esqueleto que ela criou no
+    // banco dedicado do picc (jcr_picc_cv:) — mas apenas se nenhuma outra proposta ainda
+    // referenciar aquela pessoa.
+    //
+    // IMPORTANTE: nunca remove chaves do banco principal de CVs (jcr_cv:). Esses registros
+    // podem ter sido analisados no Lattes pelo usuário (publicações, orientações,
+    // estatísticas) e não pertencem à proposta. Havia aqui uma segunda implementação de
+    // removeCVs que fazia exatamente isso; ela era código morto (a chave duplicada no
+    // objeto fazia a versão simples vencer) e foi removida.
+    removeCVs: async function (cvArray) {
+        if (!chrome.runtime?.id) throw new Error('Extension context invalidated');
+        if (!Array.isArray(cvArray) || cvArray.length === 0) return;
+
+        const keys = new Set();
+        const piccCandidates = new Set();
+
+        const peopleOf = (proc) => {
+            const people = [];
+            if (proc && proc.proponente) people.push(proc.proponente);
+            if (proc && Array.isArray(proc.teamMembers)) people.push(...proc.teamMembers);
+            return people.filter(p => p && (p.lattesId || p.name));
+        };
+
+        cvArray.forEach(cv => {
+            if (!cv) return;
+            keys.add(this._cvStorageKey(cv));
+            if (cv._storageKey) keys.add(cv._storageKey);
+            if (cv.isProcesso || cv.processId) {
+                peopleOf(cv).forEach(p => piccCandidates.add(this._piccCvStorageKey(p)));
+                if (cv.processId) keys.add(this._procBlobKey(cv.processId));
             }
+        });
+
+        // Preserva o CV-esqueleto se outra proposta ainda o referencia
+        if (piccCandidates.size > 0) {
+            try {
+                const remaining = (await this.getDB(true)).filter(p => !keys.has(this._cvStorageKey(p)));
+                const stillReferenced = new Set();
+                remaining.forEach(proc => {
+                    peopleOf(proc).forEach(p => stillReferenced.add(this._piccCvStorageKey(p)));
+                });
+                piccCandidates.forEach(k => { if (!stillReferenced.has(k)) keys.add(k); });
+            } catch (e) {
+                console.warn('[JCRLattes] removeCVs: falha ao checar referências restantes; CVs do picc preservados.', e);
+            }
+        }
+
+        const keysArray = Array.from(keys).filter(Boolean);
+        if (keysArray.length === 0) return;
+
+        await new Promise((resolve, reject) => {
+            chrome.storage.local.remove(keysArray, () => {
+                if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                else resolve();
+            });
         });
     },
 
@@ -361,13 +642,64 @@ window.JCRDBTools = {
         return this.saveCVs(dbArray);
     },
 
+    // Helper que verifica se um pesquisador (nome ou lattesId) pertence a alguma proposta do piccTools
+    isPiccProposalMember: async function (name, lattesId = '') {
+        const proposals = await this.getDB(true);
+        if (!Array.isArray(proposals) || proposals.length === 0) return false;
+        
+        const normName = this.normalizeName(name);
+        const cleanId = String(lattesId || '').trim();
+
+        return proposals.some(proc => {
+            if (!proc || (!proc.isProcesso && !proc.processId)) return false;
+
+            // Check proponente
+            if (proc.proponente) {
+                if (cleanId && proc.proponente.lattesId && String(proc.proponente.lattesId).trim() === cleanId) return true;
+                if (normName && proc.proponente.name) {
+                    const normProp = this.normalizeName(proc.proponente.name);
+                    if (normProp && (normProp === normName || normProp.includes(normName) || normName.includes(normProp))) return true;
+                }
+            }
+
+            // Check team members
+            if (Array.isArray(proc.teamMembers)) {
+                return proc.teamMembers.some(tm => {
+                    if (!tm) return false;
+                    if (cleanId && tm.lattesId && String(tm.lattesId).trim() === cleanId) return true;
+                    if (normName && tm.name) {
+                        const normTm = this.normalizeName(tm.name);
+                        return normTm && (normTm === normName || normTm.includes(normName) || normName.includes(normTm));
+                    }
+                    return false;
+                });
+            }
+
+            return false;
+        });
+    },
+
     saveCurrentCV: async function (silent = false) {
         // Ensure we have the latest data before saving
         if (this.lastArgs) {
             this.extractData(this.lastArgs.nameLink, this.lastArgs.stats, this.lastArgs.lattesInfo, this.lastArgs.ridStats);
         }
 
-        const db = await this.getDB();
+        if (!this.currentCvData || !this.currentCvData.name) return;
+
+        // Se o pesquisador pertence a alguma proposta do piccTools, salva EXCLUSIVAMENTE no banco dedicado (jcr_picc_cv:)
+        const isPicc = await this.isPiccProposalMember(this.currentCvData.name, this.currentCvData.lattesId);
+        this.currentCvData.hasFullCv = true;
+
+        if (isPicc) {
+            await this.savePiccCV(this.currentCvData);
+            // Remove do banco de CVs geral se porventura existia lá anteriormente para evitar duplicação
+            await this.removeCVs([this.currentCvData]);
+            if (!silent) this.showToast('CV do piccTools Salvo na Base Dedicada!');
+            return;
+        }
+
+        const db = await this.getDB(false);
         // Ignora registros de Processo (piccTools): o save de um CV do Lattes
         // nunca deve substituir/remover um Processo do mesmo proponente.
         const existing = db.find(cv =>
@@ -432,9 +764,35 @@ window.JCRDBTools = {
                 this.currentCvData.customId = '';
             }
         }
-        // Grava só este CV (chave própria) — abas concorrentes não se sobrescrevem
+        // Grava só este CV no banco de CVs geral (chave própria)
         await this.upsertCV(this.currentCvData, existing);
         if (!silent) this.showToast('CV Salvo no Banco de Dados!');
+    },
+
+    showAlert: function (msg, targetTab = null) {
+        if (targetTab && !targetTab.closed && typeof targetTab.alert === 'function') {
+            targetTab.alert(msg);
+        } else if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+            window.alert(msg);
+        }
+    },
+
+    showConfirm: function (msg, targetTab = null) {
+        if (targetTab && !targetTab.closed && typeof targetTab.confirm === 'function') {
+            return targetTab.confirm(msg);
+        } else if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+            return window.confirm(msg);
+        }
+        return false;
+    },
+
+    showPrompt: function (msg, defaultVal = '', targetTab = null) {
+        if (targetTab && !targetTab.closed && typeof targetTab.prompt === 'function') {
+            return targetTab.prompt(msg, defaultVal);
+        } else if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+            return window.prompt(msg, defaultVal);
+        }
+        return null;
     },
 
     // Abre o relatório individual do CV atualmente exibido na página do Lattes
@@ -443,30 +801,76 @@ window.JCRDBTools = {
             this.extractData(this.lastArgs.nameLink, this.lastArgs.stats, this.lastArgs.lattesInfo, this.lastArgs.ridStats);
         }
         if (!this.currentCvData) {
-            alert('Os dados do CV ainda estão sendo carregados. Tente novamente em instantes.');
+            this.showAlert('Os dados do CV ainda estão sendo carregados. Tente novamente em instantes.');
             return;
         }
         const newTab = window.open('', '_blank');
         if (!newTab) {
-            alert('Por favor, permita pop-ups para abrir o relatório.');
+            this.showAlert('Por favor, permita pop-ups para abrir o relatório.');
             return;
         }
         this.renderCVReport(this.currentCvData, newTab);
     },
 
-    deleteSingleCV: async function (name, lattesId = '') {
-        const db = await this.getDB();
+    deleteSingleCV: async function (name, lattesId = '', isProcessoOnly = false) {
+        const db = await this.getDB(isProcessoOnly);
         const existing = db.find(cv => this.cvMatches(cv, name, lattesId));
         if (existing) {
             await this.removeCVs([existing]);
         }
     },
 
-    clearDB: async function (silent = false) {
-        if (silent || confirm("Tem certeza que deseja apagar todos os CVs salvos?")) {
-            const db = await this.getDB();
-            await this.removeCVs(db);
-            if (!silent) this.showToast('Banco de dados limpo!');
+    clearDB: async function (silent = false, isProcessoOnly = false, targetTab = null) {
+        const confirmMsg = isProcessoOnly 
+            ? "Tem certeza que deseja apagar TODAS as Propostas e CVs salvos do piccTools?" 
+            : "Tem certeza que deseja apagar todos os CVs e Propostas salvas?";
+        if (silent || this.showConfirm(confirmMsg, targetTab)) {
+            const allItems = await new Promise(res => chrome.storage.local.get(null, res)) || {};
+            const cvPrefix = this.cvKeyPrefix || 'jcr_cv:';
+            const procPrefix = this.procKeyPrefix || 'jcr_proc:';
+            const piccCvPrefix = this.piccCvPrefix || 'jcr_picc_cv:';
+            const keysToRemove = new Set();
+
+            Object.keys(allItems).forEach(k => {
+                const val = allItems[k];
+                const isProcKey = k.startsWith(procPrefix) || k.startsWith(cvPrefix + 'proc:');
+                const isPiccCvKey = k.startsWith(piccCvPrefix);
+                const isCvKey = k.startsWith(cvPrefix);
+
+                if (isProcessoOnly) {
+                    if (isProcKey || isPiccCvKey) {
+                        keysToRemove.add(k);
+                    } else if (val && typeof val === 'object') {
+                        if (val.isProcesso || val.processId) keysToRemove.add(k);
+                    }
+                } else {
+                    if (isProcKey || isPiccCvKey || isCvKey) {
+                        keysToRemove.add(k);
+                    } else if (val && typeof val === 'object') {
+                        if (val.isProcesso || val.processId || val.lattesId || val.publications) keysToRemove.add(k);
+                    }
+                }
+            });
+
+            if (allItems[this.dbKey] && Array.isArray(allItems[this.dbKey])) {
+                if (isProcessoOnly) {
+                    const remainingLegacy = allItems[this.dbKey].filter(cv => !(cv.isProcesso || cv.processId));
+                    if (remainingLegacy.length === 0) {
+                        keysToRemove.add(this.dbKey);
+                    } else {
+                        await new Promise(res => chrome.storage.local.set({ [this.dbKey]: remainingLegacy }, res));
+                    }
+                } else {
+                    keysToRemove.add(this.dbKey);
+                }
+            }
+
+            const keysArray = Array.from(keysToRemove);
+            if (keysArray.length > 0) {
+                await new Promise(res => chrome.storage.local.remove(keysArray, res));
+            }
+
+            if (!silent) this.showToast(isProcessoOnly ? 'Banco de Propostas e CVs do piccTools limpo com sucesso!' : 'Banco de Dados de CVs e Propostas limpo com sucesso!');
         }
     },
 
@@ -548,9 +952,76 @@ window.JCRDBTools = {
         return unique;
     },
 
-    viewDB: async function (existingTab = null) {
-        let db = await this.getDB();
-        
+    isCaMemberAuthValid: function () {
+        return new Promise((resolve) => {
+            if (typeof chrome === 'undefined' || !chrome.storage?.local) { resolve(false); return; }
+            chrome.storage.local.get(['jcr_ca_member_auth'], (result) => {
+                if (chrome.runtime?.lastError || !result || !result['jcr_ca_member_auth']) {
+                    resolve(false);
+                    return;
+                }
+                const auth = result['jcr_ca_member_auth'];
+                if (auth && auth.isCaMember === true && auth.validUntil && Date.now() < auth.validUntil) {
+                    resolve(true);
+                } else {
+                    resolve(false);
+                }
+            });
+        });
+    },
+
+    viewDB: async function (existingTab = null, options = null) {
+        if (options !== null && options !== undefined) {
+            if (typeof options === 'boolean') {
+                options = { processOnly: options };
+            }
+            this._activeDbOptions = options;
+        } else {
+            options = this._activeDbOptions || {};
+        }
+
+        const isProcessoOnly = !!(options.processOnly || options.isProcesso);
+
+        if (isProcessoOnly) {
+            const isCaValid = await this.isCaMemberAuthValid();
+            if (!isCaValid) {
+                if (existingTab && !existingTab.closed && typeof existingTab.close === 'function') {
+                    try { existingTab.close(); } catch (e) {}
+                }
+                return;
+            }
+        }
+
+        // Fora da página da extensão (ou seja, chamado de um content script), abre a página
+        // dedicada db.html em vez de um about:blank. Um about:blank aberto por content script
+        // herda a origem do CNPq, que tem zoom próprio no Chrome — daí a tabela aparecer com
+        // tamanho diferente conforme o caminho de abertura. Com origem única (chrome-extension://)
+        // todas as aberturas ficam idênticas e há um só caminho de renderização.
+        const isExtensionPage = typeof location !== 'undefined' && location.protocol === 'chrome-extension:';
+        if (!existingTab && !isExtensionPage) {
+            try {
+                chrome.runtime.sendMessage({
+                    action: 'open_db_page',
+                    view: isProcessoOnly ? 'propostas' : 'cvs'
+                }, (res) => {
+                    const err = chrome.runtime.lastError ? chrome.runtime.lastError.message
+                              : (res && res.success === false ? res.error : null);
+                    if (err) {
+                        console.warn('[JCRLattes] Não foi possível abrir a página do banco:', err);
+                        this.showToast('Não foi possível abrir o banco de dados.', '#c62828');
+                    }
+                });
+            } catch (e) {
+                console.warn('[JCRLattes] Não foi possível abrir a página do banco:', e);
+            }
+            return;
+        }
+
+        let db = await this.getDB(isProcessoOnly);
+        const piccCvRecords = isProcessoOnly ? await this.getPiccCVs() : [];
+        const generalCvRecords = isProcessoOnly ? await this.getDB(false) : [];
+        const allCvRecords = isProcessoOnly ? [...piccCvRecords, ...generalCvRecords] : [];
+
         // Sort data based on current configuration
         db.sort((a, b) => {
             let valA = a[this.sortConfig.key];
@@ -580,16 +1051,19 @@ window.JCRDBTools = {
             }
         }
 
+        const titleText = isProcessoOnly ? 'piccTools - Banco de Propostas' : 'JCR Lattes - Banco de CVs';
+        const headerTitle = isProcessoOnly ? `piccTools - Banco de Propostas (${db.length})` : `JCR Lattes - Banco de CVs (${db.length})`;
+
         // Generate HTML for the table
         let tableHtml = `
             <!DOCTYPE html>
             <html>
             <head>
-                <title>JCR Lattes - Banco de CVs</title>
+                <title>${this._esc(titleText)}</title>
                 <meta charset="utf-8">
                 <style>
                     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f5f5f5; color: #333; }
-                    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #fff; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #fff; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); width: 100%; margin-left: auto; margin-right: auto; box-sizing: border-box; }
                     h1 { margin: 0; color: #1565C0; font-size: 24px; }
                     .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; transition: background 0.2s; }
                     .btn-export { background-color: #2E7D32; color: white; }
@@ -608,7 +1082,8 @@ window.JCRDBTools = {
                     .btn-delete-row:hover { background-color: #FFCDD2; }
                     .btn-export-group { background-color: #E8F5E9; color: #333; padding: 4px 6px; font-size: 14px; margin-right: 5px; border: 1px solid #A5D6A7; border-radius: 4px; }
                     .btn-export-group:hover { background-color: #C8E6C9; }
-                    .table-container { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow-x: auto; }
+                    .group-summary { width: 100%; margin-left: auto; margin-right: auto; box-sizing: border-box; }
+                    .table-container { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow-x: auto; width: 100%; margin-left: auto; margin-right: auto; box-sizing: border-box; }
                     table { width: 100%; border-collapse: collapse; }
                     th, td { padding: 8px 10px; border-bottom: 1px solid #eee; line-height: 1.2; }
                     th { background-color: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; font-size: 0.85em; white-space: normal; vertical-align: bottom; }
@@ -619,6 +1094,8 @@ window.JCRDBTools = {
                     .division-right { border-right: 1px solid #bbb !important; }
                     .rid-link-cell { text-align: center; }
                     .numeric-cell { text-align: center; }
+                    .bolsa-cell { min-width: 95px; white-space: nowrap; text-align: center; }
+                    .executora-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                     tr:hover { background-color: #f9f9f9; }
                     .name-cell { min-width: 150px; }
 
@@ -648,14 +1125,14 @@ window.JCRDBTools = {
             <body>
                 <style id="print-orientation-style">@page { size: ${this.dbPrintOrientation}; }</style>
                 <div class="header">
-                    <h1>JCR Lattes - Banco de CVs (${db.length})</h1>
+                    <h1>${this._esc(headerTitle)}</h1>
                     <div>
-                        <select id="print-orientation-select" title="Orientação da página na impressão" style="padding: 7px; margin-right: 10px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;">
+                        ${isProcessoOnly ? '' : `<select id="print-orientation-select" title="Orientação da página na impressão" style="padding: 7px; margin-right: 10px; border-radius: 4px; border: 1px solid #ccc; background: white; cursor: pointer;">
                             <option value="landscape"${this.dbPrintOrientation === 'landscape' ? ' selected' : ''}>🖨️ Paisagem</option>
                             <option value="portrait"${this.dbPrintOrientation === 'portrait' ? ' selected' : ''}>🖨️ Retrato</option>
-                        </select>
+                        </select>`}
                         <button id="refreshBtn" class="btn btn-refresh">🔄 Atualizar Lista</button>
-                        <button id="exportBtn" class="btn btn-export">📊 Exportar (CSV)</button>
+                        ${isProcessoOnly ? '' : `<button id="exportBtn" class="btn btn-export">📊 Exportar (CSV)</button>`}
                         <button id="exportJsonBtn" class="btn btn-export" style="background-color: #f39c12;">📥 Backup (JSON)</button>
                         <button id="importJsonBtn" class="btn btn-export" style="background-color: #8e44ad;">📤 Restaurar (JSON)</button>
                         <input type="file" id="importJsonInput" style="display:none" accept=".json">
@@ -666,7 +1143,8 @@ window.JCRDBTools = {
         `;
 
         if (db.length === 0) {
-            tableHtml += `<div class="empty-msg">Nenhum CV salvo no banco de dados.</div>`;
+            let emptyMsg = isProcessoOnly ? "Nenhuma Proposta/Processo (piccTools) salva no banco de dados." : "Nenhum CV salvo no banco de dados.";
+            tableHtml += `<div class="empty-msg" style="padding: 20px; text-align: center; color: #777;">${this._esc(emptyMsg)}</div>`;
         } else {
             const uniqueIds = Array.from(new Set(
                 db.flatMap(cv => (cv.customId || '').split(',').map(s => s.trim()).filter(s => s !== ''))
@@ -679,56 +1157,62 @@ window.JCRDBTools = {
                 groupOptions += `<option value="${safeId}">${safeId}</option>`;
             });
 
-            tableHtml += `
-                <div class="group-summary" style="margin-bottom: 20px; padding: 15px; background: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <div>
-                            <strong>Resumo do Grupo:</strong> 
-                            <select id="group-id-select" style="padding: 5px; margin-left: 10px; border-radius: 4px; border: 1px solid #ccc; background: white;">
-                                ${groupOptions}
-                            </select>
+            if (!isProcessoOnly) {
+                tableHtml += `
+                    <div class="group-summary" style="margin-bottom: 20px; padding: 15px; background: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div>
+                                <strong>Resumo do Grupo:</strong> 
+                                <select id="group-id-select" style="padding: 5px; margin-left: 10px; border-radius: 4px; border: 1px solid #ccc; background: white;">
+                                    ${groupOptions}
+                                </select>
+                            </div>
+                            <div id="group-actions-container" style="display: none; align-items: center;">
+                                <button id="group-btn-report" class="btn btn-view-report" title="Relatório do Grupo">📊</button>
+                                <button id="group-btn-export-json" class="btn btn-export-group" title="Salvar JSON deste grupo">📥</button>
+                                <button id="group-btn-rename" class="btn btn-rename-id" title="Renomear ID deste grupo">✏️</button>
+                                <button id="group-btn-clear" class="btn btn-clear-id" title="Limpar este ID de todos os CVs">🧹</button>
+                                <button id="group-btn-delete" class="btn btn-delete-row" title="Excluir todos os CVs deste grupo">🗑️</button>
+                            </div>
                         </div>
-                        <div id="group-actions-container" style="display: none; align-items: center;">
-                            <button id="group-btn-report" class="btn btn-view-report" title="Relatório do Grupo">📊</button>
-                            <button id="group-btn-export-json" class="btn btn-export-group" title="Salvar JSON deste grupo">📥</button>
-                            <button id="group-btn-rename" class="btn btn-rename-id" title="Renomear ID deste grupo">✏️</button>
-                            <button id="group-btn-clear" class="btn btn-clear-id" title="Limpar este ID de todos os CVs">🧹</button>
-                            <button id="group-btn-delete" class="btn btn-delete-row" title="Excluir todos os CVs deste grupo">🗑️</button>
+                        <div id="group-stats-display" style="display: none; padding: 10px; background: #fff; border-radius: 4px; border: 1px solid #eee;">
+                            <table style="width: 100%; text-align: center;">
+                                <tr>
+                                    <th style="background: none; border-bottom: 1px solid #eee; color: #1565C0;">Membros</th>
+                                    <th style="background: none; border-bottom: 1px solid #eee;">Total Artigos</th>
+                                    <th style="background: none; border-bottom: 1px solid #eee;">Artigos JCR</th>
+                                    <th style="background: none; border-bottom: 1px solid #eee;">GC (et al)</th>
+                                    <th style="background: none; border-bottom: 1px solid #eee;">Citações (WoS)</th>
+                                    <th style="background: none; border-bottom: 1px solid #eee;">H-Index (WoS)</th>
+                                    <th style="background: none; border-bottom: 1px solid #eee;">Doutorado</th>
+                                    <th style="background: none; border-bottom: 1px solid #eee;">Mestrado</th>
+                                    <th style="background: none; border-bottom: 1px solid #eee;">Patentes</th>
+                                </tr>
+                                <tr>
+                                    <td id="gstat-membros" style="font-size: 1.2em; font-weight: bold; border: none; color: #1565C0;">0</td>
+                                    <td id="gstat-total" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
+                                    <td id="gstat-jcr" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
+                                    <td id="gstat-gc" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
+                                    <td id="gstat-citacoes" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
+                                    <td id="gstat-hindex" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
+                                    <td id="gstat-doutorado" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
+                                    <td id="gstat-mestrado" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
+                                    <td id="gstat-patentes" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
+                                </tr>
+                            </table>
                         </div>
                     </div>
-                    <div id="group-stats-display" style="display: none; padding: 10px; background: #fff; border-radius: 4px; border: 1px solid #eee;">
-                        <table style="width: 100%; text-align: center;">
-                            <tr>
-                                <th style="background: none; border-bottom: 1px solid #eee; color: #1565C0;">Membros</th>
-                                <th style="background: none; border-bottom: 1px solid #eee;">Total Artigos</th>
-                                <th style="background: none; border-bottom: 1px solid #eee;">Artigos JCR</th>
-                                <th style="background: none; border-bottom: 1px solid #eee;">GC (et al)</th>
-                                <th style="background: none; border-bottom: 1px solid #eee;">Citações (WoS)</th>
-                                <th style="background: none; border-bottom: 1px solid #eee;">H-Index (WoS)</th>
-                                <th style="background: none; border-bottom: 1px solid #eee;">Doutorado</th>
-                                <th style="background: none; border-bottom: 1px solid #eee;">Mestrado</th>
-                                <th style="background: none; border-bottom: 1px solid #eee;">Patentes</th>
-                            </tr>
-                            <tr>
-                                <td id="gstat-membros" style="font-size: 1.2em; font-weight: bold; border: none; color: #1565C0;">0</td>
-                                <td id="gstat-total" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
-                                <td id="gstat-jcr" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
-                                <td id="gstat-gc" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
-                                <td id="gstat-citacoes" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
-                                <td id="gstat-hindex" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
-                                <td id="gstat-doutorado" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
-                                <td id="gstat-mestrado" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
-                                <td id="gstat-patentes" style="font-size: 1.2em; font-weight: bold; border: none;">0</td>
-                            </tr>
-                        </table>
-                    </div>
-                </div>
-            `;
+                `;
+            }
 
             let theadHtml = `<tr>`;
             theadHtml += `<th style="width: 30px; text-align: center;"><input type="checkbox" id="selectAllCheckbox" title="Selecionar Todos"></th>`;
+            const proposalAllowedKeys = ['name', 'prioridade', 'faixa', 'fellowshipString', 'instituicaoExecutora'];
+            const processOnlyKeys = ['prioridade', 'faixa', 'instituicaoExecutora'];
             const targetRank = (this.reportState && this.reportState.targetAuthorRank) ? parseInt(this.reportState.targetAuthorRank) : 1;
             this.METRICS_CONFIG.forEach(m => {
+                if (isProcessoOnly && !proposalAllowedKeys.includes(m.key)) return;
+                if (!isProcessoOnly && processOnlyKeys.includes(m.key)) return;
                 const arrow = this.sortConfig.key === m.key ? (this.sortConfig.ascending ? ' ▲' : ' ▼') : '';
                 let label = m.label;
                 let title = m.title;
@@ -740,6 +1224,8 @@ window.JCRDBTools = {
                 let classes = ['sortable-header'];
                 if (m.division) classes.push('division-left');
                 if (m.numeric) classes.push('numeric-cell');
+                if (m.key === 'fellowshipString') classes.push('bolsa-cell');
+                if (m.key === 'instituicaoExecutora') classes.push('executora-cell');
                 const classAttr = ` class="${classes.join(' ')}"`;
                 
                 if (m.key === 'customId') {
@@ -757,10 +1243,10 @@ window.JCRDBTools = {
             theadHtml += `<th class="division-left" style="font-size: 0.85em; text-align: center; white-space: nowrap;">
                 Ações<br>
                 <div style="margin-top: 4px;">
-                    <button id="bulk-btn-report" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Relatório dos Selecionados">📊</button>
-                    <button id="bulk-btn-clear" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Limpar ID dos Selecionados">🧹</button>
-                    <button id="bulk-btn-delete" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Excluir Selecionados">🗑️</button>
-                    <button id="bulk-btn-open" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Abrir CVs selecionados no Lattes para atualizar">🔄</button>
+                    ${isProcessoOnly ? '' : `<button id="bulk-btn-report" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Relatório dos Selecionados">📊</button>`}
+                    ${isProcessoOnly ? '' : `<button id="bulk-btn-clear" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Limpar ID dos Selecionados">🧹</button>`}
+                    <button id="bulk-btn-delete" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="${isProcessoOnly ? 'Excluir Propostas Selecionadas' : 'Excluir Selecionados'}">🗑️</button>
+                    ${isProcessoOnly ? '' : `<button id="bulk-btn-open" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Abrir CVs selecionados no Lattes para atualizar">🔄</button>`}
                 </div>
             </th></tr>`;
 
@@ -769,16 +1255,94 @@ window.JCRDBTools = {
                 tbodyHtml += `<tr>`;
                 tbodyHtml += `<td style="text-align: center;"><input type="checkbox" class="row-checkbox" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-needs-update="${this.cvNeedsUpdate(cv) ? 'true' : 'false'}"></td>`;
                 this.METRICS_CONFIG.forEach(m => {
+                    if (isProcessoOnly && !proposalAllowedKeys.includes(m.key)) return;
+                    if (!isProcessoOnly && processOnlyKeys.includes(m.key)) return;
                     const val = cv[m.key] !== undefined ? cv[m.key] : '';
                     let classes = [];
                     if (m.division) classes.push('division-left');
                     if (m.numeric) classes.push('numeric-cell');
                     if (m.key === 'name') classes.push('name-cell');
+                    if (m.key === 'fellowshipString') classes.push('bolsa-cell');
+                    if (m.key === 'instituicaoExecutora') classes.push('executora-cell');
                     const classAttr = classes.length > 0 ? ` class="${classes.join(' ')}"` : '';
 
                     if (m.key === 'name') {
-                        const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
-                        tbodyHtml += `<td${classAttr}><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong></td>`;
+                        let nameHtml = '';
+                        if (isProcessoOnly || cv.isProcesso || cv.processId) {
+                            const procId = cv.processId || cv.customId || 'Proposta';
+                            nameHtml = `<strong><a href="javascript:void(0);" class="btn-process-report" data-name="${this._esc(cv.name || '')}" data-processid="${this._esc(cv.processId || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" style="color: #1565C0; text-decoration: none;" title="Abrir Relatório da Proposta">📊 ${this._esc(cv.name || procId)}</a></strong>`;
+                            if (cv.processId) {
+                                nameHtml += ` <span style="background: #E3F2FD; color: #1565C0; border: 1px solid #90CAF9; font-size: 0.75em; padding: 1px 5px; border-radius: 3px; font-weight: normal;" title="Nº do Processo">📁 ${this._esc(cv.processId)}</span>`;
+                            }
+                            if (cv.edital) {
+                                nameHtml += ` <span style="background: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7; font-size: 0.75em; padding: 1px 5px; border-radius: 3px; font-weight: normal; margin-left: 3px;" title="Edital / Chamada">📜 ${this._esc(cv.edital)}</span>`;
+                            }
+                        } else {
+                            const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
+                            nameHtml = `<strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong>`;
+                        }
+                        tbodyHtml += `<td${classAttr}>${nameHtml}</td>`;
+                    } else if (m.key === 'prioridade') {
+                        const currentPrio = cv.prioridade !== undefined && cv.prioridade !== null && cv.prioridade !== '' ? String(cv.prioridade) : '-';
+                        const prioOptions = ['-', '0', '1', '2', '3', '4'].map(opt =>
+                            `<option value="${opt}"${opt === currentPrio ? ' selected' : ''}>${opt}</option>`
+                        ).join('');
+                        tbodyHtml += `<td${classAttr} style="text-align: center;">
+                            <select class="priority-select" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" style="padding: 2px 6px; border: 1px solid #ccc; border-radius: 3px; font-weight: bold; background: white; cursor: pointer;">
+                                ${prioOptions}
+                            </select>
+                        </td>`;
+                    } else if (m.key === 'faixa') {
+                        const currentFaixa = cv.faixa !== undefined && cv.faixa !== null && cv.faixa !== '' ? String(cv.faixa).toUpperCase() : '-';
+                        const badgeHtml = currentFaixa !== '-' 
+                            ? `<span style="background: #FFF3E0; color: #E65100; border: 1px solid #FFE0B2; font-weight: bold; padding: 2px 8px; border-radius: 4px; font-size: 0.85em;">Faixa ${this._esc(currentFaixa)}</span>`
+                            : `<span style="color: #888; font-weight: bold;">-</span>`;
+                        tbodyHtml += `<td${classAttr} style="text-align: center;">${badgeHtml}</td>`;
+                    } else if (m.key === 'fellowshipString') {
+                        const isValid = (s) => s && typeof s === 'string' && s.trim() !== '' && s.trim() !== '-';
+                        let bolsaVal = (cv.proponente && isValid(cv.proponente.bolsa)) ? cv.proponente.bolsa : (isValid(cv.fellowshipString) ? cv.fellowshipString : (isValid(cv.bolsa) ? cv.bolsa : ''));
+                        
+                        if (!isValid(bolsaVal)) {
+                            const propName = cv.name || (cv.proponente && cv.proponente.name);
+                            const propLattes = cv.lattesId || (cv.proponente && cv.proponente.lattesId);
+                            const matchingCv = allCvRecords.find(c => !c.isProcesso && this.cvMatches(c, propName, propLattes));
+                            if (matchingCv && isValid(matchingCv.fellowshipString)) {
+                                bolsaVal = matchingCv.fellowshipString;
+                            } else if (matchingCv && isValid(matchingCv.bolsa)) {
+                                bolsaVal = matchingCv.bolsa;
+                            }
+                        }
+
+                        if (!isValid(bolsaVal) && Array.isArray(cv.teamMembers)) {
+                            const propName = cv.name || (cv.proponente && cv.proponente.name);
+                            const propLattes = cv.lattesId || (cv.proponente && cv.proponente.lattesId);
+                            const tmProp = cv.teamMembers.find(tm => this.cvMatches(tm, propName, propLattes));
+                            if (tmProp && isValid(tmProp.bolsa)) {
+                                bolsaVal = tmProp.bolsa;
+                            } else if (cv.teamMembers.length > 0 && isValid(cv.teamMembers[0].bolsa)) {
+                                const firstTmName = cv.teamMembers[0].name || '';
+                                if (this.cvMatches({ name: firstTmName }, propName, '')) {
+                                    bolsaVal = cv.teamMembers[0].bolsa;
+                                }
+                            }
+                        }
+
+                        const displayBolsa = isValid(bolsaVal) ? String(bolsaVal).replace('-', ' ').trim() : '-';
+                        const badgeHtml = displayBolsa !== '-' 
+                            ? `<span style="background: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7; font-weight: bold; padding: 3px 10px; border-radius: 4px; font-size: 0.85em; display: inline-block; white-space: nowrap;">${this._esc(displayBolsa)}</span>`
+                            : `<span style="color: #888; font-weight: bold;">-</span>`;
+                        tbodyHtml += `<td${classAttr} style="text-align: center; white-space: nowrap; min-width: 95px;">${badgeHtml}</td>`;
+                    } else if (m.key === 'instituicaoExecutora') {
+                        // Abrevia apenas na exibição da tabela (o valor salvo continua completo,
+                        // assim como o tooltip e o cabeçalho do relatório).
+                        const execVal = val ? String(val) : '';
+                        const execShort = execVal
+                            .replace(/,\s*Brasil\.?\s*$/i, '')
+                            .replace(/\bUniversidade\b/gi, 'Univ.')
+                            .replace(/\bFederal\b/gi, 'Fed.')
+                            .replace(/\bInstituto\b/gi, 'Inst.')
+                            .trim();
+                        tbodyHtml += `<td${classAttr}${execVal ? ` title="${this._esc(execVal)}"` : ''}>${execVal ? this._esc(execShort) : '<span style="color:#999;">-</span>'}</td>`;
                     } else if (m.key === 'firstAuthorCount') {
                         let count = 0;
                         if (cv.publications && Array.isArray(cv.publications)) {
@@ -813,12 +1377,12 @@ window.JCRDBTools = {
                         tbodyHtml += `<td${classAttr}>${this._esc(String(val))}</td>`;
                     }
                 });
-                const needsUpdate = this.cvNeedsUpdate(cv);
-                tbodyHtml += `<td class="division-left" style="white-space: nowrap;">
-                    <button class="btn btn-view-report" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Relatório">📊</button>
-                    <button class="btn btn-clear-id" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Limpar ID">🧹</button>
-                    <button class="btn btn-delete-row" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Excluir">🗑️</button>
-                    <button class="btn btn-open-cv" data-lattesid="${this._esc(cv.lattesId || '')}" title="${needsUpdate ? 'CV desatualizado: abrir no Lattes para atualizar' : 'Abrir no Lattes'}">${needsUpdate ? '⚠️' : '🔄'}</button>
+                const isProc = isProcessoOnly || cv.isProcesso || cv.processId;
+                tbodyHtml += `<td class="division-left" style="white-space: nowrap;${isProcessoOnly ? ' text-align: center;' : ''}">
+                    <button class="btn btn-view-report" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" title="${isProc ? 'Relatório da Proposta' : 'Relatório do CV'}">📊</button>
+                    ${isProc ? '' : `<button class="btn btn-clear-id" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Limpar ID">🧹</button>`}
+                    <button class="btn btn-delete-row" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" title="Excluir">🗑️</button>
+                    ${cv.lattesId ? `<button class="btn btn-open-cv" data-lattesid="${this._esc(cv.lattesId || '')}" title="Abrir Lattes do Proponente">🔄</button>` : ''}
                 </td></tr>`;
             });
 
@@ -848,14 +1412,14 @@ window.JCRDBTools = {
         const exportBtn = newTab.document.getElementById('exportBtn');
         if (exportBtn) {
             exportBtn.addEventListener('click', () => {
-                this.exportCSV();
+                this.exportCSV(newTab);
             });
         }
 
         const exportJsonBtn = newTab.document.getElementById('exportJsonBtn');
         if (exportJsonBtn) {
             exportJsonBtn.addEventListener('click', () => {
-                this.exportJSON();
+                this.exportJSON(newTab, isProcessoOnly);
             });
         }
 
@@ -868,8 +1432,8 @@ window.JCRDBTools = {
             importJsonInput.addEventListener('change', (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    this.importJSON(file).then(() => {
-                        this.viewDB(newTab);
+                    this.importJSON(file, newTab, isProcessoOnly).then(() => {
+                        this.viewDB(newTab, { processOnly: isProcessoOnly });
                     });
                 }
             });
@@ -878,7 +1442,7 @@ window.JCRDBTools = {
         const refreshBtn = newTab.document.getElementById('refreshBtn');
         if (refreshBtn) {
             refreshBtn.addEventListener('click', () => {
-                this.viewDB(newTab);
+                this.viewDB(newTab, { processOnly: isProcessoOnly });
             });
         }
 
@@ -897,11 +1461,9 @@ window.JCRDBTools = {
         const clearBtn = newTab.document.getElementById('clearBtn');
         if (clearBtn) {
             clearBtn.addEventListener('click', () => {
-                if (newTab.confirm("Tem certeza que deseja apagar todos os CVs salvos?")) {
-                    this.clearDB(true).then(() => {
-                        this.viewDB(newTab);
-                    });
-                }
+                this.clearDB(false, isProcessoOnly, newTab).then(() => {
+                    this.viewDB(newTab, { processOnly: isProcessoOnly });
+                });
             });
         }
 
@@ -910,9 +1472,12 @@ window.JCRDBTools = {
             btn.addEventListener('click', (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
                 const lattesId = e.currentTarget.getAttribute('data-lattesid');
-                if (newTab.confirm(`Tem certeza que deseja apagar o CV de ${name}?`)) {
-                    this.deleteSingleCV(name, lattesId).then(() => {
-                        this.viewDB(newTab);
+                const confirmMsg = isProcessoOnly 
+                    ? `Tem certeza que deseja apagar a proposta de ${name}?` 
+                    : `Tem certeza que deseja apagar o CV de ${name}?`;
+                if (newTab.confirm(confirmMsg)) {
+                    this.deleteSingleCV(name, lattesId, isProcessoOnly).then(() => {
+                        this.viewDB(newTab, { processOnly: isProcessoOnly });
                     });
                 }
             });
@@ -954,7 +1519,7 @@ window.JCRDBTools = {
         const findCvIndex = (dbArr, name, lattesId) => dbArr.findIndex(cv => this.cvMatches(cv, name, lattesId));
 
         const updateCustomId = async (name, lattesId, newValue, inputEl) => {
-            const freshDb = await this.getDB();
+            const freshDb = await this.getDB(isProcessoOnly);
             const cvIndex = findCvIndex(freshDb, name, lattesId);
             if (cvIndex >= 0) {
                 let finalIds = newValue.split(',').map(s => s.trim()).filter(s => s !== '');
@@ -1001,6 +1566,28 @@ window.JCRDBTools = {
                         inputEl.value = finalValue;
                         await updateCustomId(name, lattesId, finalValue, inputEl);
                     }
+                }
+            });
+        });
+
+        const prioritySelects = newTab.document.querySelectorAll('.priority-select');
+        prioritySelects.forEach(select => {
+            select.addEventListener('change', async (e) => {
+                const newPrio = e.currentTarget.value;
+                const name = e.currentTarget.getAttribute('data-name');
+                const lattesId = e.currentTarget.getAttribute('data-lattesid');
+                const procId = e.currentTarget.getAttribute('data-processid');
+
+                const freshDb = await this.getDB(isProcessoOnly);
+                const cvIndex = freshDb.findIndex(cv => this.cvMatches(cv, name, lattesId, procId));
+                if (cvIndex >= 0) {
+                    freshDb[cvIndex].prioridade = newPrio;
+                    await this.saveCVs([freshDb[cvIndex]]);
+
+                    const localIndex = db.findIndex(cv => this.cvMatches(cv, name, lattesId, procId));
+                    if (localIndex >= 0) db[localIndex].prioridade = newPrio;
+
+                    this.showToast(`Prioridade de "${name || procId}" alterada para "${newPrio}"`, '#2E7D32');
                 }
             });
         });
@@ -1053,7 +1640,7 @@ window.JCRDBTools = {
                 return;
             }
 
-            const freshDb = await this.getDB();
+            const freshDb = await this.getDB(isProcessoOnly);
             const modifiedCvs = [];
 
             selected.forEach(({ name, lattesId }) => {
@@ -1078,7 +1665,7 @@ window.JCRDBTools = {
 
             if (modifiedCvs.length > 0) {
                 await this.saveCVs(modifiedCvs);
-                this.viewDB(newTab);
+                this.viewDB(newTab, { processOnly: isProcessoOnly });
             } else {
                 if (inputEl) inputEl.value = '';
             }
@@ -1132,7 +1719,7 @@ window.JCRDBTools = {
                 if (selected.length === 0) return;
 
                 if (newTab.confirm(`Tem certeza que deseja limpar o ID de ${selected.length} CV(s)?`)) {
-                    const freshDb = await this.getDB();
+                    const freshDb = await this.getDB(isProcessoOnly);
                     const modifiedCvs = [];
                     selected.forEach(({ name, lattesId }) => {
                         const cvIndex = findCvIndex(freshDb, name, lattesId);
@@ -1142,7 +1729,7 @@ window.JCRDBTools = {
                         }
                     });
                     await this.saveCVs(modifiedCvs);
-                    this.viewDB(newTab);
+                    this.viewDB(newTab, { processOnly: isProcessoOnly });
                 }
             });
         }
@@ -1154,10 +1741,10 @@ window.JCRDBTools = {
                 if (selected.length === 0) return;
 
                 if (newTab.confirm(`Tem certeza que deseja EXCLUIR ${selected.length} CV(s) do banco de dados? Esta ação não pode ser desfeita.`)) {
-                    const freshDb = await this.getDB();
+                    const freshDb = await this.getDB(isProcessoOnly);
                     const toRemove = freshDb.filter(cv => selected.some(s => this.cvMatches(cv, s.name, s.lattesId)));
                     await this.removeCVs(toRemove);
-                    this.viewDB(newTab);
+                    this.viewDB(newTab, { processOnly: isProcessoOnly });
                 }
             });
         }
@@ -1192,26 +1779,69 @@ window.JCRDBTools = {
             btn.addEventListener('click', async (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
                 const lattesId = e.currentTarget.getAttribute('data-lattesid');
-                const freshDb = await this.getDB();
+                const freshDb = await this.getDB(isProcessoOnly);
                 const cvIndex = findCvIndex(freshDb, name, lattesId);
                 if (cvIndex >= 0) {
                     freshDb[cvIndex].customId = '';
                     await this.saveCVs([freshDb[cvIndex]]);
-                    this.viewDB(newTab);
+                    this.viewDB(newTab, { processOnly: isProcessoOnly });
                 }
             });
         });
 
-        const viewReportBtns = newTab.document.querySelectorAll('.btn-view-report');
-        viewReportBtns.forEach(btn => {
-            btn.addEventListener('click', (e) => {
+        const deleteRowBtns = newTab.document.querySelectorAll('.btn-delete-row');
+        deleteRowBtns.forEach(btn => {
+            btn.addEventListener('click', async (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
                 const lattesId = e.currentTarget.getAttribute('data-lattesid');
-                if (!name) return;
-                const cvData = db.find(cv => this.cvMatches(cv, name, lattesId));
-                if (cvData) {
-                    this.renderCVReport(cvData, newTab, db);
+                const processId = e.currentTarget.getAttribute('data-processid');
+                const itemLabel = processId || name || 'este registro';
+
+                if (newTab.confirm(`Tem certeza que deseja EXCLUIR "${itemLabel}" do banco de dados?`)) {
+                    const freshDb = await this.getDB(isProcessoOnly);
+                    const target = freshDb.find(cv => (processId && cv.processId === processId) || this.cvMatches(cv, name, lattesId, processId));
+                    if (target) {
+                        await this.removeCVs([target]);
+                        this.viewDB(newTab, { processOnly: isProcessoOnly });
+                    }
                 }
+            });
+        });
+
+        const handleOpenReport = (btn) => {
+            const name = btn.getAttribute('data-name');
+            const lattesId = btn.getAttribute('data-lattesid');
+            const processId = btn.getAttribute('data-processid');
+            
+            const target = db.find(cv => 
+                (processId && cv.processId === processId) || 
+                this.cvMatches(cv, name, lattesId, processId)
+            );
+
+            if (target) {
+                if (isProcessoOnly || target.isProcesso || target.processId) {
+                    this.renderProcessReport(target, newTab, db);
+                } else {
+                    this.renderCVReport(target, newTab, db);
+                }
+            }
+        };
+
+        const processReportBtns = newTab.document.querySelectorAll('.btn-process-report');
+        processReportBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleOpenReport(e.currentTarget);
+            });
+        });
+
+        const viewReportBtns = newTab.document.querySelectorAll('tbody .btn-view-report');
+        viewReportBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleOpenReport(e.currentTarget);
             });
         });
 
@@ -1226,7 +1856,7 @@ window.JCRDBTools = {
                     this.sortConfig.key = key;
                     this.sortConfig.ascending = true;
                 }
-                this.viewDB(newTab);
+                this.viewDB(newTab, { processOnly: isProcessoOnly });
             });
         });
 
@@ -1475,10 +2105,152 @@ window.JCRDBTools = {
                         return ids.includes(groupId);
                     });
                     await this.removeCVs(toRemove);
-                    this.viewDB(newTab);
                 }
             });
         }
+    },
+
+    renderProcessReport: async function(processData, newTab, sortedDb = null) {
+        if (!processData || !newTab) return;
+
+        const prop = processData.proponente || {};
+        const proponenteName = prop.name || processData.name || 'Proponente';
+
+        const safeProcessId = (processData.processId || 'projeto').replace(/[\/\\?%*:|"<>]/g, '-').trim();
+        const safePropName = proponenteName.replace(/[\/\\?%*:|"<>]/g, '').trim();
+
+        const folderPath = safePropName ? `piccData/${safeProcessId} - ${safePropName}` : `piccData/${safeProcessId}`;
+        const uf = prop.uf || '-';
+        const inst = prop.instituicao || '-';
+
+        // Fetch all individual CV entries in general DB and dedicated piccTools DB
+        const allDbCvs = await this.getDB(false);
+        const piccCvs = await this.getPiccCVs();
+        const combinedCvs = [...piccCvs, ...allDbCvs];
+
+        // 1. Team Members Structure
+        let teamMembers = [];
+        teamMembers.push({
+            name: proponenteName,
+            role: 'Proponente / Coordenador',
+            formacao: prop.formacao || '',
+            bolsa: prop.bolsa || '-',
+            instituicao: inst,
+            lattesId: processData.lattesId || prop.lattesId || '',
+            cvLink: prop.cvLink || ''
+        });
+
+        if (Array.isArray(processData.teamMembers)) {
+            processData.teamMembers.forEach(tm => {
+                if (tm && tm.name && !teamMembers.some(m => m.name.toLowerCase() === tm.name.toLowerCase())) {
+                    teamMembers.push({
+                        name: tm.name,
+                        role: tm.categoria || tm.role || 'Membro da Equipe',
+                        formacao: tm.formacao || '',
+                        bolsa: tm.bolsa || '-',
+                        instituicao: tm.instituicao || '-',
+                        lattesId: tm.lattesId || '',
+                        cvLink: tm.cvLink || ''
+                    });
+                }
+            });
+        }
+
+        // Check which team members exist in the DB with full parsed CV data
+        const excludedCvKeys = Array.isArray(processData.excludedCvKeys) ? processData.excludedCvKeys : [];
+        let foundGroupCvs = [];
+
+        // Apenas seleciona os CVs que entram no consolidado. A tabela da equipe é montada
+        // em renderCVReport(); a versão que existia aqui era atribuída e nunca usada.
+        teamMembers.forEach((member) => {
+            const memberCv = combinedCvs.find(cv => !cv.isProcesso && this.cvMatches(cv, member.name, member.lattesId));
+            const hasFullCvData = !!(memberCv && this.isFullCv(memberCv));
+            
+            const memberKey = member.lattesId || member.name;
+            const isExcluded = excludedCvKeys.includes(memberKey) || excludedCvKeys.includes(member.name);
+            const isIncluded = !isExcluded;
+
+            if (hasFullCvData && memberCv && isIncluded) {
+                foundGroupCvs.push(memberCv);
+            }
+        });
+
+
+        // Build Group Statistics and full groupCvData for team members present in DB
+        let uniquePubs = [];
+        let uniquePatents = [];
+        let uniqueEvents = [];
+        let uniqueSupervisions = [];
+        let groupConcluded = {};
+        let groupInCourse = {};
+
+        if (foundGroupCvs.length > 0) {
+            foundGroupCvs.forEach(cv => {
+                if (Array.isArray(cv.publications)) {
+                    cv.publications.forEach(p => {
+                        const pTitle = (p.paperTitle || p.title || '').trim().toLowerCase();
+                        const pDoi = (p.doi || '').trim().toLowerCase();
+                        const exists = uniquePubs.some(existing => {
+                            const exDoi = (existing.doi || '').trim().toLowerCase();
+                            if (exDoi && pDoi && exDoi === pDoi) return true;
+                            const exTitle = (existing.paperTitle || existing.title || '').trim().toLowerCase();
+                            return exTitle && pTitle && exTitle === pTitle;
+                        });
+                        if (!exists) uniquePubs.push(p);
+                    });
+                }
+                if (Array.isArray(cv.rawPatents)) {
+                    cv.rawPatents.forEach(pat => {
+                        if (!uniquePatents.some(existing => existing.title && pat.title && existing.title.toLowerCase() === pat.title.toLowerCase())) {
+                            uniquePatents.push(pat);
+                        }
+                    });
+                }
+                if (Array.isArray(cv.rawEvents)) {
+                    cv.rawEvents.forEach(ev => {
+                        if (!uniqueEvents.some(existing => existing.name && ev.name && existing.name.toLowerCase() === ev.name.toLowerCase())) {
+                            uniqueEvents.push(ev);
+                        }
+                    });
+                }
+                if (cv.supervisions) {
+                    const rawSup = Array.isArray(cv.supervisions.raw) ? cv.supervisions.raw : (Array.isArray(cv.supervisions) ? cv.supervisions : []);
+                    rawSup.forEach(s => {
+                        uniqueSupervisions.push(s);
+                        const cat = s.category || 'Outras';
+                        if (s.status === 'Concluída') {
+                            if (!groupConcluded[cat]) groupConcluded[cat] = [];
+                            if (s.year && !isNaN(s.year)) groupConcluded[cat].push(parseInt(s.year));
+                        } else if (s.status === 'Em andamento') {
+                            groupInCourse[cat] = (groupInCourse[cat] || 0) + 1;
+                        }
+                    });
+                }
+            });
+        }
+
+        const groupCvData = {
+            name: `Equipe da Proposta ${processData.processId || ''} (${foundGroupCvs.length} membros)`,
+            lattesId: '',
+            dateAdded: new Date().toISOString(),
+            publications: uniquePubs,
+            rawPatents: uniquePatents,
+            rawEvents: uniqueEvents,
+            supervisions: {
+                raw: uniqueSupervisions,
+                inCourse: groupInCourse,
+                concluded: groupConcluded
+            },
+            declaredCitations: null,
+            ridStats: null,
+            researcherIdLink: null,
+            highJcr: 7.0,
+            lowJcr: 1.5,
+            groupMembers: foundGroupCvs,
+            allTeamCvs: combinedCvs
+        };
+
+        return this.renderCVReport(groupCvData, newTab, sortedDb, processData);
     },
 
     renderCVReport: function(cvData, newTab, sortedDb = null, parentGroupData = null) {
@@ -1487,6 +2259,304 @@ window.JCRDBTools = {
         const rawEvents = cvData.rawEvents || [];
         const supervisions = cvData.supervisions || {};
         const declaredCitations = cvData.declaredCitations || null;
+
+        // Process entry metadata if called from renderProcessReport
+        let projectHeaderHtml = '';
+        let reviewsHtml = '';
+        let hasGroupCvs = true;
+        if (parentGroupData && (parentGroupData.processId || parentGroupData.isProcesso)) {
+            const proc = parentGroupData;
+            const prop = proc.proponente || {};
+            const proponenteName = prop.name || proc.name || 'Proponente';
+            const safeProcessId = (proc.processId || 'projeto').replace(/[\/\\?%*:|"<>]/g, '-').trim();
+            const safePropName = proponenteName.replace(/[\/\\?%*:|"<>]/g, '').trim();
+            const folderPath = safePropName ? `piccData/${safeProcessId} - ${safePropName}` : `piccData/${safeProcessId}`;
+            const inst = prop.instituicao || '-';
+
+            // Navigation buttons for projects
+            let procNavHTML = '';
+            if (sortedDb && sortedDb.length > 1) {
+                const curIdx = sortedDb.findIndex(p => p.processId === proc.processId);
+                if (curIdx !== -1) {
+                    const prevIdx = curIdx > 0 ? curIdx - 1 : sortedDb.length - 1;
+                    const nextIdx = curIdx < sortedDb.length - 1 ? curIdx + 1 : 0;
+                    const prevP = sortedDb[prevIdx];
+                    const nextP = sortedDb[nextIdx];
+                    procNavHTML = `
+                        <button id="btn-prev-proc" data-processid="${this._esc(prevP.processId)}" style="padding: 8px 14px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;" title="Proposta Anterior: ${this._esc(prevP.processId)}">⬅️ Anterior</button>
+                        <button id="btn-next-proc" data-processid="${this._esc(nextP.processId)}" style="padding: 8px 14px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;" title="Próxima Proposta: ${this._esc(nextP.processId)}">Próxima ➡️</button>
+                    `;
+                }
+            }
+
+            // Documents Card
+            let filesHtml = `
+                <div style="background: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+                    <h3 style="margin-top: 0; color: #2E7D32; font-size: 1.1em; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                        <span>📁 Documentos e Arquivos da Proposta</span>
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <div style="display: flex; align-items: center; gap: 8px; background: #ffffff; border: 1px solid #A5D6A7; padding: 4px 12px; border-radius: 20px; font-size: 0.85em; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                                <span style="font-weight: bold; color: #1B5E20;">Modo de Leitura:</span>
+                                <label style="cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: bold; color: #2E7D32;" title="Abrir usando os links diretos da Web / CNPq">
+                                    <input type="radio" name="doc-source-mode" value="online" checked style="cursor: pointer; accent-color: #2E7D32;"> 🌐 On-line
+                                </label>
+                                <label style="cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: bold; color: #1565C0;" title="Abrir usando as cópias salvas no backup local">
+                                    <input type="radio" name="doc-source-mode" value="offline" style="cursor: pointer; accent-color: #1565C0;"> 📂 Backup Local
+                                </label>
+                            </div>
+                            <span style="font-size: 0.85em; font-weight: normal; background: #C8E6C9; color: #1B5E20; padding: 4px 10px; border-radius: 4px;">
+                                📂 Pasta Local: <button id="btn-open-project-folder" data-folder="${this._esc(folderPath)}" style="background: none; border: none; color: #1B5E20; font-weight: bold; text-decoration: underline; cursor: pointer; padding: 0; font-size: 1em;" title="Clique para abrir esta pasta no Gerenciador de Arquivos">Downloads/${this._esc(folderPath)}/</button>
+                            </span>
+                        </div>
+                    </h3>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px;">
+                        ${(() => {
+                            const pdfOnlineUrl = proc.pdfLink || '';
+                            const onlineLabel = '📄 Proposta';
+                            const offlineLabel = `📄 proposta_${safeProcessId}.pdf`;
+                            return `<button id="btn-doc-proposta" class="btn-doc-item" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(pdfOnlineUrl)}" style="background: #D32F2F; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(onlineLabel)}">${this._esc(onlineLabel)}</button>`;
+                        })()}
+
+                        ${(() => {
+                            const congeladoUrl = prop.cvCongelado || proc.cvCongelado || (prop.cvLink && !prop.cvLink.includes('lattes.cnpq.br') ? prop.cvLink : '');
+                            const safeLattesId = (prop.lattesId || proc.lattesId || 'proponente');
+                            if (proc.cvHtml || congeladoUrl) {
+                                const onlineLabel = '❄️ CV Lattes (Congelado)';
+                                const offlineLabel = `❄️ curriculo_${safeLattesId}.html`;
+                                return `<button id="btn-doc-cv-congelado" class="btn-doc-item" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(congeladoUrl)}" style="background: #1976D2; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(onlineLabel)}">${this._esc(onlineLabel)}</button>`;
+                            }
+                            return '';
+                        })()}
+
+                        ${(() => {
+                            let html = '';
+                            const reviewsList = (Array.isArray(proc.reviews) && proc.reviews.length > 0)
+                                ? proc.reviews
+                                : (Array.isArray(proc.reviewLinks) ? proc.reviewLinks.map(l => ({ link: l })) : []);
+
+                            if (reviewsList.length > 0) {
+                                reviewsList.forEach((rev, idx) => {
+                                    const onlineUrl = (typeof rev === 'string') ? rev : (rev.link || '');
+                                    const onlineLabel = reviewsList.length > 1 ? `📝 Parecer Ad-Hoc #${idx + 1}` : `📝 Parecer Ad-Hoc`;
+                                    const offlineLabel = `📝 parecer_${idx + 1}.html`;
+                                    html += `<button id="btn-doc-parecer-${idx + 1}" class="btn-doc-item btn-doc-parecer-item" data-idx="${idx}" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(onlineUrl)}" style="background: #F57C00; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(onlineLabel)}">${this._esc(onlineLabel)}</button>`;
+                                });
+                            }
+                            return html;
+                        })()}
+
+                        ${(() => {
+                            let html = '';
+                            const rawAttList = (Array.isArray(proc.attachments) && proc.attachments.length > 0)
+                                ? proc.attachments
+                                : (proc.supplementaryLink ? [{ type: 'Anexo', url: proc.supplementaryLink }] : []);
+
+                            const attList = [...rawAttList].sort((a, b) => {
+                                const aType = (a.type || a.name || '').toLowerCase();
+                                const bType = (b.type || b.name || '').toLowerCase();
+                                const aIsCv = aType.includes('currículo') || aType.includes('curriculo') || aType.includes('cv');
+                                const bIsCv = bType.includes('currículo') || bType.includes('curriculo') || bType.includes('cv');
+                                if (aIsCv && !bIsCv) return 1;
+                                if (!aIsCv && bIsCv) return -1;
+                                return 0;
+                            });
+
+                            if (attList.length > 0) {
+                                attList.forEach((att, idx) => {
+                                    let typeName = (att.type || 'Anexo')
+                                        .replace(/Curr[íi]culo\s+Lattes/gi, 'CV Lattes')
+                                        .replace(/Curr[íi]culo/gi, 'CV')
+                                        .replace(/Curriculum\s+Vitae/gi, 'CV');
+                                    const onlineLabel = `📦 ${typeName}`;
+                                    const safeType = String(att.type || 'anexo').toLowerCase().replace(/[^\w]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'anexo';
+                                    const countSuffix = attList.length > 1 ? `_${idx + 1}` : '';
+                                    let ext = 'pdf';
+                                    if (att.url && att.url.toLowerCase().includes('.zip')) ext = 'zip';
+                                    else if (att.url && att.url.toLowerCase().includes('.doc')) ext = 'doc';
+                                    const offlineLabel = `📦 anexo_${safeType}${countSuffix}_${safeProcessId}.${ext}`;
+                                    const onlineUrl = att.url || '';
+                                    html += `<button id="btn-doc-anexo-${idx + 1}" class="btn-doc-item btn-doc-anexo-item" data-idx="${idx}" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(onlineUrl)}" style="background: #7B1FA2; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(onlineLabel)}">${this._esc(onlineLabel)}</button>`;
+                                });
+                            }
+                            return html;
+                        })()}
+                    </div>
+                </div>
+            `;
+
+            // Team Members Structure
+            let teamMembers = [];
+            teamMembers.push({
+                name: proponenteName,
+                role: 'Proponente / Coordenador',
+                formacao: prop.formacao || '',
+                bolsa: prop.bolsa || '-',
+                instituicao: inst,
+                lattesId: proc.lattesId || prop.lattesId || '',
+                cvLink: prop.cvLink || ''
+            });
+
+            if (Array.isArray(proc.teamMembers)) {
+                proc.teamMembers.forEach(tm => {
+                    if (tm && tm.name && !teamMembers.some(m => m.name.toLowerCase() === tm.name.toLowerCase())) {
+                        teamMembers.push({
+                            name: tm.name,
+                            role: tm.categoria || tm.role || 'Membro da Equipe',
+                            formacao: tm.formacao || '',
+                            bolsa: tm.bolsa || '-',
+                            instituicao: tm.instituicao || '-',
+                            lattesId: tm.lattesId || '',
+                            cvLink: tm.cvLink || ''
+                        });
+                    }
+                });
+            }
+
+            const excludedCvKeys = Array.isArray(proc.excludedCvKeys) ? proc.excludedCvKeys : [];
+            let teamRows = '';
+            teamMembers.forEach((member, idx) => {
+                const memberCv = (cvData.allTeamCvs || cvData.groupMembers || []).find(cv => this.cvMatches(cv, member.name, member.lattesId));
+                const hasFullCvData = !!(memberCv && this.isFullCv(memberCv));
+                
+                const memberKey = member.lattesId || member.name;
+                const isExcluded = excludedCvKeys.includes(memberKey) || excludedCvKeys.includes(member.name);
+                const isIncluded = !isExcluded;
+
+                const memberLattes = member.lattesId ? `http://lattes.cnpq.br/${this._esc(member.lattesId)}` : (member.cvLink || '#');
+                // No modo "Backup Local" o clique abre a cópia salva do CV em vez do lattes.cnpq.br
+                const cvLinkAttrs = `class="cv-lattes-link" data-cv-key="${this._esc(this._memberCvBlobKey(member.lattesId, member.name))}" data-proc-id="${this._esc(proc.processId || '')}"`;
+                const cvBolsa = memberCv ? (memberCv.fellowshipString || memberCv.bolsa) : '';
+                const displayBolsa = (cvBolsa && cvBolsa !== '-') ? cvBolsa : (member.bolsa || '-');
+                const roleAndFormacao = member.formacao ? `${member.role} - ${member.formacao}` : member.role;
+
+                const cellStyle = hasFullCvData
+                    ? (isIncluded
+                        ? 'background: #E8F5E9; border: 1px solid #A5D6A7; color: #1B5E20; font-weight: bold; text-align: center;'
+                        : 'background: #FFF3E0; border: 1px solid #FFE082; color: #E65100; font-weight: bold; text-align: center;')
+                    : 'background: #FFEBEE; border: 1px solid #EF9A9A; color: #C62828; font-weight: bold; text-align: center;';
+
+                const statusIconHtml = hasFullCvData
+                    ? (memberLattes !== '#' ? `<a href="${memberLattes}" ${cvLinkAttrs} target="_blank" style="color: ${isIncluded ? '#2E7D32' : '#E65100'}; text-decoration: none; font-size: 1.1em; font-weight: bold;" title="CV Completo no Banco de Dados (Clique para abrir)">✔ <span class="cv-link-icon">🔗</span></a>` : '✔')
+                    : (memberLattes !== '#' ? `<a href="${memberLattes}" ${cvLinkAttrs} target="_blank" style="color: #C62828; text-decoration: none; font-size: 1.1em; font-weight: bold;" title="CV Pendente na DB / Sem dados completos (Clique para abrir no Lattes)">✖ <span class="cv-link-icon">🔗</span></a>` : '✖');
+
+                const cellStatusHtml = hasFullCvData
+                    ? `<label style="cursor: pointer; display: inline-flex; align-items: center; gap: 6px;" title="${isIncluded ? 'Incluído no consolidado (Desmarque para desconsiderar do relatório)' : 'Desconsiderado do consolidado (Marque para incluir no relatório)'}">
+                         <input type="checkbox" class="chk-include-cv" data-member-key="${this._esc(memberKey)}" data-member-name="${this._esc(member.name)}" ${isIncluded ? 'checked' : ''} style="cursor: pointer; width: 15px; height: 15px; accent-color: #2E7D32;">
+                         <span>${statusIconHtml}</span>
+                       </label>`
+                    : statusIconHtml;
+
+                teamRows += `
+                    <tr style="border-bottom: 1px solid #eee; ${isExcluded ? 'background: #FFFDE7; opacity: 0.8;' : ''}">
+                        <td style="padding: 8px; text-align: center;">${idx + 1}</td>
+                        <td style="padding: 8px; text-align: left; font-weight: bold;">
+                            ${this._esc(member.name)} ${isExcluded ? '<span style="font-size: 0.75em; color: #E65100; font-weight: normal; margin-left: 6px;">(Desconsiderado no Consolidado)</span>' : ''}
+                            <br><span style="font-size: 0.8em; color: #1565C0; font-weight: normal;">${this._esc(roleAndFormacao)}</span>
+                        </td>
+                        <td style="padding: 8px; text-align: center; white-space: nowrap;">
+                            <span style="background: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; display: inline-block;">${this._esc(displayBolsa)}</span>
+                        </td>
+                        <td style="padding: 8px; text-align: left;">${this._esc(member.instituicao)}</td>
+                        <td style="padding: 8px; ${cellStyle}">
+                            ${cellStatusHtml}
+                        </td>
+                    </tr>
+                `;
+            });
+
+            const teamTableHtml = `
+                <details open style="margin-bottom: 25px; background: white; border: 1px solid #BBDEFB; border-radius: 8px; padding: 15px;">
+                    <summary style="color: #1565C0; margin-top: 0; border-bottom: 2px solid #1565C0; padding-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-weight: bold; font-size: 1.1em; list-style: none;">
+                        <span>👥 Equipe da Proposta (${teamMembers.length} participante(s), ${(cvData.groupMembers || []).length} CV(s) incluído(s) no consolidado) <span style="font-size: 0.8em; color: #666; font-weight: normal;">(Clique para colapsar / expandir)</span></span>
+                        <button id="btn-refresh-proc-report" style="background: #1976D2; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8em; font-weight: bold; display: inline-flex; align-items: center; gap: 5px;" title="Atualizar dados após abrir CVs no Lattes">
+                            🔄 Atualizar Relatório
+                        </button>
+                    </summary>
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9em;">
+                        <thead>
+                            <tr style="background: #E3F2FD; color: #0D47A1;">
+                                <th style="padding: 8px; width: 40px; text-align: center;">#</th>
+                                <th style="padding: 8px; text-align: left;">Nome / Categoria</th>
+                                <th style="padding: 8px; width: 100px; min-width: 90px; text-align: center; white-space: nowrap;">Bolsa</th>
+                                <th style="padding: 8px; text-align: left;">Instituição</th>
+                                <th style="padding: 8px; width: 110px; text-align: center;" title="DB / Usar: Marque para incluir o CV no relatório consolidado ou desmarque para desconsiderar">DB / Usar</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${teamRows}
+                        </tbody>
+                    </table>
+                </details>
+            `;
+
+            const foundCount = (cvData.groupMembers || []).length;
+            const totalCount = teamMembers.length;
+            hasGroupCvs = foundCount > 0;
+
+            const integratedReportTitleHtml = foundCount > 0 ? `
+                <div style="background: #E3F2FD; border: 1px solid #90CAF9; border-radius: 8px; padding: 15px 20px; margin: 25px 0 20px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h2 style="margin: 0; color: #0D47A1; font-size: 1.3em; display: flex; align-items: center; gap: 8px;">
+                            <span>📊 Relatório Integrado de Produção Científica da Equipe</span>
+                        </h2>
+                        <div style="margin-top: 5px; color: #1565C0; font-size: 0.95em;">
+                            Estatísticas agregadas considerando <strong>${foundCount} de ${totalCount} membro(s)</strong> da equipe com Currículo Lattes cadastrado no Banco de Dados.
+                        </div>
+                    </div>
+                    <span style="background: #1565C0; color: white; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 0.9em;">
+                        ${foundCount} CV(s) na DB
+                    </span>
+                </div>
+            ` : `
+                <div style="background: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 8px; padding: 18px 22px; margin: 25px 0 20px 0; display: flex; align-items: center; gap: 15px;">
+                    <div style="font-size: 2.2em; line-height: 1;">⚠️</div>
+                    <div>
+                        <h3 style="margin: 0; color: #E65100; font-size: 1.15em;">Nenhum Currículo Lattes Cadastrado no Banco de Dados</h3>
+                        <div style="margin-top: 5px; color: #D84315; font-size: 0.95em;">
+                            Nenhum dos <strong>${totalCount} integrante(s)</strong> da proposta possui currículo no Banco de Dados. Clique nos links 🔗 da tabela acima para abrir os CVs e salvar seus dados na DB.
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const reviewerNotesHtml = `
+                <details ${(proc.reviewerNotes || '').trim() ? 'open' : ''} style="margin-bottom: 25px; background: #FFFDE7; border: 1px solid #FFE082; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <summary style="color: #F57F17; margin-top: 0; padding-bottom: 4px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 1.1em; list-style: none; user-select: none;">
+                        <span>📝 Anotações do Revisor <span style="font-size: 0.8em; color: #795548; font-weight: normal;">(Campo de texto livre - Clique para colapsar/expandir)</span></span>
+                        <span id="reviewer-notes-status" style="font-size: 0.8em; color: #2E7D32; font-weight: bold; display: none; background: #E8F5E9; padding: 2px 8px; border-radius: 10px; border: 1px solid #A5D6A7;">✓ Salvo</span>
+                    </summary>
+                    <div style="margin-top: 12px;">
+                        <textarea id="reviewer-notes-textarea" placeholder="Digite aqui suas anotações livres, parecer prévio, notas técnicas ou observações sobre este projeto..." style="width: 100%; height: 120px; padding: 10px; border: 1px solid #FFCA28; border-radius: 6px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 14px; outline: none; resize: vertical; box-sizing: border-box; background: #ffffff; color: #333; line-height: 1.4;"></textarea>
+                    </div>
+                </details>
+            `;
+
+            projectHeaderHtml = `
+                <div style="background: #1565C0; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                    <div>
+                        <h1 style="margin: 0; font-size: 1.6em;">📁 Relatório da Proposta: ${this._esc(proc.processId || 'Proposta')}</h1>
+                        <div style="margin-top: 8px; font-size: 1em; opacity: 0.95;">
+                            <strong>Proponente:</strong> ${this._esc(proponenteName)} ${prop.bolsa && prop.bolsa !== '-' ? `<span style="background: #E8F5E9; color: #1B5E20; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; margin-left: 4px;">🎖️ Bolsa: ${this._esc(prop.bolsa)}</span>` : ''} &nbsp;|&nbsp; <strong>Instituição:</strong> ${this._esc(inst)}
+                        </div>
+                        ${proc.instituicaoExecutora ? `<div style="margin-top: 4px; font-size: 0.9em; opacity: 0.95;">🏛️ <strong>Instituição Executora/Sede:</strong> ${this._esc(proc.instituicaoExecutora)}</div>` : ''}
+                        ${proc.numeroProtocolo ? `<div style="margin-top: 4px; font-size: 0.85em; opacity: 0.85;">Protocolo Nº: ${this._esc(proc.numeroProtocolo)}</div>` : ''}
+                        ${(proc.edital || (proc.faixa && proc.faixa !== '-')) ? `<div style="margin-top: 4px; font-size: 0.85em; opacity: 0.85;">${proc.edital ? `📜 <strong>Edital:</strong> ${this._esc(proc.edital)}` : ''}${(proc.edital && proc.faixa && proc.faixa !== '-') ? ' &nbsp;|&nbsp; ' : ''}${(proc.faixa && proc.faixa !== '-') ? `🎯 <strong>Faixa:</strong> ${this._esc(proc.faixa)}` : ''}</div>` : ''}
+                    </div>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: flex-end;">
+                        ${procNavHTML}
+                        <button id="btn-print-report" style="padding: 8px 15px; background: #7f8c8d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">🖨️ Imprimir</button>
+                        <button id="btn-back-proc-db" style="padding: 8px 15px; background: #ffffff; color: #1565C0; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">⬅️ Voltar às Propostas</button>
+                    </div>
+                </div>
+                ${filesHtml}
+                ${reviewerNotesHtml}
+                ${teamTableHtml}
+                ${integratedReportTitleHtml}
+            `;
+
+            // Pareceres Ad-Hoc - accessed via top documents card buttons (${filesHtml})
+            reviewsHtml = '';
+        }
 
         const currentYear = new Date().getFullYear();
         if (!this.reportState) {
@@ -1615,7 +2685,9 @@ window.JCRDBTools = {
                     </div>
                 </div>
             </div>
+        `;
 
+        const reportFiltersHTML = `
             <div id="print-filters-summary" style="display: none; color: #555; font-size: 0.85em; margin: 8px 0; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px;">${printFiltersSummary}</div>
 
             <div class="collapsible-section" id="sec-report-filters">
@@ -1721,7 +2793,7 @@ window.JCRDBTools = {
         if (cvData.groupMembers && cvData.groupMembers.length > 0) {
             let theadHtml = `<tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border};">`;
             this.METRICS_CONFIG.forEach(m => {
-                if (['customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
+                if (['prioridade', 'faixa', 'customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
                 const titleAttr = m.title ? ` title="${m.title}"` : '';
                 let style = 'padding: 8px; font-weight: bold; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #ccc;';
                 if (m.division) style += ' border-left: 1px solid #bbb;';
@@ -1736,7 +2808,7 @@ window.JCRDBTools = {
             sortedMembers.forEach(cv => {
                 tbodyHtml += `<tr>`;
                 this.METRICS_CONFIG.forEach(m => {
-                    if (['customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
+                    if (['prioridade', 'faixa', 'customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
                     const val = cv[m.key] !== undefined ? cv[m.key] : '';
                     let style = 'padding: 6px 8px; border-bottom: 1px solid #eee;';
                     if (m.division) style += ' border-left: 1px solid #bbb;';
@@ -1861,7 +2933,8 @@ window.JCRDBTools = {
             </head>
             <body>
                 <div class="container">
-                    ${headerHTML}
+                    ${projectHeaderHtml ? projectHeaderHtml : headerHTML}
+                    ${(!projectHeaderHtml || hasGroupCvs) ? reportFiltersHTML : ''}
                     
                     ${filteredPublications.length > 0 ? `
                     <div class="collapsible-section" id="sec-publications">
@@ -1874,7 +2947,7 @@ window.JCRDBTools = {
                         </div>
                     </div>` : ''}
                     
-                    ${(ridTableHTML !== '' || citationTableHTML !== '') ? `
+                    ${(hasGroupCvs && (ridTableHTML !== '' || citationTableHTML !== '')) ? `
                     <div class="collapsible-section" id="sec-citations">
                         <div class="collapsible-header">
                             <h3>Citações e Índices</h3>
@@ -1886,7 +2959,7 @@ window.JCRDBTools = {
                         </div>
                     </div>` : ''}
                     
-                    ${supervisionTableHTML !== '' ? `
+                    ${(hasGroupCvs && supervisionTableHTML !== '') ? `
                     <div class="collapsible-section" id="sec-supervisions">
                         <div class="collapsible-header">
                             <h3>Orientações</h3>
@@ -1897,7 +2970,7 @@ window.JCRDBTools = {
                         </div>
                     </div>` : ''}
                     
-                    ${patentTableHTML !== '' ? `
+                    ${(hasGroupCvs && patentTableHTML !== '') ? `
                     <div class="collapsible-section" id="sec-patents">
                         <div class="collapsible-header">
                             <h3>Patentes</h3>
@@ -1908,7 +2981,7 @@ window.JCRDBTools = {
                         </div>
                     </div>` : ''}
 
-                    ${eventTableHTML !== '' ? `
+                    ${(hasGroupCvs && eventTableHTML !== '') ? `
                     <div class="collapsible-section" id="sec-events">
                         <div class="collapsible-header">
                             <h3>Participação em Eventos</h3>
@@ -1918,6 +2991,8 @@ window.JCRDBTools = {
                             ${eventTableHTML}
                         </div>
                     </div>` : ''}
+
+                    ${reviewsHtml}
 
                     ${filteredPublications.length > 0 ? `
                     <div class="collapsible-section" id="sec-graphs">
@@ -1954,7 +3029,7 @@ window.JCRDBTools = {
                         <div class="collapsible-header" id="header-pub-list">
                             <div style="display: flex; align-items: center; gap: 15px;">
                                 <h3 style="margin: 0;">Lista de Publicações</h3>
-                                <div style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;" onclick="event.stopPropagation();">
+                                <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                                     <span>Período (anos): <input type="number" id="inp-pub-list-years" value="${state.pubListYears !== undefined ? state.pubListYears : 5}" min="0" style="width: 50px; padding: 2px;"></span>
                                     <button id="btn-pub-list-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
                                     <span class="no-print" style="display: flex; align-items: center; gap: 10px; color: #555;">
@@ -1978,7 +3053,7 @@ window.JCRDBTools = {
                         <div class="collapsible-header" id="header-journal-list">
                             <div style="display: flex; align-items: center; gap: 15px;">
                                 <h3 style="margin: 0;">Publicações por Periódico</h3>
-                                <div style="font-size: 0.9em; font-weight: normal; margin-top: 2px;" onclick="event.stopPropagation();">
+                                <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px;">
                                     Período (anos): <input type="number" id="inp-journal-years" value="${state.journalYears !== undefined ? state.journalYears : 5}" min="0" style="width: 50px; padding: 2px;">
                                     &nbsp;Mín. artigos: <input type="number" id="inp-journal-min-papers" value="${state.minJournalPapers !== undefined ? state.minJournalPapers : 1}" min="1" style="width: 40px; padding: 2px;">
                                     <button id="btn-journal-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
@@ -2013,13 +3088,437 @@ window.JCRDBTools = {
             btnPrint.addEventListener('click', () => newTab.print());
         }
 
-        doc.getElementById('btn-back-db').addEventListener('click', () => {
-            if (parentGroupData) {
-                this.renderCVReport(parentGroupData, newTab);
-            } else {
-                this.viewDB(newTab);
-            }
+        const btnBackProc = doc.getElementById('btn-back-proc-db');
+        if (btnBackProc) {
+            btnBackProc.addEventListener('click', () => {
+                this.viewDB(newTab, { processOnly: true });
+            });
+        }
+
+        const btnOpenFolder = doc.getElementById('btn-open-project-folder');
+        if (btnOpenFolder) {
+            btnOpenFolder.addEventListener('click', (e) => {
+                e.preventDefault();
+                const folder = btnOpenFolder.getAttribute('data-folder');
+                if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                    chrome.runtime.sendMessage({ action: 'open_folder', folder: folder });
+                }
+            });
+        }
+
+        const refreshProcBtn = doc.getElementById('btn-refresh-proc-report');
+        if (refreshProcBtn && parentGroupData) {
+            refreshProcBtn.addEventListener('click', async () => {
+                const freshDb = await this.getDB(true);
+                const freshProc = freshDb.find(p => p.processId === parentGroupData.processId) || parentGroupData;
+                this.renderProcessReport(freshProc, newTab, sortedDb);
+            });
+        }
+
+        const notesTextarea = doc.getElementById('reviewer-notes-textarea');
+        const notesStatus = doc.getElementById('reviewer-notes-status');
+        if (notesTextarea && parentGroupData) {
+            notesTextarea.value = parentGroupData.reviewerNotes || '';
+            
+            let saveTimeout = null;
+            notesTextarea.addEventListener('input', () => {
+                if (saveTimeout) clearTimeout(saveTimeout);
+                saveTimeout = setTimeout(async () => {
+                    parentGroupData.reviewerNotes = notesTextarea.value;
+                    if (typeof window !== 'undefined' && window.JCRDBTools && typeof window.JCRDBTools.saveCVs === 'function') {
+                        await window.JCRDBTools.saveCVs([parentGroupData]);
+                    }
+                    if (notesStatus) {
+                        notesStatus.style.display = 'inline-block';
+                        setTimeout(() => { notesStatus.style.display = 'none'; }, 2000);
+                    }
+                }, 400);
+            });
+        }
+
+        // Reading Mode helper (Online vs Backup Local)
+        const getDocSourceMode = () => {
+            const checkedRadio = doc.querySelector('input[name="doc-source-mode"]:checked');
+            return checkedRadio ? checkedRadio.value : 'online';
+        };
+
+        // Dynamic Mode Switcher for Document Buttons Labels
+        const modeRadios = doc.querySelectorAll('input[name="doc-source-mode"]');
+        const updateDocButtonsUI = () => {
+            const currentMode = getDocSourceMode();
+            const docButtons = doc.querySelectorAll('.btn-doc-item');
+            docButtons.forEach(btn => {
+                const onlineLabel = btn.getAttribute('data-online-label');
+                const offlineLabel = btn.getAttribute('data-offline-label');
+                if (currentMode === 'offline' && offlineLabel) {
+                    btn.textContent = offlineLabel;
+                    btn.style.opacity = '0.95';
+                    btn.setAttribute('title', `Modo Backup Local: Lendo cópia local (${offlineLabel.replace(/^[^\s]+\s*/, '')})`);
+                } else if (onlineLabel) {
+                    btn.textContent = onlineLabel;
+                    btn.style.opacity = '1';
+                    btn.setAttribute('title', 'Modo On-line: Abrindo link direto da Web');
+                }
+            });
+        };
+
+        modeRadios.forEach(radio => {
+            radio.addEventListener('change', updateDocButtonsUI);
         });
+
+        // Modo "Backup Local": se houver cópia salva do CV, o link abre a cópia local;
+        // se não houver, o link segue normalmente para o lattes.cnpq.br — apenas o ícone
+        // avisa que não existe cópia local. As cópias são pré-carregadas aqui para que o
+        // clique seja síncrono (abrir uma aba depois de um await pode ser bloqueado).
+        const cvLinks = Array.from(doc.querySelectorAll('.cv-lattes-link'));
+        const localCvs = new Map();   // data-cv-key -> HTML salvo
+
+        const updateCvLinkIcons = () => {
+            const offline = getDocSourceMode() === 'offline';
+            cvLinks.forEach(link => {
+                const icon = link.querySelector('.cv-link-icon');
+                if (!icon) return;
+                const temCopia = localCvs.has(link.getAttribute('data-cv-key'));
+                if (!offline) {
+                    icon.textContent = '🔗';
+                    link.setAttribute('title', 'Abrir o currículo no Lattes');
+                } else if (temCopia) {
+                    icon.textContent = '💾';
+                    link.setAttribute('title', 'Abrir a cópia local do CV salva na pasta desta proposta');
+                } else {
+                    icon.textContent = '⚠';
+                    link.setAttribute('title', 'Sem cópia local deste CV — o link abrirá o currículo on-line. Abra o CV uma vez na Plataforma Lattes para guardar uma cópia.');
+                }
+            });
+        };
+
+        if (cvLinks.length > 0) {
+            const procIdCv = cvLinks[0].getAttribute('data-proc-id');
+            if (procIdCv) {
+                this.getProcBlobs(procIdCv).then(blobs => {
+                    Object.keys(blobs || {}).forEach(k => {
+                        if (k.indexOf('memberCv_') === 0) localCvs.set(k, blobs[k]);
+                    });
+                    updateCvLinkIcons();
+                }).catch(() => {});
+            }
+
+            cvLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    if (getDocSourceMode() !== 'offline') return;   // on-line: segue para o Lattes
+                    const html = localCvs.get(link.getAttribute('data-cv-key'));
+                    if (!html) return;                              // sem cópia local: segue para o Lattes
+                    e.preventDefault();
+                    try {
+                        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                        const url = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                        newTab.open(url, '_blank');
+                    } catch (err) {
+                        console.warn('[dbTools] Erro ao abrir a cópia local do CV:', err);
+                    }
+                });
+            });
+
+            modeRadios.forEach(radio => radio.addEventListener('change', updateCvLinkIcons));
+            updateCvLinkIcons();
+        }
+
+        updateDocButtonsUI();
+
+        const safeProcId = parentGroupData ? (parentGroupData.processId || 'projeto').replace(/[\/\\?%*:|"<>]/g, '-').trim() : 'projeto';
+        const propName = parentGroupData && parentGroupData.proponente ? parentGroupData.proponente.name : '';
+        const safePropName = String(propName).replace(/[\/\\?%*:|"<>]/g, '').trim();
+        const localFolder = safePropName ? `piccData/${safeProcId} - ${safePropName}` : `piccData/${safeProcId}`;
+
+        const base64ToBlob = (base64, mimeType = 'application/pdf') => {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return new Blob([bytes], { type: mimeType });
+        };
+
+        // Hidrata sob demanda os conteúdos pesados guardados em jcr_proc_blob:<processId>.
+        // Os registros antigos, que ainda trazem esses campos embutidos, continuam funcionando:
+        // só preenchemos o que estiver faltando.
+        let blobsHydrated = false;
+        const hydrateProcBlobs = async () => {
+            if (blobsHydrated || !parentGroupData || !parentGroupData.processId) return;
+            blobsHydrated = true;
+            try {
+                const blobs = await this.getProcBlobs(parentGroupData.processId);
+                if (!blobs || Object.keys(blobs).length === 0) return;
+                if (blobs.pdfData && !parentGroupData.pdfData) parentGroupData.pdfData = blobs.pdfData;
+                if (blobs.cvHtml && !parentGroupData.cvHtml) parentGroupData.cvHtml = blobs.cvHtml;
+                if (Array.isArray(parentGroupData.reviews)) {
+                    parentGroupData.reviews.forEach((rev, i) => {
+                        if (rev && typeof rev === 'object' && !rev.html && blobs['review_' + i]) {
+                            rev.html = blobs['review_' + i];
+                        }
+                    });
+                }
+                if (Array.isArray(parentGroupData.attachments)) {
+                    parentGroupData.attachments.forEach((att, i) => {
+                        if (att && !att.data && blobs['att_' + i]) att.data = blobs['att_' + i];
+                    });
+                }
+            } catch (e) {
+                console.warn('[dbTools] Falha ao carregar conteúdos salvos da proposta:', e);
+            }
+        };
+
+        // 1. Proposta PDF Button
+        const btnDocProposta = doc.getElementById('btn-doc-proposta');
+        if (btnDocProposta && parentGroupData) {
+            btnDocProposta.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await hydrateProcBlobs();
+                const mode = getDocSourceMode();
+                const onlineUrl = btnDocProposta.getAttribute('data-online-url');
+                const offlineFilename = btnDocProposta.getAttribute('data-offline-label')?.replace(/^[^\s]+\s*/, '') || `proposta_${safeProcId}.pdf`;
+
+                if (mode === 'online' && onlineUrl) {
+                    newTab.open(onlineUrl, '_blank');
+                } else {
+                    // Backup local mode: 1. Try saved base64 pdfData in IndexedDB
+                    if (parentGroupData.pdfData) {
+                        try {
+                            const blob = base64ToBlob(parentGroupData.pdfData, 'application/pdf');
+                            const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                            newTab.open(blobUrl, '_blank');
+                            return;
+                        } catch (err) {
+                            console.warn("[dbTools] Erro ao abrir pdfData:", err);
+                        }
+                    }
+
+                    // 2. Try fetching ArrayBuffer on-the-fly via background worker
+                    if (onlineUrl && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                        try {
+                            btnDocProposta.textContent = '⏳ Carregando PDF...';
+                            const res = await new Promise((resolve) => {
+                                chrome.runtime.sendMessage({ action: 'fetch_arraybuffer', url: onlineUrl }, (r) => resolve(r));
+                            });
+                            btnDocProposta.textContent = (mode === 'offline') ? btnDocProposta.getAttribute('data-offline-label') : btnDocProposta.getAttribute('data-online-label');
+
+                            if (res && res.success && res.base64) {
+                                parentGroupData.pdfData = res.base64;
+                                if (typeof window !== 'undefined' && window.JCRDBTools && typeof window.JCRDBTools.saveCVs === 'function') {
+                                    await window.JCRDBTools.saveCVs([parentGroupData]);
+                                }
+                                const blob = base64ToBlob(res.base64, 'application/pdf');
+                                const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                                newTab.open(blobUrl, '_blank');
+                                return;
+                            }
+                        } catch (fetchErr) {
+                            console.warn("[dbTools] Falha no fetch on-the-fly do PDF:", fetchErr);
+                        }
+                    }
+
+                    // 3. Fallback: Display complete local folder path notice
+                    this.showAlert(`📂 O arquivo PDF local desta proposta está salvo na sua pasta de Downloads:\n\nDownloads/${localFolder}/${offlineFilename}`, newTab);
+                }
+            });
+        }
+
+        // 2. CV Congelado Button
+        const btnDocCvCongelado = doc.getElementById('btn-doc-cv-congelado');
+        if (btnDocCvCongelado && parentGroupData) {
+            btnDocCvCongelado.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await hydrateProcBlobs();
+                const mode = getDocSourceMode();
+                const onlineUrl = btnDocCvCongelado.getAttribute('data-online-url');
+                const safeLattesId = (parentGroupData.proponente && parentGroupData.proponente.lattesId) ? parentGroupData.proponente.lattesId : (parentGroupData.lattesId || 'proponente');
+                const offlineFilename = `curriculo_${safeLattesId}.html`;
+
+                if (mode === 'online' && onlineUrl) {
+                    newTab.open(onlineUrl, '_blank');
+                } else {
+                    // Backup local mode
+                    let cvHtmlText = parentGroupData.cvHtml || parentGroupData.cvContent || (parentGroupData.proponente && (parentGroupData.proponente.cvHtml || parentGroupData.proponente.cvContent));
+
+                    // 1. If not directly in parentGroupData, check dedicated piccTools CV storage
+                    if (!cvHtmlText && safeLattesId && typeof chrome !== 'undefined' && chrome.storage?.local) {
+                        try {
+                            const keys = [`jcr_picc_cv:id:${safeLattesId}`, `jcr_cv:${safeLattesId}`, `jcr_cv:proc:${safeLattesId}`];
+                            const storageRes = await new Promise(resolve => chrome.storage.local.get(keys, resolve));
+                            for (const k of keys) {
+                                if (storageRes && storageRes[k]) {
+                                    const entry = storageRes[k];
+                                    cvHtmlText = entry.cvHtml || entry.cvContent || entry.htmlContent;
+                                    if (cvHtmlText) break;
+                                }
+                            }
+                        } catch (stErr) {
+                            console.warn("[dbTools] Erro ao buscar CV no storage:", stErr);
+                        }
+                    }
+
+                    // 2. Open Blob URL if HTML is available
+                    if (cvHtmlText) {
+                        const fnFormat = window.JCRReportUtils?.makeSelfContainedHtml || window.makeSelfContainedHtml;
+                        const formattedHtml = fnFormat ? fnFormat(cvHtmlText, onlineUrl || 'http://plsql1.cnpq.br/curriculostg/') : cvHtmlText;
+                        const blob = new Blob([formattedHtml], { type: 'text/html;charset=utf-8' });
+                        const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                        newTab.open(blobUrl, '_blank');
+                        return;
+                    }
+
+                    // 3. Try fetching on-the-fly via background worker
+                    if (onlineUrl && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                        try {
+                            btnDocCvCongelado.textContent = '⏳ Carregando CV...';
+                            const res = await new Promise((resolve) => {
+                                chrome.runtime.sendMessage({ action: 'fetch_url', url: onlineUrl }, (r) => resolve(r));
+                            });
+                            btnDocCvCongelado.textContent = (mode === 'offline') ? btnDocCvCongelado.getAttribute('data-offline-label') : btnDocCvCongelado.getAttribute('data-online-label');
+
+                            if (res && res.success && res.text) {
+                                const fnFormat = window.JCRReportUtils?.makeSelfContainedHtml || window.makeSelfContainedHtml;
+                                const formattedHtml = fnFormat ? fnFormat(res.text, onlineUrl) : res.text;
+                                parentGroupData.cvHtml = formattedHtml;
+                                if (typeof window !== 'undefined' && window.JCRDBTools && typeof window.JCRDBTools.saveCVs === 'function') {
+                                    await window.JCRDBTools.saveCVs([parentGroupData]);
+                                }
+                                const blob = new Blob([formattedHtml], { type: 'text/html;charset=utf-8' });
+                                const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                                newTab.open(blobUrl, '_blank');
+                                return;
+                            }
+                        } catch (fetchErr) {
+                            console.warn("[dbTools] Falha no fetch on-the-fly do CV:", fetchErr);
+                        }
+                    }
+
+                    // 4. Fallback: Display complete local folder path notice
+                    this.showAlert(`📂 Cópia do CV Lattes Congelado salva na pasta de backup local:\n\nDownloads/${localFolder}/${offlineFilename}`, newTab);
+                }
+            });
+        }
+
+        // 3. Pareceres Ad-Hoc Buttons
+        if (parentGroupData && Array.isArray(parentGroupData.reviews)) {
+            parentGroupData.reviews.forEach((rev, idx) => {
+                const btn = doc.getElementById(`btn-doc-parecer-${idx + 1}`);
+                if (btn) {
+                    btn.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        await hydrateProcBlobs();
+                        const mode = getDocSourceMode();
+                        const onlineUrl = (typeof rev === 'string') ? rev : (rev.link || '');
+                        const offlineFilename = `parecer_${idx + 1}.html`;
+
+                        if (mode === 'online' && onlineUrl) {
+                            newTab.open(onlineUrl, '_blank');
+                        } else if (rev.html || rev.htmlContent) {
+                            const htmlText = rev.html || rev.htmlContent;
+                            const fnFormat = window.JCRReportUtils?.makeSelfContainedHtml || window.makeSelfContainedHtml;
+                            const formattedHtml = fnFormat ? fnFormat(htmlText, onlineUrl || 'https://chagas.cnpq.br/chagas/') : htmlText;
+                            const blob = new Blob([formattedHtml], { type: 'text/html;charset=utf-8' });
+                            const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                            newTab.open(blobUrl, '_blank');
+                        } else {
+                            this.showAlert(`📂 Cópia do Parecer Ad-Hoc salvo na pasta de backup local:\nDownloads/${localFolder}/${offlineFilename}`, newTab);
+                        }
+                    });
+                }
+            });
+        }
+
+        // 4. Attachments Buttons
+        if (parentGroupData && Array.isArray(parentGroupData.attachments)) {
+            parentGroupData.attachments.forEach((att, idx) => {
+                const btn = doc.getElementById(`btn-doc-anexo-${idx + 1}`);
+                if (btn) {
+                    btn.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        await hydrateProcBlobs();
+                        const mode = getDocSourceMode();
+                        const onlineUrl = att.url || '';
+                        const offlineFilename = btn.getAttribute('data-offline-label')?.replace(/^[^\s]+\s*/, '') || `anexo_${idx + 1}.pdf`;
+
+                        if (mode === 'online' && onlineUrl) {
+                            newTab.open(onlineUrl, '_blank');
+                        } else {
+                            // Backup local mode
+                            let mimeType = 'application/pdf';
+                            const lowerUrl = (onlineUrl || offlineFilename).toLowerCase();
+                            if (lowerUrl.includes('.zip')) mimeType = 'application/zip';
+                            else if (lowerUrl.includes('.doc')) mimeType = 'application/msword';
+                            else if (lowerUrl.includes('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                            else if (lowerUrl.includes('.png')) mimeType = 'image/png';
+                            else if (lowerUrl.includes('.jpg') || lowerUrl.includes('.jpeg')) mimeType = 'image/jpeg';
+
+                            // 1. Try saved base64 in att.data or att.base64
+                            const b64Data = att.data || att.base64;
+                            if (b64Data) {
+                                try {
+                                    const blob = base64ToBlob(b64Data, mimeType);
+                                    const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                                    newTab.open(blobUrl, '_blank');
+                                    return;
+                                } catch (err) {
+                                    console.warn("[dbTools] Erro ao abrir anexo base64:", err);
+                                }
+                            }
+
+                            // 2. Try saved HTML content if att is HTML
+                            if (att.htmlContent || att.content) {
+                                const htmlText = att.htmlContent || att.content;
+                                const blob = new Blob([htmlText], { type: 'text/html;charset=utf-8' });
+                                const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                                newTab.open(blobUrl, '_blank');
+                                return;
+                            }
+
+                            // 3. Try fetching ArrayBuffer on-the-fly via background worker
+                            if (onlineUrl && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                                try {
+                                    btn.textContent = '⏳ Carregando Anexo...';
+                                    const res = await new Promise((resolve) => {
+                                        chrome.runtime.sendMessage({ action: 'fetch_arraybuffer', url: onlineUrl }, (r) => resolve(r));
+                                    });
+                                    btn.textContent = (mode === 'offline') ? btn.getAttribute('data-offline-label') : btn.getAttribute('data-online-label');
+
+                                    if (res && res.success && res.base64) {
+                                        att.data = res.base64;
+                                        if (typeof window !== 'undefined' && window.JCRDBTools && typeof window.JCRDBTools.saveCVs === 'function') {
+                                            await window.JCRDBTools.saveCVs([parentGroupData]);
+                                        }
+                                        const blob = base64ToBlob(res.base64, mimeType);
+                                        const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                                        newTab.open(blobUrl, '_blank');
+                                        return;
+                                    }
+                                } catch (fetchErr) {
+                                    console.warn("[dbTools] Falha no fetch on-the-fly do anexo:", fetchErr);
+                                }
+                            }
+
+                            // 4. Fallback: Display complete local folder path notice
+                            this.showAlert(`📂 O arquivo de anexo local está salvo na sua pasta de Downloads:\n\nDownloads/${localFolder}/${offlineFilename}`, newTab);
+                        }
+                    });
+                }
+            });
+        }
+
+        const btnBack = doc.getElementById('btn-back-db');
+        if (btnBack) {
+            btnBack.addEventListener('click', () => {
+                if (parentGroupData && (parentGroupData.processId || parentGroupData.isProcesso)) {
+                    this.renderProcessReport(parentGroupData, newTab, sortedDb);
+                } else if (parentGroupData) {
+                    this.renderCVReport(parentGroupData, newTab);
+                } else {
+                    this.viewDB(newTab);
+                }
+            });
+        }
 
         const btnPrev = doc.getElementById('btn-prev-cv');
         if (btnPrev) {
@@ -2054,6 +3553,38 @@ window.JCRDBTools = {
             });
         }
 
+        // Checkboxes to include/exclude CVs from consolidated proposal report
+        const chkIncludeCvs = doc.querySelectorAll('.chk-include-cv');
+        if (chkIncludeCvs.length > 0 && parentGroupData) {
+            chkIncludeCvs.forEach(chk => {
+                chk.addEventListener('change', async (e) => {
+                    const memberKey = e.target.getAttribute('data-member-key');
+                    const memberName = e.target.getAttribute('data-member-name');
+
+                    if (!Array.isArray(parentGroupData.excludedCvKeys)) {
+                        parentGroupData.excludedCvKeys = [];
+                    }
+
+                    if (!e.target.checked) {
+                        if (memberKey && !parentGroupData.excludedCvKeys.includes(memberKey)) {
+                            parentGroupData.excludedCvKeys.push(memberKey);
+                        }
+                        if (memberName && !parentGroupData.excludedCvKeys.includes(memberName)) {
+                            parentGroupData.excludedCvKeys.push(memberName);
+                        }
+                    } else {
+                        parentGroupData.excludedCvKeys = parentGroupData.excludedCvKeys.filter(k => k !== memberKey && k !== memberName);
+                    }
+
+                    if (typeof window !== 'undefined' && window.JCRDBTools && typeof window.JCRDBTools.saveCVs === 'function') {
+                        await window.JCRDBTools.saveCVs([parentGroupData]);
+                    }
+
+                    this.renderProcessReport(parentGroupData, newTab, sortedDb);
+                });
+            });
+        }
+
         const reRender = () => {
             state.highJcr = parseFloat(doc.getElementById('inp-high-jcr').value) || 7.0;
             state.lowJcr = parseFloat(doc.getElementById('inp-low-jcr').value) || 1.5;
@@ -2080,7 +3611,42 @@ window.JCRDBTools = {
 
         ['chk-jcr-high', 'chk-jcr-mid', 'chk-jcr-low', 'chk-jcr-none', 
          'chk-auth-first', 'chk-auth-last', 'chk-auth-others', 'chk-auth-gc'].forEach(id => {
-            doc.getElementById(id).addEventListener('change', reRender);
+            const chkEl = doc.getElementById(id);
+            if (chkEl) chkEl.addEventListener('change', reRender);
+        });
+
+        // Impede que cliques nos controles dentro do cabeçalho colapsável o abram/fechem
+        // (antes era onclick="event.stopPropagation()" inline, bloqueado pela CSP em db.html)
+        doc.querySelectorAll('.jcr-stop-propagation').forEach(el => {
+            el.addEventListener('click', (e) => e.stopPropagation());
+        });
+
+        // Árvore de Orientações: expandir/recolher tipo e instituição.
+        // Substitui os handlers inline gerados em report_utils.generateSupervisionTableHTML.
+        doc.querySelectorAll('tr[data-sup-type]').forEach(row => {
+            row.addEventListener('click', () => {
+                const typeId = row.getAttribute('data-sup-type');
+                const icon = row.querySelector('.type-icon');
+                const isExpanding = icon && icon.textContent === '▶';
+                if (isExpanding) {
+                    doc.querySelectorAll(`.child-of-${typeId}`).forEach(el => el.style.display = 'table-row');
+                } else {
+                    doc.querySelectorAll(`.child-of-${typeId}, .child-of-${typeId}-all`).forEach(el => el.style.display = 'none');
+                    doc.querySelectorAll(`.child-of-${typeId} .inst-icon`).forEach(ic => ic.textContent = '▶');
+                }
+                if (icon) icon.textContent = isExpanding ? '▼' : '▶';
+            });
+        });
+
+        doc.querySelectorAll('tr[data-sup-inst]').forEach(row => {
+            row.addEventListener('click', () => {
+                const instId = row.getAttribute('data-sup-inst');
+                doc.querySelectorAll(`.child-of-${instId}`).forEach(el => {
+                    el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
+                });
+                const icon = row.querySelector('.inst-icon');
+                if (icon) icon.textContent = icon.textContent === '▶' ? '▼' : '▶';
+            });
         });
 
         // Add collapsible functionality
@@ -2149,7 +3715,7 @@ window.JCRDBTools = {
                     currentPubYear = pYear;
                     html += `
                     <div style="margin-bottom: 15px;">
-                        <div class="pub-year-header" style="background: #e0e0e0; padding: 6px 12px; cursor: pointer; font-weight: bold; border-radius: 4px; display: flex; justify-content: space-between; border: 1px solid #ccc;" onclick="const c = this.nextElementSibling; const isHidden = c.style.display === 'none'; c.style.display = isHidden ? 'block' : 'none'; this.querySelector('.y-icon').textContent = isHidden ? '[-]' : '[+]';">
+                        <div class="pub-year-header" style="background: #e0e0e0; padding: 6px 12px; cursor: pointer; font-weight: bold; border-radius: 4px; display: flex; justify-content: space-between; border: 1px solid #ccc;">
                             <span>Ano: ${pYear}</span>
                             <span class="y-icon">[-]</span>
                         </div>
@@ -2157,7 +3723,7 @@ window.JCRDBTools = {
                     `;
                 }
 
-                let cleanRef = pub.reference || 'Referência indisponível';
+                let cleanRef = pub.reference || [pub.paperTitle || pub.title, pub.journalName, pub.year].filter(Boolean).join('. ') || 'Referência indisponível';
                 cleanRef = cleanRef.replace(/^\s*\d+\.\s*/, '');
                 cleanRef = cleanRef.replace(/\s*Fator de Impacto:\s*[\d.]+\s*(?:\(.*?\))?/g, '');
                 cleanRef = cleanRef.replace(/\s*Não classificado\s*(?:\(.*?\))?/g, '');
@@ -2200,6 +3766,17 @@ window.JCRDBTools = {
             }
 
             pubContainer.innerHTML = html;
+            // Listeners dos cabeçalhos de ano (antes onclick inline, bloqueado pela CSP em db.html)
+            pubContainer.querySelectorAll('.pub-year-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const content = header.nextElementSibling;
+                    if (!content) return;
+                    const isHidden = content.style.display === 'none';
+                    content.style.display = isHidden ? 'block' : 'none';
+                    const icon = header.querySelector('.y-icon');
+                    if (icon) icon.textContent = isHidden ? '[-]' : '[+]';
+                });
+            });
             isPubListGenerated = true;
         };
 
@@ -2226,7 +3803,7 @@ window.JCRDBTools = {
             [chkPubShowDoi, 'showPubListDoi'],
             [chkPubShowCit, 'showPubListCitations']
         ].forEach(([chk, key]) => {
-            if (!chk) return;
+            if (!chk || typeof chk.addEventListener !== 'function') return;
             chk.addEventListener('change', () => {
                 state[key] = chk.checked;
                 if (isPubListGenerated) generatePubList();
@@ -2244,7 +3821,7 @@ window.JCRDBTools = {
 
         const attachJournalSort = () => {
             const table = doc.getElementById('journal-table');
-            if (!table) return;
+            if (!table || typeof table.querySelectorAll !== 'function') return;
             const tbody = doc.getElementById('journal-table-body');
             const sortState = { col: 3, dir: -1 };
 
@@ -2316,35 +3893,53 @@ window.JCRDBTools = {
         // sob demanda. Sem isto, imprimir sem antes abri-las manualmente resulta na seção vazia
         // (só o título, sem lista) — então expandimos e geramos ambas antes de qualquer impressão,
         // seja pelo botão da página ou por Ctrl+P do navegador.
-        newTab.addEventListener('beforeprint', () => {
-            if (!isPubListGenerated) generatePubList();
-            if (contentPubList) contentPubList.style.display = 'block';
-            const pubIcon = headerPubList && headerPubList.querySelector('.toggle-icon');
-            if (pubIcon) pubIcon.textContent = '[-]';
+        if (newTab && typeof newTab.addEventListener === 'function') {
+            newTab.addEventListener('beforeprint', () => {
+                if (!isPubListGenerated) generatePubList();
+                if (contentPubList) contentPubList.style.display = 'block';
+                const pubIcon = headerPubList && headerPubList.querySelector('.toggle-icon');
+                if (pubIcon) pubIcon.textContent = '[-]';
 
-            if (!isJournalGenerated) generateJournalList();
-            if (contentJournalList) contentJournalList.style.display = 'block';
-            const journalIcon = headerJournalList && headerJournalList.querySelector('.toggle-icon');
-            if (journalIcon) journalIcon.textContent = '[-]';
-        });
+                if (!isJournalGenerated) generateJournalList();
+                if (contentJournalList) contentJournalList.style.display = 'block';
+                const journalIcon = headerJournalList && headerJournalList.querySelector('.toggle-icon');
+                if (journalIcon) journalIcon.textContent = '[-]';
+            });
+        }
+
+        const backBtn = doc.getElementById('btn-back-db');
+        if (backBtn) {
+            backBtn.addEventListener('click', () => {
+                if (parentGroupData && (parentGroupData.processId || parentGroupData.isProcesso)) {
+                    this.renderProcessReport(parentGroupData, newTab, sortedDb);
+                } else {
+                    this.viewDB(newTab);
+                }
+            });
+        }
     },
 
-    exportCSV: async function () {
+    exportCSV: async function (targetTab = null) {
         const db = await this.getDB();
         if (db.length === 0) {
-            alert("O banco de dados está vazio.");
+            this.showAlert("O banco de dados está vazio.", targetTab);
             return;
         }
 
         // Using semicolon for Excel compatibility in Brazil
         let csvContent = "\uFEFF"; // BOM for UTF-8 Excel
         
+        // getDB() aqui devolve apenas CVs, então colunas exclusivas de Proposta
+        // (prioridade, faixa, executora) sairiam sempre vazias — são omitidas.
+        const csvColumns = this.METRICS_CONFIG.filter(m =>
+            !['prioridade', 'faixa', 'instituicaoExecutora'].includes(m.key));
+
         // CSV Header
-        csvContent += this.METRICS_CONFIG.map(m => m.label.replace(/(\r\n|\n|\r)/gm, " ")).join(';') + "\r\n";
+        csvContent += csvColumns.map(m => m.label.replace(/(\r\n|\n|\r)/gm, " ")).join(';') + "\r\n";
 
         // CSV Rows
         db.forEach(cv => {
-            let row = this.METRICS_CONFIG.map(m => {
+            let row = csvColumns.map(m => {
                 let val = cv[m.key] !== undefined ? String(cv[m.key]) : '';
                 // Format decimal numbers for Brazilian Excel
                 if (val.includes('.') && !isNaN(val)) {
@@ -2368,80 +3963,104 @@ window.JCRDBTools = {
         setTimeout(() => URL.revokeObjectURL(url), 100);
     },
 
-    exportJSON: async function () {
-        const db = await this.getDB();
+    exportJSON: async function (targetTab = null, isProcessoOnly = false) {
+        if (isProcessoOnly) {
+            const propostas = await this.getDB(true);
+            const piccCvs = await this.getPiccCVs();
+            const combined = [...propostas, ...piccCvs];
+            if (combined.length === 0) {
+                this.showAlert("A base de dados do piccTools (propostas e CVs) está vazia.", targetTab);
+                return;
+            }
+
+            const jsonContent = JSON.stringify(combined, null, 2);
+            const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = (targetTab && targetTab.document) ? targetTab.document.createElement("a") : document.createElement("a");
+            const dateStr = new Date().toISOString().split('T')[0];
+            const fileName = `jcr_lattes_picc_backup_${dateStr}.json`;
+            link.setAttribute("href", url);
+            link.setAttribute("download", fileName);
+            const container = (targetTab && targetTab.document && targetTab.document.body) ? targetTab.document.body : document.body;
+            container.appendChild(link);
+            link.click();
+            container.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 100);
+            return;
+        }
+
+        const db = await this.getDB(false);
         if (db.length === 0) {
-            alert("O banco de dados está vazio.");
+            this.showAlert("O banco de dados de CVs está vazio.", targetTab);
             return;
         }
 
         const jsonContent = JSON.stringify(db, null, 2);
         const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
+        const link = (targetTab && targetTab.document) ? targetTab.document.createElement("a") : document.createElement("a");
         link.setAttribute("href", url);
         link.setAttribute("download", "jcr_lattes_database_backup.json");
-        document.body.appendChild(link);
+        const container = (targetTab && targetTab.document && targetTab.document.body) ? targetTab.document.body : document.body;
+        container.appendChild(link);
         link.click();
-        document.body.removeChild(link);
+        container.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(url), 100);
     },
 
-    importJSON: function (file) {
-        return new Promise((resolve, reject) => {
+    importJSON: function (file, targetTab = null, isProcessoOnly = false) {
+        return new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = async (e) => {
                 try {
                     const importedDB = JSON.parse(e.target.result);
                     if (!Array.isArray(importedDB)) {
-                        alert("Erro: O arquivo JSON não contém um banco de dados válido (esperado um array).");
+                        this.showAlert("Erro: O arquivo JSON não contém um banco de dados válido (esperado um array).", targetTab);
                         resolve();
                         return;
                     }
-                    
-                    const currentDB = await this.getDB();
-                    let addedCount = 0;
-                    let updatedCount = 0;
-                    let skippedCount = 0;
-                    const toUpsert = [];
-                    const toRemoveOldKey = [];
 
-                    for (const importedCV of importedDB) {
-                        if (!importedCV.name) continue; // Invalid entry
+                    let addedPropostas = 0;
+                    let addedCvs = 0;
+                    const toSet = {};
 
-                        const existingIndex = currentDB.findIndex(cv => this.cvMatches(cv, importedCV.name, importedCV.lattesId));
-                        if (existingIndex >= 0) {
-                            const existing = currentDB[existingIndex];
-                            const existingDate = existing.dateAdded ? new Date(existing.dateAdded) : new Date(0);
-                            const importedDate = importedCV.dateAdded ? new Date(importedCV.dateAdded) : new Date(0);
-                            if (importedDate <= existingDate) {
-                                skippedCount++;
-                                continue; // Keep the newer local version
-                            }
-                            if (this._cvStorageKey(existing) !== this._cvStorageKey(importedCV)) {
-                                toRemoveOldKey.push(existing);
-                            }
-                            currentDB[existingIndex] = importedCV;
-                            updatedCount++;
-                        } else {
-                            currentDB.push(importedCV);
-                            addedCount++;
+                    for (const item of importedDB) {
+                        if (!item) continue;
+                        const isProc = !!(item.isProcesso || item.processId);
+                        if (isProc) {
+                            const key = this._cvStorageKey(item);
+                            toSet[key] = item;
+                            addedPropostas++;
+                        } else if (item.name || item.lattesId) {
+                            const isPicc = isProcessoOnly || item.isPiccCv || (item.customId && item.customId.includes('picc'));
+                            const key = isPicc ? this._piccCvStorageKey(item) : this._cvStorageKey(item);
+                            toSet[key] = item;
+                            addedCvs++;
                         }
-                        toUpsert.push(importedCV);
                     }
 
-                    if (toRemoveOldKey.length > 0) await this.removeCVs(toRemoveOldKey);
-                    await this.saveCVs(toUpsert);
-                    const skippedMsg = skippedCount > 0 ? `\nCVs mantidos (versão local mais recente): ${skippedCount}` : '';
-                    alert(`Importação concluída com sucesso!\n\nCVs adicionados: ${addedCount}\nCVs atualizados: ${updatedCount}${skippedMsg}`);
+                    if (Object.keys(toSet).length > 0) {
+                        await new Promise((res, rej) => {
+                            chrome.storage.local.set(toSet, () => {
+                                if (chrome.runtime.lastError) rej(chrome.runtime.lastError);
+                                else res();
+                            });
+                        });
+                    }
+
+                    if (isProcessoOnly || addedPropostas > 0) {
+                        this.showAlert(`Importação do backup do piccTools concluída com sucesso!\n\nPropostas restauradas: ${addedPropostas}\nCVs restaurados: ${addedCvs}`, targetTab);
+                    } else {
+                        this.showAlert(`Importação do backup de CVs concluída com sucesso!\n\nCVs restaurados: ${addedCvs}`, targetTab);
+                    }
                     resolve();
                 } catch (error) {
-                    alert("Erro ao ler o arquivo JSON: " + error.message);
+                    this.showAlert("Erro ao ler o arquivo JSON: " + error.message, targetTab);
                     resolve();
                 }
             };
             reader.onerror = () => {
-                alert("Erro ao ler o arquivo.");
+                this.showAlert("Erro ao ler o arquivo.", targetTab);
                 resolve();
             };
             reader.readAsText(file);

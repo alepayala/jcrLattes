@@ -1,17 +1,21 @@
 {
   "manifest_version": 3,
   "name": "JCRLattes",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Anote o Fator de Impacto (JCR) no Currículo Lattes, analise autoria e gere relatórios estatísticos de produção científica.",
   "permissions": [
     "storage",
     "unlimitedStorage",
     "tabs",
-    "scripting"
+    "scripting",
+    "downloads"
   ],
   "host_permissions": [
     "*://*.researcherid.com/*",
-    "*://*.webofscience.com/*"
+    "*://*.webofscience.com/*",
+    "*://efomento.cnpq.br/*",
+    "*://plsql1.cnpq.br/*",
+    "*://anexosform.cnpq.br/*"
   ],
   "background": {
     "service_worker": "scripts/background.js"
@@ -23,6 +27,7 @@
     "128": "images/icon-128.png"
   },
   "action": {
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "images/icon-16.png",
       "32": "images/icon-32.png",
@@ -41,6 +46,38 @@
         "scripts/report_utils.js",
         "scripts/db_tools.js",
         "scripts/content.js"
+      ]
+    },
+    {
+      "matches": [
+        "http://efomento.cnpq.br/efomento/*",
+        "https://efomento.cnpq.br/efomento/*",
+        "http://anexosform.cnpq.br/doc/*",
+        "https://anexosform.cnpq.br/doc/*"
+      ],
+      "all_frames": true,
+      "js": [
+        "scripts/report_utils.js",
+        "scripts/db_tools.js",
+        "scripts/pdf.min.js",
+        "scripts/picc_content.js"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "images/*.png",
+        "images/*.jpg",
+        "scripts/*.js"
+      ],
+      "matches": [
+        "http://buscatextual.cnpq.br/*",
+        "https://buscatextual.cnpq.br/*",
+        "http://efomento.cnpq.br/*",
+        "https://efomento.cnpq.br/*",
+        "http://anexosform.cnpq.br/*",
+        "https://anexosform.cnpq.br/*"
       ]
     }
   ]

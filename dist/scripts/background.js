@@ -163,6 +163,114 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'download_file' && request.url && request.filename) {
+        chrome.downloads.download({
+            url: request.url,
+            filename: request.filename,
+            conflictAction: 'overwrite',
+            saveAs: false
+        }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+                console.warn('[piccTools Background] Erro ao baixar arquivo:', request.filename, chrome.runtime.lastError.message);
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true, downloadId });
+            }
+        });
+        return true;
+    }
+
+    if (request.action === 'download_data' && request.data && request.filename) {
+        const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(request.data);
+        chrome.downloads.download({
+            url: dataUrl,
+            filename: request.filename,
+            conflictAction: 'overwrite',
+            saveAs: false
+        }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+                console.warn('[piccTools Background] Erro ao salvar dados:', request.filename, chrome.runtime.lastError.message);
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true, downloadId });
+            }
+        });
+        return true;
+    }
+
+    // Abre a pagina do banco de dados da extensao (db.html).
+    // Content scripts nao podem chamar chrome.tabs.create diretamente; alem disso,
+    // abrir via window.open('') criaria a aba na origem do CNPq, que tem zoom e
+    // contexto proprios. Centralizar aqui garante origem unica para todas as aberturas.
+    if (request.action === 'open_db_page') {
+        const view = request.view === 'cvs' ? 'cvs' : 'propostas';
+        chrome.tabs.create({ url: chrome.runtime.getURL(`db.html?view=${view}`) }, () => {
+            if (chrome.runtime.lastError) {
+                console.warn('[JCRLattes] Erro ao abrir db.html:', chrome.runtime.lastError.message);
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true });
+            }
+        });
+        return true;
+    }
+
+    if (request.action === 'fetch_url' && request.url) {
+        fetch(request.url)
+            .then(async res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const buffer = await res.arrayBuffer();
+                
+                // Determine charset from header or default to iso-8859-1 for CNPq pages
+                const contentType = res.headers.get('content-type') || '';
+                let charset = 'iso-8859-1';
+                const match = contentType.match(/charset=([^\s;]+)/i);
+                if (match) {
+                    const c = match[1].toLowerCase();
+                    if (c.includes('utf-8')) charset = 'utf-8';
+                    else if (c.includes('iso') || c.includes('latin') || c.includes('windows')) charset = 'iso-8859-1';
+                }
+
+                // Peek at HTML meta tag if header was generic
+                if (charset === 'iso-8859-1') {
+                    const peekText = new TextDecoder('iso-8859-1').decode(buffer.slice(0, 1024));
+                    if (/meta[^>]+charset=["']?utf-8/i.test(peekText)) {
+                        charset = 'utf-8';
+                    }
+                }
+
+                const decoder = new TextDecoder(charset);
+                return decoder.decode(buffer);
+            })
+            .then(text => sendResponse({ success: true, text }))
+            .catch(err => sendResponse({ success: false, error: err.message }));
+        return true;
+    }
+
+    if (request.action === 'fetch_arraybuffer' && request.url) {
+        console.log(`[JCRLattes ServiceWorker] Baixando binário/PDF via background: ${request.url}`);
+        fetch(request.url)
+            .then(async res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const buffer = await res.arrayBuffer();
+                const bytes = new Uint8Array(buffer);
+                let binary = '';
+                const len = bytes.length;
+                for (let i = 0; i < len; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                const base64 = btoa(binary);
+                console.log(`[JCRLattes ServiceWorker] Binário baixado com sucesso (${len} bytes)`);
+                // o mime é necessário para montar data: URIs corretos ao embutir imagens
+                sendResponse({ success: true, base64: base64, mime: res.headers.get('content-type') || '' });
+            })
+            .catch(err => {
+                console.error(`[JCRLattes ServiceWorker] Erro ao baixar binário: ${request.url}`, err);
+                sendResponse({ success: false, error: err.message });
+            });
+        return true;
+    }
+
     if (request.action === 'fetch_rid_stats' && request.url) {
         console.log(`[RID Extraction Service Worker] Request started for URL: ${request.url}`);
         
@@ -225,5 +333,33 @@ chrome.runtime.onInstalled.addListener((details) => {
         });
 
         return true; 
+    }
+
+    if (request.action === 'open_folder') {
+        const folder = request.folder || '';
+        if (typeof chrome !== 'undefined' && chrome.downloads) {
+            if (folder) {
+                chrome.downloads.search({ query: [folder] }, (items) => {
+                    if (items && items.length > 0) {
+                        const validItem = items.find(i => i.exists !== false);
+                        if (validItem && chrome.downloads.show) {
+                            chrome.downloads.show(validItem.id);
+                            sendResponse({ success: true });
+                            return;
+                        }
+                    }
+                    if (chrome.downloads.showDefaultFolder) {
+                        chrome.downloads.showDefaultFolder();
+                        sendResponse({ success: true });
+                    } else {
+                        sendResponse({ success: false });
+                    }
+                });
+                return true;
+            } else if (chrome.downloads.showDefaultFolder) {
+                chrome.downloads.showDefaultFolder();
+                sendResponse({ success: true });
+            }
+        }
     }
 });

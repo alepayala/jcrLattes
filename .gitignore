@@ -12,7 +12,10 @@ venv/
 *.zip
 network_graph.png
 jcr_lattes_database_backup.json
+# CVs e paginas de teste salvos localmente (nao versionar)
 *.html
+# ...mas os HTML da propria extensao fazem parte do pacote:
+!dist/*.html
 test_pages/
 
 # IDEs and Editors

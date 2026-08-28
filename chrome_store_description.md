@@ -1,4 +1,4 @@
-JCRLattes - Versão 1.6.0
+JCRLattes - Versão 1.7.0
 
 Resumo:
 Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes, autoria e orientações em segundos.
@@ -27,15 +27,15 @@ Principais Funcionalidades:
 * Banco de Dados de Currículos: Salve múltiplos currículos Lattes localmente no seu navegador para consultas futuras e análises comparativas, com visualização nativa do Índice H e total de citações diretamente na listagem.
 * Consolidação Instantânea de Grupos: Atribua IDs customizados aos currículos para compilar métricas integradas em tempo real. 
 * Relatório de Seleção: Gere o resumo e o relatório consolidado apenas dos currículos marcados na tabela, sem precisar criar um ID de grupo — ideal para análises pontuais.
-* Salvamento Simultâneo Confiável: Cada currículo é armazenado individualmente no banco local. Atualize vários CVs em abas paralelas (inclusive com Auto-Save) sem risco de um sobrescrever o outro.
+* Salvamento Simultâneo Confiável: Cada currículo é armazenado individualmente no banco local. Atualize vários CVs em abas paralelas sem risco de um sobrescrever o outro.
 * Deduplicação Inteligente: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria/colaboração repetidos entre os membros, gerando métricas reais e não infladas da produção coletiva.
 * Acesso Direto Integrado: Atalho flutuante injetado na tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
-* Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status (⚠️ atualização necessária / 🔄 atualizado) na coluna de ações, com botão direto para abrir o Lattes. O ícone de ação global se adapta automaticamente ao conjunto selecionado.
+* Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status na coluna de ações, com botão direto para abrir o Lattes.
 * Atualização Simplificada (Update): Um botão de atualização rápida permite abrir o currículo Lattes em uma nova aba para reprocessar e sincronizar os dados mais recentes.
 * Backup e Portabilidade: Exporte todo o seu banco de dados em formato JSON para restaurá-lo em outros dispositivos ou exporte os dados tabulados em CSV para análise no Microsoft Excel ou ferramentas estatísticas. Na importação, o sistema compara automaticamente as versões e mantém sempre o registro mais recente.
 
 3. Análise de Autoria, Patentes, Orientações e Eventos:
-* Seletor de Rank de Autoria Customizado: Defina a posição de autoria desejada (1º, 2º, etc.) para contagem e métricas de autoria na tabela do Lattes, no Gerenciador de Banco de Dados e nos relatórios de grupo, atualizando dynamicamente os cabeçalhos das tabelas (ex: 2º Autor, 3º Autor).
+* Seletor de Rank de Autoria Customizado: Defina a posição de autoria desejada (1º, 2º, etc.) para contagem e métricas de autoria na tabela do Lattes, no Gerenciador de Banco de Dados e nos relatórios de grupo, atualizando dinamicamente os cabeçalhos das tabelas (ex: 2º Autor, 3º Autor).
 * Análise Avançada de Autoria: Identificação automatizada do papel do pesquisador como Primeiro Autor (1º), Autor em Rank Específico ou Último Autor (`Ult`) em cada publicação.
 * Média Real de Coautores: Cálculo da média de coautores por artigo, com opção de desconsiderar Grandes Colaborações (artigos com "et al." ou consórcios multicêntricos) para evitar distorções estatísticas.
 * Portfólio de Inovação e Patentes: Gestão e contagem estruturada de patentes classificadas por status (Depósito, Concessão, etc.).
@@ -61,7 +61,7 @@ Como Usar:
 4. Para salvar o currículo no seu banco de dados local ou configurar filtros, utilize o painel lateral de opções da extensão.
 
 5. ⚠️ Atenção e Avisos Importantes:
-* Extração de Dados: O JCRLattes depende da formatação original do currículo Lattes. Preenchimentos atípicos ou informações inseridas fora do padrão pelo autor podem gerar inconsistências na extração.
+* Extração de Dados: O JCRLattes depende da formatação original do currículo Lattes. Preenchimentos atípicos ou informações inseridas fora do padrão pelo autor me podem gerar inconsistências na extração.
 * Carregamento Dinâmico: Algumas informações do Lattes são carregadas de forma assíncrona. A extensão precisa aguardar essas atualizações em tempo real, sendo suscetível a oscilações e lentidões na conexão com os servidores do CNPq.
 * Dados do ResearcherID: As requisições de citações e publicações para o ResearcherID podem falhar dependendo das restrições de acesso da base de dados. Preferencialmente, certifique-se de estar logado na Web of Science ou de utilizar uma rede com acesso institucional liberado (CAFe).
 * Relatórios em Grupo: A geração de relatórios coletivos, especialmente a deduplicação de produções, pode exigir muito processamento. Caso seu navegador mostre uma notificação alertando lentidão ou inatividade na página, selecione "Aguardar" e tenha paciência até a conclusão.
@@ -74,3 +74,22 @@ O JCRLattes é um projeto de código aberto! Acesse o nosso repositório oficial
 
 --------------------------------------------------
 Eleve o nível de sua gestão acadêmica e análise de produção científica com o JCRLattes.
+
+--------------------------------------------------
+
+### 📝 JUSTIFICATIVA PARA A PERMISSÃO "downloads" (CHROME WEB STORE SUBMISSION FORM)
+
+**English (Recommended for Chrome Web Store Developer Console Form):**
+> The "downloads" permission is strictly required to allow users to export and save their academic data and reports to their local disk. Specifically:
+> 1. Exporting local database backups as JSON files for data portability, backup, and restoration across devices.
+> 2. Exporting consolidated scientific production tables and metrics as CSV files for offline statistical analysis in spreadsheet applications (e.g., Microsoft Excel).
+> 3. Saving offline backup copies of academic document reports (in PDF and HTML formats) directly to the user's local Downloads folder for offline consultation when academic servers are unavailable.
+> No automatic or background downloads occur without explicit user interaction (clicking export/download buttons).
+
+**Português (Para conferência do desenvolvedor):**
+> A permissão "downloads" é estritamente necessária para permitir que o usuário exporte e salve seus dados e relatórios acadêmicos no disco rígido. Especificamente:
+> 1. Exportação de backups do banco de dados local em arquivos JSON para portabilidade e restauração em outros dispositivos.
+> 2. Exportação de relatórios e métricas de produção científica em arquivos CSV para análise estatística em planilhas (como o Excel).
+> 3. Salvamento de cópias de backup de documentos acadêmicos (PDF e HTML) na pasta Downloads local para consulta offline quando os servidores estiverem indisponíveis.
+> Nenhum download é realizado em segundo plano sem a ação direta e explícita do usuário (clique nos botões de exportação/salvamento).
+
