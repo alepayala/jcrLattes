@@ -201,13 +201,37 @@ window.JCRDBTools = {
     },
 
     // Caminho da pasta da proposta nos Downloads (mesma regra usada pelo piccTools)
+    // Nome da pasta da proposta nos Downloads:
+    //   piccData/<proponente> - <processo>
+    // A faixa foi retirada do nome: a extracao dela do PDF nem sempre e confiavel, e um
+    // valor errado (ou ausente) mudaria a pasta da proposta.
+    // Implementacao unica: piccTools e as mensagens do relatorio usam esta funcao.
+    //
+    // O nome e reduzido a ASCII (sem acentos nem pontuacao). Acentos podem ser gravados
+    // em formas Unicode diferentes (NFC/NFD) por quem cria e por quem le o caminho, e
+    // duas cadeias visualmente iguais deixam de casar — foi o que impedia de localizar a
+    // pasta pelo historico de downloads.
+    _nomeSeguro: function (v, barraViraHifen) {
+        let t = String(v || '');
+        if (barraViraHifen) t = t.replace(/[\/\\]/g, '-');
+        return t
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')   // remove acentos
+            .replace(/[^A-Za-z0-9 _-]/g, '')                        // remove pontuacao
+            .replace(/\s+/g, ' ')
+            .trim();
+    },
+
     _projectFolderPath: function (proc) {
         if (!proc) return 'piccData/processo';
-        const processId = proc.processId || proc.customId || 'processo';
-        const propName = (proc.proponente && proc.proponente.name) ? proc.proponente.name : (proc.name || '');
-        const safeProcessId = String(processId).replace(/[\/\?%*:|"<>]/g, '-').trim();
-        const safePropName = String(propName).replace(/[\/\?%*:|"<>]/g, '').trim();
-        return `piccData/${safePropName ? `${safeProcessId} - ${safePropName}` : safeProcessId}`;
+
+        const processId = this._nomeSeguro(proc.processId || proc.customId || '', true);
+        const propName = this._nomeSeguro((proc.proponente && proc.proponente.name) ? proc.proponente.name : (proc.name || ''));
+
+        const partes = [];
+        if (propName) partes.push(propName);
+        if (processId) partes.push(processId);
+
+        return `piccData/${partes.join(' - ') || 'processo'}`;
     },
 
     // Chave do CV de um pesquisador dentro dos blobs da proposta
@@ -1095,7 +1119,7 @@ window.JCRDBTools = {
                     .rid-link-cell { text-align: center; }
                     .numeric-cell { text-align: center; }
                     .bolsa-cell { min-width: 95px; white-space: nowrap; text-align: center; }
-                    .executora-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                    .executora-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
                     tr:hover { background-color: #f9f9f9; }
                     .name-cell { min-width: 150px; }
 
@@ -2117,9 +2141,8 @@ window.JCRDBTools = {
         const proponenteName = prop.name || processData.name || 'Proponente';
 
         const safeProcessId = (processData.processId || 'projeto').replace(/[\/\\?%*:|"<>]/g, '-').trim();
-        const safePropName = proponenteName.replace(/[\/\\?%*:|"<>]/g, '').trim();
 
-        const folderPath = safePropName ? `piccData/${safeProcessId} - ${safePropName}` : `piccData/${safeProcessId}`;
+        const folderPath = this._projectFolderPath(processData);
         const uf = prop.uf || '-';
         const inst = prop.instituicao || '-';
 
@@ -2269,8 +2292,7 @@ window.JCRDBTools = {
             const prop = proc.proponente || {};
             const proponenteName = prop.name || proc.name || 'Proponente';
             const safeProcessId = (proc.processId || 'projeto').replace(/[\/\\?%*:|"<>]/g, '-').trim();
-            const safePropName = proponenteName.replace(/[\/\\?%*:|"<>]/g, '').trim();
-            const folderPath = safePropName ? `piccData/${safeProcessId} - ${safePropName}` : `piccData/${safeProcessId}`;
+            const folderPath = this._projectFolderPath(proc);
             const inst = prop.instituicao || '-';
 
             // Navigation buttons for projects
@@ -2493,6 +2515,75 @@ window.JCRDBTools = {
             const totalCount = teamMembers.length;
             hasGroupCvs = foundCount > 0;
 
+            // ---- Quadro Geral: totais por categoria ----
+            // Usa o quadro do proprio PDF da proposta (contagem oficial do CNPq). Se ele
+            // nao tiver sido capturado, calcula a partir das categorias dos membros extraidos.
+            let quadroLinhas = Array.isArray(proc.quadroGeral) ? proc.quadroGeral.filter(q => q && q.categoria) : [];
+            let quadroOrigem = 'PDF da proposta';
+            if (quadroLinhas.length === 0 && Array.isArray(teamMembers) && teamMembers.length > 0) {
+                const contagem = {};
+                teamMembers.forEach(m => {
+                    // nesta lista a categoria vem em "role" (o proponente entra como
+                    // "Proponente / Coordenador"); "categoria" fica como alternativa
+                    const bruto = m && (m.role || m.categoria);
+                    const cat = bruto ? String(bruto).trim() : 'Sem categoria';
+                    contagem[cat] = (contagem[cat] || 0) + 1;
+                });
+                quadroLinhas = Object.keys(contagem).sort().map(c => ({ categoria: c, quantidade: contagem[c] }));
+                quadroOrigem = 'calculado a partir da equipe extraída';
+            }
+
+            // Ordem fixa das colunas: proponente, pesquisador, colaborador, pesquisador
+            // estrangeiro, tecnico, [categorias nao previstas] e Aluno sempre por ultimo.
+            const semAcento = (c) => String(c || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+            const ordemCategoria = (cat) => {
+                const c = semAcento(cat);
+                if (c.startsWith('proponente')) return 0;
+                if (c.includes('estrangeir')) return 3;        // pesquisador estrangeiro
+                if (c.startsWith('tecnic')) return 4;
+                if (c.startsWith('aluno')) return 6;           // sempre no fim
+                if (c.startsWith('colaborador')) return 2;
+                if (c.startsWith('pesquisador')) return 1;
+                return 5;                                      // demais, antes de Aluno
+            };
+            quadroLinhas = quadroLinhas.slice().sort((a, b) => {
+                const d = ordemCategoria(a.categoria) - ordemCategoria(b.categoria);
+                return d !== 0 ? d : String(a.categoria).localeCompare(String(b.categoria), 'pt-BR');
+            });
+
+            let quadroGeralHtml = '';
+            if (quadroLinhas.length > 0) {
+                const totalParticipantes = quadroLinhas.reduce((soma, q) => soma + (Number(q.quantidade) || 0), 0);
+                const colunas = quadroLinhas.map(q => `
+                    <th style="padding: 8px 12px; text-align: center; border-left: 1px solid #BBDEFB; font-weight: bold; white-space: nowrap;">${this._esc(q.categoria)}</th>`).join('');
+                const valores = quadroLinhas.map(q => `
+                    <td style="padding: 10px 12px; text-align: center; border-left: 1px solid #E3F2FD; font-size: 1.25em; font-weight: bold; color: #0D47A1;">${this._esc(String(q.quantidade))}</td>`).join('');
+
+                quadroGeralHtml = `
+                <div style="margin-bottom: 25px; background: white; border: 1px solid #BBDEFB; border-radius: 8px; padding: 15px;">
+                    <div style="color: #1565C0; font-weight: bold; font-size: 1.05em; margin-bottom: 10px;">
+                        👥 Quadro Geral da Equipe
+                        <span style="font-size: 0.8em; color: #666; font-weight: normal;">(${this._esc(quadroOrigem)})</span>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                        <thead>
+                            <tr style="background: #E3F2FD; color: #0D47A1;">
+                                <th style="padding: 8px 12px; text-align: left; white-space: nowrap;">Participantes</th>
+                                ${colunas}
+                                <th style="padding: 8px 12px; text-align: center; border-left: 2px solid #90CAF9; white-space: nowrap;">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="padding: 10px 12px; text-align: left; color: #555;">Nº de participantes</td>
+                                ${valores}
+                                <td style="padding: 10px 12px; text-align: center; border-left: 2px solid #90CAF9; font-size: 1.25em; font-weight: bold; color: #1B5E20; background: #E8F5E9;">${totalParticipantes}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>`;
+            }
+
             const integratedReportTitleHtml = foundCount > 0 ? `
                 <div style="background: #E3F2FD; border: 1px solid #90CAF9; border-radius: 8px; padding: 15px 20px; margin: 25px 0 20px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                     <div>
@@ -2551,6 +2642,7 @@ window.JCRDBTools = {
                 ${filesHtml}
                 ${reviewerNotesHtml}
                 ${teamTableHtml}
+                ${quadroGeralHtml}
                 ${integratedReportTitleHtml}
             `;
 
@@ -2793,7 +2885,7 @@ window.JCRDBTools = {
         if (cvData.groupMembers && cvData.groupMembers.length > 0) {
             let theadHtml = `<tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border};">`;
             this.METRICS_CONFIG.forEach(m => {
-                if (['prioridade', 'faixa', 'customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
+                if (['prioridade', 'faixa', 'instituicaoExecutora', 'ridPublications', 'customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
                 const titleAttr = m.title ? ` title="${m.title}"` : '';
                 let style = 'padding: 8px; font-weight: bold; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #ccc;';
                 if (m.division) style += ' border-left: 1px solid #bbb;';
@@ -2808,7 +2900,7 @@ window.JCRDBTools = {
             sortedMembers.forEach(cv => {
                 tbodyHtml += `<tr>`;
                 this.METRICS_CONFIG.forEach(m => {
-                    if (['prioridade', 'faixa', 'customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
+                    if (['prioridade', 'faixa', 'instituicaoExecutora', 'ridPublications', 'customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
                     const val = cv[m.key] !== undefined ? cv[m.key] : '';
                     let style = 'padding: 6px 8px; border-bottom: 1px solid #eee;';
                     if (m.division) style += ' border-left: 1px solid #bbb;';
@@ -3101,7 +3193,7 @@ window.JCRDBTools = {
                 e.preventDefault();
                 const folder = btnOpenFolder.getAttribute('data-folder');
                 if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-                    chrome.runtime.sendMessage({ action: 'open_folder', folder: folder });
+                    chrome.runtime.sendMessage({ action: 'open_folder', folder });
                 }
             });
         }
@@ -3225,10 +3317,9 @@ window.JCRDBTools = {
 
         updateDocButtonsUI();
 
-        const safeProcId = parentGroupData ? (parentGroupData.processId || 'projeto').replace(/[\/\\?%*:|"<>]/g, '-').trim() : 'projeto';
-        const propName = parentGroupData && parentGroupData.proponente ? parentGroupData.proponente.name : '';
-        const safePropName = String(propName).replace(/[\/\\?%*:|"<>]/g, '').trim();
-        const localFolder = safePropName ? `piccData/${safeProcId} - ${safePropName}` : `piccData/${safeProcId}`;
+        const safeProcId = parentGroupData ? String(parentGroupData.processId || 'projeto').replace(/[\/\\?%*:|"<>]/g, '-').trim() : 'projeto';
+        // Mesma funcao usada na gravacao, para a mensagem apontar a pasta correta
+        const localFolder = parentGroupData ? this._projectFolderPath(parentGroupData) : 'piccData/projeto';
 
         const base64ToBlob = (base64, mimeType = 'application/pdf') => {
             const binaryString = atob(base64);

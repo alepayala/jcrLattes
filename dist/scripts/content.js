@@ -1974,6 +1974,26 @@ async function buildStandaloneCvHtml() {
     el.removeAttribute('data-original-display');
   });
 
+  // Secoes recolhidas pelo clique no titulo voltam a aparecer na copia, devolvendo o
+  // display que tinham antes (preserva o que o proprio Lattes mantem oculto).
+  clone.querySelectorAll('[data-jcr-collapsed]').forEach(el => {
+    el.style.display = el.getAttribute('data-jcr-prev-display') || '';
+    el.removeAttribute('data-jcr-collapsed');
+    el.removeAttribute('data-jcr-prev-display');
+  });
+
+  // Remove os controles de recolher injetados pela extensao (marcador e titulo do Resumo)
+  clone.querySelectorAll('.jcr-section-toggle, h1.jcr-section-title').forEach(el => el.remove());
+  clone.querySelectorAll('[data-jcr-collapsible]').forEach(wrapper => {
+    wrapper.removeAttribute('data-jcr-collapsible');
+    const titulo = wrapper.querySelector('h1, h2, h3');
+    if (titulo) {
+      titulo.style.cursor = '';
+      titulo.style.userSelect = '';
+      titulo.removeAttribute('title');
+    }
+  });
+
   // Separadores de ano recolhidos passam a aparecer expandidos na copia
   clone.querySelectorAll('.jcr-lattes-year-separator[data-collapsed="true"]').forEach(sep => {
     sep.setAttribute('data-collapsed', 'false');
@@ -2004,7 +2024,18 @@ async function buildStandaloneCvHtml() {
   return html;
 }
 
-async function saveCvToProposalFolders(nameLink) {
+// Quantas anotacoes de JCR ainda nao chegaram. O Lattes preenche o atributo
+// original-title de cada .ajaxJCR por AJAX, uma requisicao por periodico: enquanto
+// isso nao termina, os artigos aparecem como "Nao classificado".
+function contarJcrPendentes() {
+  return document.querySelectorAll('.ajaxJCR:not([original-title])').length;
+}
+
+function cvDadosProntos() {
+  return contarJcrPendentes() === 0 && !window.isFetchingRidStats;
+}
+
+async function saveCvToProposalFolders(nameLink, tentativa = 0) {
   if (window.__jcrCvProposalSaveDone) return;
   const DB = window.JCRDBTools;
   if (!DB || typeof DB.findProposalsForResearcher !== 'function') return;
@@ -2017,12 +2048,34 @@ async function saveCvToProposalFolders(nameLink) {
     const alvos = await DB.findProposalsForResearcher(lattesId, nome);
     if (!alvos || alvos.length === 0) return;   // nao pertence a nenhuma proposta: nada a fazer
 
+    // Espera os fatores de impacto chegarem antes de salvar. Sem isso a copia era
+    // gravada aos 2s com boa parte dos artigos ainda como "Nao classificado".
+    const MAX_TENTATIVAS = 40;   // ~60s de espera
+    if (!cvDadosProntos() && tentativa < MAX_TENTATIVAS) {
+      if (window.__jcrCvProposalSaveTimer) return;   // ja existe uma espera em curso
+      if (tentativa === 0) {
+        console.log(`[JCRLattes] Aguardando ${contarJcrPendentes()} fator(es) de impacto antes de salvar o CV...`);
+      }
+      window.__jcrCvProposalSaveTimer = setTimeout(() => {
+        window.__jcrCvProposalSaveTimer = null;
+        saveCvToProposalFolders(nameLink, tentativa + 1);
+      }, 1500);
+      return;
+    }
+
+    const pendentes = contarJcrPendentes();
+    if (pendentes > 0) {
+      console.warn(`[JCRLattes] Tempo esgotado: ${pendentes} fator(es) de impacto nao chegaram. Salvando assim mesmo.`);
+    }
+
     window.__jcrCvProposalSaveDone = true;
     const html = await buildStandaloneCvHtml();
     const res = await DB.saveCvToMatchingProposals(lattesId, nome, html);
 
     if (res.propostas.length > 0) {
-      DB.showToast(`CV salvo na pasta de ${res.propostas.length} proposta(s): ${res.propostas.join(', ')}`);
+      const aviso = pendentes > 0 ? ` (${pendentes} sem JCR: dados incompletos)` : '';
+      DB.showToast(`CV salvo na pasta de ${res.propostas.length} proposta(s): ${res.propostas.join(', ')}${aviso}`,
+                   pendentes > 0 ? '#e67e22' : '#4CAF50');
       console.log('[JCRLattes] CV salvo nas propostas:', res.propostas);
     }
   } catch (e) {
@@ -2071,8 +2124,25 @@ function setupCollapsibleSections(sections) {
     clickable.title = 'Clique para recolher/expandir esta secao';
 
     const aplicar = (recolhido) => {
-      conteudo.forEach(el => { el.style.display = recolhido ? 'none' : ''; });
-      if (section.footerElement) section.footerElement.style.display = recolhido ? 'none' : '';
+      // Guarda o display anterior ao recolher e o devolve ao expandir. Sem isso, expandir
+      // faria display='' em todos os filhos e revelaria o que o PROPRIO Lattes mantem
+      // oculto. O atributo data-jcr-collapsed ainda marca o que foi escondido por nos,
+      // para o salvamento do CV saber o que reexpandir.
+      const marcar = (el) => {
+        if (recolhido) {
+          if (!el.hasAttribute('data-jcr-collapsed')) {
+            el.setAttribute('data-jcr-prev-display', el.style.display || '');
+            el.setAttribute('data-jcr-collapsed', 'true');
+            el.style.display = 'none';
+          }
+        } else if (el.hasAttribute('data-jcr-collapsed')) {
+          el.style.display = el.getAttribute('data-jcr-prev-display') || '';
+          el.removeAttribute('data-jcr-collapsed');
+          el.removeAttribute('data-jcr-prev-display');
+        }
+      };
+      conteudo.forEach(marcar);
+      if (section.footerElement) marcar(section.footerElement);
       icone.textContent = recolhido ? '[+]' : '[-]';
     };
 

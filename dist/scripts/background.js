@@ -337,29 +337,38 @@ chrome.runtime.onInstalled.addListener((details) => {
 
     if (request.action === 'open_folder') {
         const folder = request.folder || '';
-        if (typeof chrome !== 'undefined' && chrome.downloads) {
-            if (folder) {
-                chrome.downloads.search({ query: [folder] }, (items) => {
-                    if (items && items.length > 0) {
-                        const validItem = items.find(i => i.exists !== false);
-                        if (validItem && chrome.downloads.show) {
-                            chrome.downloads.show(validItem.id);
-                            sendResponse({ success: true });
-                            return;
-                        }
-                    }
-                    if (chrome.downloads.showDefaultFolder) {
-                        chrome.downloads.showDefaultFolder();
-                        sendResponse({ success: true });
-                    } else {
-                        sendResponse({ success: false });
-                    }
-                });
-                return true;
-            } else if (chrome.downloads.showDefaultFolder) {
+        if (!chrome.downloads) { sendResponse({ success: false }); return; }
+
+        const abrirPastaPadrao = () => {
+            if (chrome.downloads.showDefaultFolder) {
                 chrome.downloads.showDefaultFolder();
-                sendResponse({ success: true });
+                sendResponse({ success: true, fallback: true });
+            } else {
+                sendResponse({ success: false });
             }
-        }
+        };
+
+        if (!folder) { abrirPastaPadrao(); return true; }
+
+        // chrome.downloads.show() abre o gerenciador de arquivos JA na pasta do arquivo,
+        // entao basta achar um download que esteja dentro da pasta da proposta.
+        // No Windows o item.filename e um caminho absoluto com barras INVERTIDAS; a busca
+        // anterior comparava com a string de barras normais, nunca casava e caia na raiz
+        // de Downloads. Normalizamos os separadores dos dois lados antes de comparar.
+        const normalizar = (v) => String(v || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+        const alvo = normalizar(folder) + '/';
+
+        chrome.downloads.search({ limit: 0, orderBy: ['-startTime'] }, (items) => {
+            const encontrado = (items || []).find(i =>
+                i && i.exists !== false && i.filename && normalizar(i.filename).includes(alvo));
+            if (encontrado && chrome.downloads.show) {
+                chrome.downloads.show(encontrado.id);
+                sendResponse({ success: true });
+            } else {
+                console.warn('[piccTools Background] Nenhum arquivo encontrado em', folder, '- abrindo a pasta de Downloads.');
+                abrirPastaPadrao();
+            }
+        });
+        return true;
     }
 });

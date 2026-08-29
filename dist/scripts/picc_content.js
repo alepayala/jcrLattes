@@ -347,16 +347,14 @@
     }
 
     // Helper to format project folder path: Downloads/piccData/<ProcessId> - <NomeProponente>/
+    // Implementacao unica em JCRDBTools._projectFolderPath (db_tools.js), para que a
+    // gravacao e as mensagens do relatorio apontem sempre para a mesma pasta.
     function getProjectFolderPath(item) {
-        if (!item) return 'piccData/processo';
-        const processId = item.processId || item.customId || 'processo';
-        const propName = (item.proponente && item.proponente.name) ? item.proponente.name : (item.name || '');
-
-        const safeProcessId = String(processId).replace(/[\/\\?%*:|"<>]/g, '-').trim();
-        const safePropName = String(propName).replace(/[\/\\?%*:|"<>]/g, '').trim();
-
-        const folderName = safePropName ? `${safeProcessId} - ${safePropName}` : safeProcessId;
-        return `piccData/${folderName}`;
+        if (window.JCRDBTools && typeof window.JCRDBTools._projectFolderPath === 'function') {
+            return window.JCRDBTools._projectFolderPath(item);
+        }
+        console.warn('[piccTools] JCRDBTools._projectFolderPath indisponivel.');
+        return 'piccData/processo';
     }
 
     // Save proposal PDF, CV HTML, annexes, and review HTMLs to Downloads/piccData/<ProcessId> - <NomeProponente>/
@@ -687,6 +685,51 @@
             }
         });
 
+        // Limites das colunas derivados do cabecalho que se repete em cada bloco de membro
+        // (NOME | FORMACAO/TITULACAO | BOLSA | INSTITUICAO/DEPARTAMENTO | AREAS DE ATUACAO).
+        // Antes eram fixos (45/160/225/258/400) e quebravam em PDFs com outra margem: num
+        // deles o nome comeca em x=34 e seus primeiros pedacos caiam fora da faixa do nome,
+        // produzindo nomes truncados ("Lucas Anhezini de Araujo" -> "Anhezini de").
+        const colunas = (() => {
+            const padrao = { nome: 45, formacao: 160, bolsa: 225, inst: 258, areas: 400 };
+            if (equipeIdx < 0) return padrao;
+
+            const acharX = (re) => {
+                for (let j = equipeIdx; j < allPageItems.length; j++) {
+                    if (re.test(allPageItems[j].str.trim())) return allPageItems[j].x;
+                }
+                return null;
+            };
+
+            const xNome = acharX(/^NOME$/i);
+            const xForm = acharX(/^(FORMA|TITULA)/i);
+            let xInst = acharX(/^(INSTITUI|DEPARTAMENTO)/i);
+            let xBolsa = acharX(/^BOLSA/i);
+            let xAreas = acharX(/^([ÁA]REAS|ATUA)/i);
+
+            // Sem os dois marcos da esquerda nao ha como derivar: mantem o comportamento anterior
+            if (xNome === null || xForm === null || !(xNome < xForm)) return padrao;
+
+            // INSTITUICAO costuma ficar a ~42% do caminho entre FORMACAO e AREAS
+            if ((xInst === null || xInst <= xForm) && xAreas !== null && xAreas > xForm) {
+                xInst = xForm + (xAreas - xForm) * 0.42;
+            }
+            if (xInst === null || xInst <= xForm) return padrao;
+
+            // BOLSA fica entre formacao e instituicao; se o rotulo nao aparecer, estima
+            if (xBolsa === null || xBolsa <= xForm || xBolsa >= xInst) xBolsa = xForm + (xInst - xForm) * 0.55;
+            if (xAreas === null || xAreas <= xInst) xAreas = xInst + 140;
+
+            const folga = 6;   // itens podem comecar poucos pontos a esquerda do rotulo
+            return {
+                nome: xNome - folga,
+                formacao: xForm - folga,
+                bolsa: xBolsa - folga,
+                inst: xInst - folga,
+                areas: xAreas - folga
+            };
+        })();
+
         let currentCategory = 'Pesquisador';
 
         memberBlockEndIndices.forEach((endIdx, i) => {
@@ -759,14 +802,19 @@
                     continue;
                 }
 
-                // Column 1 (NOME): 45 <= X < 160
-                if (item.x >= 45 && item.x < 160) nameParts.push(item.str);
-                // Column 2 (FORMAÇÃO/TITULAÇÃO): 160 <= X < 225
-                if (item.x >= 160 && item.x < 225) formacaoParts.push(item.str);
-                // Column 3 (BOLSA): 225 <= X < 258
-                if (item.x >= 225 && item.x < 258) bolsaParts.push(item.str);
-                // Column 4 (INSTITUIÇÃO/DEPARTAMENTO): 258 <= X < 400
-                if (item.x >= 258 && item.x < 400) instParts.push(item.str);
+                // A URL do curriculo pode vir como item proprio na mesma coluna do nome
+                // (formato em que "URL DO CURRICULO" e o link ficam na mesma linha).
+                // Sem este filtro o link era concatenado ao nome do membro.
+                const txtItem = item.str.trim().toLowerCase();
+                if (txtItem.startsWith('http://') || txtItem.startsWith('https://') || txtItem.includes('lattes.cnpq.br')) {
+                    continue;
+                }
+
+                // Colunas delimitadas pelos X do cabecalho (ver "colunas" acima)
+                if (item.x >= colunas.nome && item.x < colunas.formacao) nameParts.push(item.str);
+                else if (item.x >= colunas.formacao && item.x < colunas.bolsa) formacaoParts.push(item.str);
+                else if (item.x >= colunas.bolsa && item.x < colunas.inst) bolsaParts.push(item.str);
+                else if (item.x >= colunas.inst && item.x < colunas.areas) instParts.push(item.str);
             }
 
             const name = nameParts.join(' ').replace(/\s+/g, ' ').trim();
@@ -868,6 +916,62 @@
             return 0;
         });
 
+        // ---- Quadro Geral: totais por categoria informados no proprio PDF ----
+        //   Quadro Geral
+        //   CATEGORIA        NUMERO DE PARTICIPANTES
+        //   Pesquisador      5
+        //   Aluno            10
+        // O numero pode vir no MESMO item de texto da categoria ("Pesquisador 5") ou numa
+        // coluna a direita, com y proximo — tratamos os dois casos por coordenada.
+        let quadroGeral = [];
+        {
+            const iQg = allPageItems.findIndex(it => /^Quadro\s+Geral\b/i.test(it.str.trim()));
+            if (iQg >= 0) {
+                const pagina = allPageItems[iQg].page;
+                const yTopo = allPageItems[iQg].y;
+                let yFim = yTopo - 120;   // limite inferior do bloco
+
+                // ...ou ate o inicio da secao seguinte, se ela vier antes
+                for (let k = 0; k < allPageItems.length; k++) {
+                    const it = allPageItems[k];
+                    if (it.page !== pagina || it.y >= yTopo) continue;
+                    if (/^(RESUMO|PALAVRAS|OBJETIVO|METODOLOGIA)/i.test(it.str.trim())) {
+                        yFim = Math.max(yFim, it.y);
+                        break;
+                    }
+                }
+
+                const bloco = allPageItems.filter(it => it.page === pagina && it.y < yTopo && it.y > yFim);
+                const categorias = [];   // { y, texto }
+                const numeros = [];      // { y, valor }
+
+                bloco.forEach(it => {
+                    const t = it.str.trim();
+                    if (!t) return;
+                    if (/^(CATEGORIA|N[ÚU]MERO|DE|PARTICIPANTES)$/i.test(t)) return;   // cabecalho
+                    if (/^N[ÚU]MERO\s+DE\s+PARTICIPANTES$/i.test(t)) return;
+                    if (/^\d+$/.test(t)) { numeros.push({ y: it.y, valor: parseInt(t, 10) }); return; }
+
+                    const juntos = t.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.\-]*?)\s+(\d+)$/);
+                    if (juntos) {
+                        quadroGeral.push({ categoria: juntos[1].replace(/\s+/g, ' ').trim(), quantidade: parseInt(juntos[2], 10) });
+                        return;
+                    }
+                    if (/^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.\-]*$/.test(t) && t.length <= 40) {
+                        categorias.push({ y: it.y, texto: t.replace(/\s+/g, ' ').trim() });
+                    }
+                });
+
+                // Layout em duas colunas: casa cada categoria com o numero de y proximo
+                if (quadroGeral.length === 0) {
+                    categorias.forEach(c => {
+                        const n = numeros.find(v => Math.abs(v.y - c.y) <= 4);
+                        if (n) quadroGeral.push({ categoria: c.texto, quantidade: n.valor });
+                    });
+                }
+            }
+        }
+
         const supplementaryLink = attachments.length > 0 ? attachments[0].url : '';
 
         // Validação de sanidade: a extração da equipe depende de coordenadas X fixas do
@@ -893,6 +997,7 @@
             edital: edital,
             faixa: faixa,
             instituicaoExecutora: instituicaoExecutora,
+            quadroGeral: quadroGeral,
             proponente: proponenteObj,
             pdfLink: pdfUrl || '',
             supplementaryLink: supplementaryLink,
@@ -1132,6 +1237,7 @@
                 existing.edital = processData.edital || existing.edital || '';
                 existing.faixa = processData.faixa || existing.faixa || '-';
                 existing.instituicaoExecutora = processData.instituicaoExecutora || existing.instituicaoExecutora || '';
+                if (Array.isArray(processData.quadroGeral) && processData.quadroGeral.length > 0) existing.quadroGeral = processData.quadroGeral;
                 existing.pdfLink = pdfUrl;
                 if (cvCongeladoUrl) existing.cvCongelado = cvCongeladoUrl;
                 if (processData.supplementaryLink) existing.supplementaryLink = processData.supplementaryLink;
@@ -1150,6 +1256,7 @@
                     edital: processData.edital || '',
                     faixa: processData.faixa || '-',
                     instituicaoExecutora: processData.instituicaoExecutora || '',
+                    quadroGeral: processData.quadroGeral || [],
                     isProcesso: true,
                     prioridade: '-',
                     filesDownloaded: true,
@@ -1463,8 +1570,36 @@
                 extractBtn.onmouseout = () => extractBtn.style.backgroundColor = '#2E7D32';
                 extractBtn.addEventListener('click', extractTableData);
 
+                // Botao para interromper um lote longo. Fica oculto ate a extracao comecar.
+                const stopBtn = document.createElement('button');
+                stopBtn.id = 'picc-stop-btn';
+                stopBtn.innerText = '⏹ Parar';
+                stopBtn.title = 'Interrompe a extracao apos concluir a proposta em andamento. As propostas ja processadas permanecem salvas.';
+                stopBtn.style.cssText = `
+                    background-color: #C62828;
+                    color: white;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-weight: bold;
+                    transition: background 0.2s;
+                    white-space: nowrap;
+                    margin-left: 8px;
+                    display: none;
+                `;
+                stopBtn.onmouseover = () => stopBtn.style.backgroundColor = '#8E0000';
+                stopBtn.onmouseout = () => stopBtn.style.backgroundColor = '#C62828';
+                stopBtn.addEventListener('click', () => {
+                    piccAbortarExtracao = true;
+                    stopBtn.disabled = true;
+                    stopBtn.innerText = '⏹ Parando...';
+                    setStatusGlobal('Parando apos concluir a proposta em andamento...', '#ffcc80');
+                });
+
                 toolbar.appendChild(filterInput);
                 toolbar.appendChild(extractBtn);
+                toolbar.appendChild(stopBtn);
             } else if (isPdfPage) {
                 const processPdfBtn = document.createElement('button');
                 processPdfBtn.innerText = 'Reprocessar este PDF';
@@ -1534,6 +1669,32 @@
         if (isPdfPage && !window.piccToolsDirectPdfProcessed) {
             window.piccToolsDirectPdfProcessed = true;
             processDirectPDF(window.location.href);
+        }
+    }
+
+    // Pedido de interrupcao do lote em andamento (botao "Parar")
+    let piccAbortarExtracao = false;
+
+    function setStatusGlobal(msg, cor) {
+        const el = document.getElementById('picc-tools-status');
+        if (!el) return;
+        el.innerText = msg;
+        if (cor) el.style.color = cor;
+    }
+
+    // Alterna a barra entre "ocioso" e "extraindo"
+    function definirModoExtracao(extraindo) {
+        const extractBtn = document.getElementById('picc-extract-btn');
+        const stopBtn = document.getElementById('picc-stop-btn');
+        if (extractBtn) {
+            extractBtn.disabled = extraindo;
+            extractBtn.style.opacity = extraindo ? '0.5' : '1';
+            extractBtn.style.cursor = extraindo ? 'default' : 'pointer';
+        }
+        if (stopBtn) {
+            stopBtn.style.display = extraindo ? '' : 'none';
+            stopBtn.disabled = false;
+            stopBtn.innerText = '⏹ Parar';
         }
     }
 
@@ -1754,8 +1915,12 @@
         }
 
         console.log("piccTools Extração Concluída:", extractedData);
-        
-        setStatus(`Baixando PDFs, Pareceres e salvando arquivos de ${extractedData.length} proposta(s)... Aguarde.`, '#fff59d');
+
+        piccAbortarExtracao = false;
+        definirModoExtracao(true);
+        const totalPropostas = extractedData.length;
+        let processadas = 0;
+        setStatus(`Baixando PDFs, Pareceres e salvando arquivos de 0/${totalPropostas} proposta(s)... Aguarde.`, '#fff59d');
 
         const db = await safeGetDB(true);
         let addedCount = 0;
@@ -1770,7 +1935,10 @@
         // Carrega o índice de CVs do piccTools UMA vez para todo o lote
         await beginCvSyncBatch();
 
+        let abortado = false;
         for (const item of extractedData) {
+            if (piccAbortarExtracao) { abortado = true; break; }
+            setStatus(`Baixando PDFs, Pareceres e salvando arquivos de ${processadas + 1}/${totalPropostas} proposta(s)... Aguarde.`, '#fff59d');
             try {
                 // Extract 16-digit Lattes ID and raw HTML from cvCongelado / cvLink
                 const targetCvUrl = item.proponente.cvCongelado || item.proponente.cvLink;
@@ -1792,6 +1960,7 @@
                 const faixa = (pdfResult.processData && pdfResult.processData.faixa) || pdfResult.faixa || '-';
                 item.faixa = faixa;
                 const instExecutora = (pdfResult.processData && pdfResult.processData.instituicaoExecutora) || '';
+                const quadroGeral = (pdfResult.processData && Array.isArray(pdfResult.processData.quadroGeral)) ? pdfResult.processData.quadroGeral : [];
 
                 // Se o link do CV da tabela não rendeu o ID Lattes, tenta o link do bloco
                 // do proponente no PDF. (Antes este fetch ocorria sempre, porque a condição
@@ -1842,6 +2011,7 @@
                     existing.edital = edital || existing.edital || '';
                     existing.faixa = faixa || existing.faixa || '-';
                     existing.instituicaoExecutora = instExecutora || existing.instituicaoExecutora || '';
+                    existing.quadroGeral = quadroGeral.length > 0 ? quadroGeral : (existing.quadroGeral || []);
                     existing.pdfLink = item.pdfLink || (pdfResult.processData && pdfResult.processData.pdfLink) || existing.pdfLink || '';
                     existing.lattesId = lattesId || existing.lattesId || '';
                     existing.proponente = item.proponente;
@@ -1861,6 +2031,7 @@
                         edital: edital,
                         faixa: faixa || '-',
                         instituicaoExecutora: instExecutora,
+                        quadroGeral: quadroGeral,
                         isProcesso: true,
                         filesDownloaded: true,
                         alreadyDownloaded: true,
@@ -1909,7 +2080,10 @@
                 console.error(`[piccTools] Erro ao processar a proposta ${item.processId}:`, itemErr);
                 setStatus(`Erro na proposta ${item.processId}: ${itemErr.message}. Continuando com as demais...`, '#ffcc80');
             }
+            processadas++;
         }
+
+        definirModoExtracao(false);
 
         // Grava todos os CVs de pesquisadores acumulados em uma única escrita
         await flushCvSyncBatch();
@@ -1929,7 +2103,10 @@
             }
         }
 
-        if (failedCount > 0) {
+        if (abortado) {
+            const restantes = totalPropostas - processadas;
+            setStatus(`Interrompido pelo usuário: ${processadas}/${totalPropostas} proposta(s) processada(s) (${addedCount} novas, ${updatedCount} atualizadas) — ${restantes} não processada(s). O que já foi baixado permanece salvo.`, '#ffcc80');
+        } else if (failedCount > 0) {
             setStatus(`Concluído com falhas: ${addedCount} novos, ${updatedCount} atualizados, ${failedCount} com erro (${failedProcesses.join(', ')}). Arquivos salvos em Downloads/piccData/.`, '#ffcc80');
         } else if (parseWarnings.length > 0) {
             setStatus(`Sucesso: ${addedCount} novos, ${updatedCount} atualizados — mas ${parseWarnings.length} PDF(s) não foram lidos corretamente: ${parseWarnings.join('; ')}`, '#ffcc80');
@@ -1939,7 +2116,7 @@
 
         setTimeout(() => {
             setStatus("");
-        }, (failedCount > 0 || parseWarnings.length > 0) ? 20000 : 8000);
+        }, (abortado || failedCount > 0 || parseWarnings.length > 0) ? 20000 : 8000);
     }
 
     // Initialize when DOM is ready
