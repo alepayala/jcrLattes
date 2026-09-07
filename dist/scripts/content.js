@@ -1356,6 +1356,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
   // Titulos das secoes viram controles de recolher/expandir (substituem os checkboxes)
   setupCollapsibleSections(sections);
+  setupGeneralInfoGroup(sections);
 
   const togglesHTML = generateSectionToggles(targetAuthorRank);
 
@@ -1983,7 +1984,7 @@ async function buildStandaloneCvHtml() {
   });
 
   // Remove os controles de recolher injetados pela extensao (marcador e titulo do Resumo)
-  clone.querySelectorAll('.jcr-section-toggle, h1.jcr-section-title').forEach(el => el.remove());
+  clone.querySelectorAll('.jcr-section-toggle, h1.jcr-section-title, .jcr-group-header').forEach(el => el.remove());
   clone.querySelectorAll('[data-jcr-collapsible]').forEach(wrapper => {
     wrapper.removeAttribute('data-jcr-collapsible');
     const titulo = wrapper.querySelector('h1, h2, h3');
@@ -2160,6 +2161,93 @@ function setupCollapsibleSections(sections) {
 
     wrapper.setAttribute('data-jcr-collapsible', 'true');
   });
+}
+
+// Agrupa sob um unico titulo "Informacoes Gerais" as secoes que ficam entre o Resumo e a
+// primeira secao de Producoes (Identificacao, Enderecos, Formacao, Atuacao, Idiomas...).
+// Corresponde ao antigo checkbox "Dados gerais", que escondia todas de uma vez.
+//
+// O grupo esconde as SECOES INTEIRAS (o wrapper de cada uma); o recolher individual de
+// cada titulo continua agindo sobre o conteudo dentro do wrapper. Como sao alvos
+// diferentes, os dois estados convivem: ao reabrir o grupo, cada subsecao reaparece
+// exatamente como o usuario a deixou.
+const JCR_GRUPO_INFO_ID = '__grupo-info-gerais';
+
+function setupGeneralInfoGroup(sections) {
+  if (!Array.isArray(sections) || sections.length === 0) return;
+
+  const idxProducao = sections.findIndex(s =>
+    (s.label && /produ[çc]/i.test(s.label)) || (s.id && /producao/i.test(s.id)));
+  if (idxProducao <= 0) return;
+
+  const idxResumo = sections.findIndex(s => s.id === 'resumo');
+  const inicio = idxResumo >= 0 ? idxResumo + 1 : 0;
+  const grupo = sections.slice(inicio, idxProducao);
+  if (grupo.length === 0) return;
+
+  // Marca/desmarca com os mesmos atributos usados no recolher individual, para que o
+  // salvamento do CV saiba reexpandir. O display e reaplicado mesmo quando o atributo ja
+  // existe: a montagem do painel zera style.display de todas as secoes a cada render.
+  const marcar = (el, recolhido) => {
+    if (!el) return;
+    if (recolhido) {
+      if (!el.hasAttribute('data-jcr-collapsed')) {
+        el.setAttribute('data-jcr-prev-display', el.style.display || '');
+        el.setAttribute('data-jcr-collapsed', 'true');
+      }
+      el.style.display = 'none';
+    } else if (el.hasAttribute('data-jcr-collapsed')) {
+      el.style.display = el.getAttribute('data-jcr-prev-display') || '';
+      el.removeAttribute('data-jcr-collapsed');
+      el.removeAttribute('data-jcr-prev-display');
+    }
+  };
+
+  let cabecalho = document.getElementById('jcr-group-info-gerais');
+  let icone;
+
+  if (!cabecalho) {
+    const primeiro = grupo[0].element;
+    if (!primeiro || !primeiro.parentNode) return;
+
+    cabecalho = document.createElement('div');
+    cabecalho.id = 'jcr-group-info-gerais';
+    cabecalho.className = 'title-wrapper jcr-group-header';
+
+    const titulo = document.createElement('h1');
+    titulo.textContent = 'Informações Gerais';
+    titulo.style.cursor = 'pointer';
+    titulo.style.userSelect = 'none';
+    titulo.title = 'Clique para recolher/expandir todas as informações gerais';
+
+    icone = document.createElement('span');
+    icone.className = 'jcr-section-toggle';
+    icone.style.cssText = `display: inline-block; margin-right: 10px; font-size: 0.6em; font-weight: bold; font-family: monospace; vertical-align: middle; letter-spacing: -0.5px; color: ${COLORS.midJcr};`;
+    titulo.insertBefore(icone, titulo.firstChild);
+
+    cabecalho.appendChild(titulo);
+    primeiro.parentNode.insertBefore(cabecalho, primeiro);
+
+    titulo.addEventListener('click', (e) => {
+      e.preventDefault();
+      const recolhido = !(jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] === true);
+      jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] = recolhido;
+      aplicarGrupo(recolhido);
+      saveSettings();
+    });
+  } else {
+    icone = cabecalho.querySelector('.jcr-section-toggle');
+  }
+
+  function aplicarGrupo(recolhido) {
+    grupo.forEach(sec => {
+      marcar(sec.element, recolhido);
+      marcar(sec.footerElement, recolhido);
+    });
+    if (icone) icone.textContent = recolhido ? '[+]' : '[-]';
+  }
+
+  aplicarGrupo(jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] === true);
 }
 
 function getSections() {

@@ -364,7 +364,7 @@
         // Skip downloading if files were already downloaded previously for this proposal UNLESS forceRedownload is true
         if (!forceRedownload) {
             const db = await safeGetDB(true);
-            const existing = db.find(entry => entry.processId === item.processId || (entry.isProcesso && entry.customId && entry.customId.includes(item.processId)));
+            const existing = db.find(entry => entry.processId === item.processId);
             if (existing && (existing.filesDownloaded || existing.alreadyDownloaded)) {
                 console.log(`[piccTools] Arquivos da proposta ${item.processId} já foram baixados anteriormente. Pula re-download.`);
                 return;
@@ -1141,15 +1141,125 @@
         return reviews;
     }
 
-        // Process direct PDF URL directly
-    async function processDirectPDF(pdfUrl, forceRedownload = false) {
-        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            const res = await new Promise(r => chrome.storage.local.get(['jcr_picctools_disabled'], r));
-            const isDisabled = (res && res.jcr_picctools_disabled !== undefined) ? !!res.jcr_picctools_disabled : true;
-            if (isDisabled) {
-                console.log("[piccTools] Processamento de PDF direto cancelado: piccTools está desabilitado pelo usuário.");
+    // piccTools comeca desabilitado: so age quando o usuario liga explicitamente.
+    async function piccEstaDesabilitado() {
+        if (typeof chrome === 'undefined' || !chrome.storage?.local) return false;
+        const res = await new Promise(r => chrome.storage.local.get(['jcr_picctools_disabled'], r));
+        return (res && res.jcr_picctools_disabled !== undefined) ? !!res.jcr_picctools_disabled : true;
+    }
+
+    // Baixa o PDF pelo service worker (evita CORS) e cai para um fetch direto se preciso.
+    async function baixarPdfArrayBuffer(pdfUrl) {
+        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            const bgRes = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({ action: 'fetch_arraybuffer', url: pdfUrl }, (res) => {
+                    if (chrome.runtime.lastError || !res || !res.success || !res.base64) {
+                        resolve(null);
+                    } else {
+                        resolve(base64ToArrayBuffer(res.base64));
+                    }
+                });
+            });
+            if (bgRes) return bgRes;
+        }
+        const response = await fetch(pdfUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.arrayBuffer();
+    }
+
+    // Um processo ja esta na base? Compara so os digitos, para tolerar as variacoes de
+    // pontuacao entre o numero impresso no PDF e o da planilha.
+    function acharPropostaNaBase(db, processId) {
+        const soDigitos = (v) => String(v || '').replace(/[^\d]/g, '');
+        const alvo = soDigitos(processId);
+        if (!alvo) return null;
+        return (db || []).find(e => e && soDigitos(e.processId) === alvo) || null;
+    }
+
+    // A coluna "Chamada" da planilha nem sempre chega legivel: o valor da chamada
+    // Universal 2026 aparece truncado e com espacos ("l 202 6"). O caminho dos PDFs em
+    // anexosform.cnpq.br/doc/<chamada>/... precisa do identificador exato, entao
+    // traduzimos os valores conhecidos. Valor desconhecido segue como veio.
+    const CHAMADAS_CAMINHO = {
+        'l2026': 'Universal_2026',
+        'universal2026': 'Universal_2026',
+        'universal_2026': 'Universal_2026'
+    };
+
+    function chamadaParaCaminho(valor) {
+        const bruto = String(valor || '').trim();
+        if (!bruto) return '';
+        const compacto = bruto.replace(/\s+/g, '').toLowerCase();
+        return CHAMADAS_CAMINHO[compacto] || bruto;
+    }
+
+    // Abrir um PDF de proposta direto no navegador NAO importa nada sozinho: apenas le o
+    // numero do processo e confere se ele ja esta na base. O caminho normal de importacao
+    // e a planilha de julgamento, que traz tambem pareceres e anexos; importar a partir de
+    // um PDF avulso fica como acao explicita do usuario.
+    async function inspectDirectPDF(pdfUrl) {
+        if (await piccEstaDesabilitado()) return;
+
+        const btn = document.getElementById('picc-pdf-action-btn');
+        const ajustarBotao = (rotulo, cor, dica, aoClicar) => {
+            if (!btn) return;
+            btn.innerText = rotulo;
+            btn.title = dica || '';
+            btn.disabled = !aoClicar;
+            btn.style.backgroundColor = cor;
+            btn.style.opacity = aoClicar ? '1' : '0.65';
+            btn.style.cursor = aoClicar ? 'pointer' : 'default';
+            btn.onclick = aoClicar || null;
+        };
+
+        setStatusGlobal('Lendo o número do processo neste PDF...', '#fff59d');
+        try {
+            const arrayBuffer = await baixarPdfArrayBuffer(pdfUrl);
+            const dados = await parseProcessFromPDF(arrayBuffer, pdfUrl);
+            const processId = (dados && dados.processId) ? String(dados.processId).trim() : '';
+
+            if (!processId) {
+                setStatusGlobal('Não foi possível ler o número do processo neste PDF.', '#ffcc80');
+                ajustarBotao('Processo não identificado', '#616161',
+                             'O PDF não traz um número de processo legível', null);
                 return;
             }
+
+            const quem = (dados.proponente && dados.proponente.name) ? ` — ${dados.proponente.name}` : '';
+            const db = await safeGetDB(true);
+            const existente = acharPropostaNaBase(db, processId);
+
+            if (existente) {
+                setStatusGlobal(`Processo ${processId}${quem} já está na lista de propostas.`, '#a5d6a7');
+                ajustarBotao('Processar este PDF', '#1565C0',
+                             'Reprocessa este PDF e atualiza os dados da proposta na base',
+                             () => processDirectPDF(pdfUrl, true));
+            } else {
+                setStatusGlobal(`Processo ${processId}${quem} NÃO está na lista de propostas.`, '#ffcc80');
+                ajustarBotao('Importar esta proposta', '#2E7D32',
+                             'Adiciona esta proposta à base a partir deste PDF',
+                             async () => {
+                                 const aviso = `O processo ${processId}${quem} não está na lista de propostas.\n\n`
+                                     + 'O caminho normal de importação é a planilha de julgamento, que traz também '
+                                     + 'os pareceres ad hoc e os anexos. Importar apenas a partir deste PDF cria um '
+                                     + 'registro sem essas informações.\n\nImportar mesmo assim?';
+                                 if (!window.confirm(aviso)) return;
+                                 await processDirectPDF(pdfUrl, true);
+                             });
+            }
+        } catch (e) {
+            console.error('[piccTools] Erro ao inspecionar o PDF:', e);
+            setStatusGlobal(`Erro ao ler o PDF: ${e.message}`, '#ffcccc');
+            ajustarBotao('Tentar de novo', '#1565C0', 'Ler novamente o número do processo neste PDF',
+                         () => inspectDirectPDF(pdfUrl));
+        }
+    }
+
+        // Process direct PDF URL directly
+    async function processDirectPDF(pdfUrl, forceRedownload = false) {
+        if (await piccEstaDesabilitado()) {
+            console.log("[piccTools] Processamento de PDF direto cancelado: piccTools está desabilitado pelo usuário.");
+            return;
         }
 
         pdfUrl = pdfUrl || window.location.href;
@@ -1162,25 +1272,7 @@
         try {
             console.log(`[piccTools] Processando PDF diretamente da URL: ${pdfUrl}...`);
 
-            let arrayBuffer = null;
-            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-                const bgRes = await new Promise((resolve) => {
-                    chrome.runtime.sendMessage({ action: 'fetch_arraybuffer', url: pdfUrl }, (res) => {
-                        if (chrome.runtime.lastError || !res || !res.success || !res.base64) {
-                            resolve(null);
-                        } else {
-                            resolve(base64ToArrayBuffer(res.base64));
-                        }
-                    });
-                });
-                if (bgRes) arrayBuffer = bgRes;
-            }
-
-            if (!arrayBuffer) {
-                const response = await fetch(pdfUrl);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                arrayBuffer = await response.arrayBuffer();
-            }
+            const arrayBuffer = await baixarPdfArrayBuffer(pdfUrl);
 
             const processData = await parseProcessFromPDF(arrayBuffer, pdfUrl);
             if (!processData || (!processData.processId && !processData.numeroProtocolo)) {
@@ -1226,7 +1318,7 @@
             }
 
             const db = await safeGetDB(true);
-            const existingIndex = db.findIndex(entry => entry.processId === processData.processId || (entry.isProcesso && entry.customId && entry.customId.includes(processData.processId)));
+            const existingIndex = db.findIndex(entry => entry.processId === processData.processId);
 
             let updatedRecord;
             if (existingIndex >= 0) {
@@ -1261,7 +1353,6 @@
                     prioridade: '-',
                     filesDownloaded: true,
                     alreadyDownloaded: true,
-                    customId: processData.processId,
                     name: processData.proponente.name || processData.processId,
                     lattesId: processData.proponente.lattesId || '',
                     cvCongelado: cvCongeladoUrl,
@@ -1601,21 +1692,23 @@
                 toolbar.appendChild(extractBtn);
                 toolbar.appendChild(stopBtn);
             } else if (isPdfPage) {
+                // Nasce desabilitado: so a inspecao (que le o processo e consulta a base)
+                // define se a acao e "Processar este PDF" ou "Importar esta proposta".
                 const processPdfBtn = document.createElement('button');
-                processPdfBtn.innerText = 'Reprocessar este PDF';
+                processPdfBtn.id = 'picc-pdf-action-btn';
+                processPdfBtn.innerText = 'Verificando proposta...';
+                processPdfBtn.disabled = true;
                 processPdfBtn.style.cssText = `
-                    background-color: #1565C0;
+                    background-color: #616161;
                     color: white;
                     border: none;
                     padding: 6px 12px;
                     border-radius: 4px;
-                    cursor: pointer;
+                    cursor: default;
                     font-weight: bold;
                     transition: background 0.2s;
+                    opacity: 0.65;
                 `;
-                processPdfBtn.onmouseover = () => processPdfBtn.style.backgroundColor = '#0D47A1';
-                processPdfBtn.onmouseout = () => processPdfBtn.style.backgroundColor = '#1565C0';
-                processPdfBtn.addEventListener('click', () => processDirectPDF(window.location.href, true));
                 toolbar.appendChild(processPdfBtn);
             }
 
@@ -1666,9 +1759,9 @@
             document.documentElement.appendChild(toolbar);
         }
 
-        if (isPdfPage && !window.piccToolsDirectPdfProcessed) {
-            window.piccToolsDirectPdfProcessed = true;
-            processDirectPDF(window.location.href);
+        if (isPdfPage && !window.piccToolsDirectPdfInspected) {
+            window.piccToolsDirectPdfInspected = true;
+            inspectDirectPDF(window.location.href);
         }
     }
 
@@ -1846,7 +1939,7 @@
                         if (cryptoMatch) {
                             const arg2 = cryptoMatch[2];
                             const firstChar = arg2 ? arg2.charAt(0) : '';
-                            const chamadaId = chamadaVal || '';
+                            const chamadaId = chamadaParaCaminho(chamadaVal);
                             if (chamadaId && arg2 && firstChar) {
                                 pdfLink = `http://anexosform.cnpq.br/doc/${chamadaId}/${firstChar}/${arg2}_cp.pdf`;
                             }
@@ -1999,7 +2092,7 @@
                 // Save PDF, Lattes HTML, and Parecer HTMLs (with full CSS & icons) to Downloads/picctool/<processId>/
                 await saveProcessFiles(item, cvResult.htmlText, reviews);
 
-                const existingIndex = db.findIndex(entry => entry.processId === item.processId || (entry.isProcesso && entry.customId && entry.customId.includes(item.processId)));
+                const existingIndex = db.findIndex(entry => entry.processId === item.processId);
 
                 let processRecord;
                 if (existingIndex >= 0) {
@@ -2035,8 +2128,7 @@
                         isProcesso: true,
                         filesDownloaded: true,
                         alreadyDownloaded: true,
-                        customId: item.processId,
-                        name: item.proponente.name, // Keep for backward compatibility in table views
+                        name: item.proponente.name,   // coluna Nome da tabela de propostas
                         lattesId: lattesId,
                         proponente: item.proponente,
                         teamMembers: teamMembers,
