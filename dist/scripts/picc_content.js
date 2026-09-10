@@ -2,6 +2,17 @@
 // Content script for Plataforma Carlos Chagas (piccTools)
 
 (function () {
+    // ------------------------------------------------------------------
+    // Ferramenta de desenvolvimento: o botao "HTML brutos" da barra da planilha
+    // baixa em lote o HTML original de "Producoes e orientacoes" para estudarmos
+    // a estrutura da pagina.
+    //
+    // MANTENHA SEMPRE false nas distribuicoes da Chrome Web Store. Ligue apenas
+    // em copias locais, para coletar novas amostras, e desligue antes de gerar
+    // o zip da loja.
+    // ------------------------------------------------------------------
+    const MOSTRAR_BOTAO_BRUTOS = false;
+
     // Setup PDF.js worker
     if (typeof pdfjsLib !== 'undefined') {
         pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('scripts/pdf.worker.min.js');
@@ -176,6 +187,7 @@
             });
         }
         if (record.cvHtml) { blobs.cvHtml = record.cvHtml; delete record.cvHtml; }
+        if (record.producoesHtml) { blobs.producoes = record.producoesHtml; delete record.producoesHtml; }
         if (record.pdfData) { blobs.pdfData = record.pdfData; delete record.pdfData; }
 
         if (Object.keys(blobs).length > 0 && window.JCRDBTools && typeof window.JCRDBTools.saveProcBlobs === 'function') {
@@ -462,6 +474,21 @@
                     }, `o parecer ad-hoc #${idx + 1}`);
                 }
             });
+        }
+
+        // 5. Save "Producoes e orientacoes" HTML (ja autossuficiente)
+        if (item.producoesHtml && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            requestDownload({
+                action: 'download_data',
+                data: item.producoesHtml,
+                filename: `${folder}/producoes_${safeProcessId}.html`
+            }, 'as produções e orientações');
+        } else if (item.producoesLink && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+            requestDownload({
+                action: 'download_file',
+                url: item.producoesLink,
+                filename: `${folder}/producoes_${safeProcessId}.html`
+            }, 'as produções e orientações');
         }
 
         item.filesDownloaded = true;
@@ -1091,6 +1118,61 @@
         }
     }
 
+    // O efomento serve as paginas em ISO-8859-1, mas o arquivo e gravado em UTF-8.
+    // Sem acertar a declaracao de charset, a copia bruta abre com os acentos quebrados.
+    // So o <meta charset> muda: a estrutura, as classes e os <script> ficam intactos.
+    function comCharsetUtf8(htmlText) {
+        const t = String(htmlText || '');
+        if (/<meta[^>]+charset=/i.test(t)) {
+            return t.replace(/<meta[^>]+charset=["']?[^\s"'/>]+["']?[^>]*>/i, '<meta charset="utf-8">');
+        }
+        if (/<head[^>]*>/i.test(t)) {
+            return t.replace(/(<head[^>]*>)/i, '$1\n<meta charset="utf-8">');
+        }
+        return '<meta charset="utf-8">\n' + t;
+    }
+
+    // Busca o HTML da pagina "Producoes e orientacoes" (publicacao.do). Devolve
+    //   html  -> versao autossuficiente (CSS e imagens embutidos, scripts removidos),
+    //            igual a dos pareceres ad hoc, que e a usada no relatorio;
+    //   bruto -> o HTML exatamente como veio do servidor.
+    //
+    // TEMPORARIO: "bruto" serve so ao botao de coleta em lote, que junta esses
+    // arquivos numa pasta para estudarmos a estrutura da pagina. Nao e aberto pela
+    // extensao nem guardado no banco, e sai daqui quando a extracao estiver definida.
+    async function extractProducoesHtml(link) {
+        const vazio = { html: '', bruto: '' };
+        if (!link) return vazio;
+        try {
+            let htmlText = '';
+            if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                htmlText = await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({ action: 'fetch_url', url: link }, (res) => {
+                        if (chrome.runtime.lastError || !res || !res.success) resolve('');
+                        else resolve(res.text || '');
+                    });
+                });
+            }
+            if (!htmlText) {
+                const response = await fetch(link);
+                if (response.ok) {
+                    const buffer = await response.arrayBuffer();
+                    htmlText = new TextDecoder('iso-8859-1').decode(buffer);
+                }
+            }
+            if (!htmlText) return vazio;
+            // Os DOIs vivem em onclick="abrirDOI(...)" e makeSelfContainedHtml remove
+            // todos os on*: sem converter ANTES, o DOI sumiria da copia salva.
+            const comDoi = (window.JCRProducoes && typeof window.JCRProducoes.converterLinksDoi === 'function')
+                ? window.JCRProducoes.converterLinksDoi(htmlText)
+                : htmlText;
+            return { html: makeSelfContainedHtml(comDoi, link), bruto: comCharsetUtf8(htmlText) };
+        } catch (e) {
+            console.warn('[piccTools] Erro ao buscar Produções e orientações:', link, e);
+            return vazio;
+        }
+    }
+
     async function extractReviewsFromAdHoc(reviewLinks) {
         if (!Array.isArray(reviewLinks) || reviewLinks.length === 0) return [];
         
@@ -1176,21 +1258,156 @@
         return (db || []).find(e => e && soDigitos(e.processId) === alvo) || null;
     }
 
-    // A coluna "Chamada" da planilha nem sempre chega legivel: o valor da chamada
-    // Universal 2026 aparece truncado e com espacos ("l 202 6"). O caminho dos PDFs em
-    // anexosform.cnpq.br/doc/<chamada>/... precisa do identificador exato, entao
-    // traduzimos os valores conhecidos. Valor desconhecido segue como veio.
-    const CHAMADAS_CAMINHO = {
-        'l2026': 'Universal_2026',
-        'universal2026': 'Universal_2026',
-        'universal_2026': 'Universal_2026'
-    };
+    // ------------------------------------------------------------------
+    // Prefixo da chamada: o trecho <prefixo> em
+    //   http://anexosform.cnpq.br/doc/<prefixo>/<x>/<arquivo>_cp.pdf
+    //
+    // O valor da coluna "Chamada" da planilha nem sempre serve como esta (chega
+    // truncado ou com espacos), e a coluna pode nem estar habilitada. Por isso o
+    // prefixo virou um campo editavel na barra: comeca com o valor da coluna e o
+    // que o usuario corrigir fica guardado por chamada.
+    // ------------------------------------------------------------------
+    const CHAMADA_SEM_COLUNA = '(sem coluna)';
+    let chamadaColunaAtual = '';      // valor bruto lido da coluna, se houver
+    let chamadaTentativaToken = 0;    // identifica a sequencia de tentativas em curso
 
-    function chamadaParaCaminho(valor) {
-        const bruto = String(valor || '').trim();
-        if (!bruto) return '';
-        const compacto = bruto.replace(/\s+/g, '').toLowerCase();
-        return CHAMADAS_CAMINHO[compacto] || bruto;
+    function chaveChamada(valorColuna) {
+        const c = String(valorColuna || '').replace(/\s+/g, '').toLowerCase();
+        return c || CHAMADA_SEM_COLUNA;
+    }
+
+    function campoChamada() {
+        return document.getElementById('picc-chamada-input');
+    }
+
+    // Prefixo em uso: o que estiver no campo. Sem campo (fora da planilha), o que
+    // foi guardado para esta chamada.
+    function prefixoChamada() {
+        const el = campoChamada();
+        return el ? el.value.trim() : '';
+    }
+
+    const DICA_CHAMADA_VAZIA = 'Informe o prefixo da chamada. Ele aparece no endereço do PDF: '
+        + 'abra manualmente o PDF de uma proposta pela planilha e copie o trecho logo após /doc/ '
+        + 'em http://anexosform.cnpq.br/doc/<PREFIXO>/...';
+    const DICA_CHAMADA_ERRADA = 'Não foi possível baixar o PDF com este prefixo. Confira o valor: '
+        + 'abra manualmente o PDF de uma proposta pela planilha e copie o trecho logo após /doc/ '
+        + 'em http://anexosform.cnpq.br/doc/<PREFIXO>/...';
+
+    // Pinta o campo de vermelho quando falta o prefixo ou quando ele nao achou o PDF
+    function marcarChamada(problema, dica) {
+        const el = campoChamada();
+        if (!el) return;
+        el.style.borderColor = problema ? '#C62828' : '#90CAF9';
+        el.style.borderWidth = problema ? '2px' : '1px';
+        el.style.background = problema ? '#FFEBEE' : 'white';
+        el.title = problema ? (dica || DICA_CHAMADA_VAZIA)
+                            : 'Prefixo da chamada usado no endereço dos PDFs (anexosform.cnpq.br/doc/<prefixo>/...)';
+        const aviso = document.getElementById('picc-chamada-aviso');
+        if (aviso) aviso.style.display = problema ? 'inline' : 'none';
+    }
+
+    function revisarChamada() {
+        marcarChamada(!prefixoChamada());
+    }
+
+    // Valor da coluna "Chamada" na tabela da planilha (primeira linha com conteudo).
+    // Vazio quando a coluna nao esta habilitada — e ai o campo comeca em branco.
+    function lerChamadaDaTabela() {
+        try {
+            const tabela = document.getElementById('tabelaPropostas')
+                        || document.querySelector('table.dataTable')
+                        || document.querySelector('table[id*="proposta"], table[id*="Proposta"]')
+                        || document.querySelector('table');
+            if (!tabela) return '';
+
+            // O cabecalho nem sempre esta em <thead>: cai para a primeira linha da tabela.
+            let cabecalho = Array.from(tabela.querySelectorAll('thead th, thead td'));
+            if (cabecalho.length === 0) {
+                const primeira = tabela.querySelector('tr');
+                if (primeira) cabecalho = Array.from(primeira.querySelectorAll('th, td'));
+            }
+            let idx = -1;
+            cabecalho.forEach((c, i) => {
+                const t = (c.innerText || c.textContent || '').trim().toLowerCase();
+                if (idx === -1 && (t.includes('chamada') || t.includes('edital'))) idx = i;
+            });
+            if (idx === -1) return '';
+
+            const linhas = tabela.querySelectorAll('tbody tr, tr');
+            for (const linha of linhas) {
+                const celulas = linha.querySelectorAll('td');
+                if (celulas.length > idx) {
+                    const v = (celulas[idx].innerText || celulas[idx].textContent || '').trim();
+                    if (v) return v;
+                }
+            }
+        } catch (e) {
+            console.warn('[piccTools] Não foi possível ler a coluna Chamada:', e);
+        }
+        return '';
+    }
+
+    async function guardarChamada(valor) {
+        const DB = (typeof window !== 'undefined') ? window.JCRDBTools : null;
+        if (!DB || typeof DB.setPiccChamada !== 'function') return;
+        try {
+            await DB.setPiccChamada(chamadaColunaAtual, valor);
+        } catch (e) {
+            console.warn('[piccTools] Falha ao guardar o prefixo da chamada:', e);
+        }
+    }
+
+    // Preenche o campo: o que ja foi guardado para esta chamada tem precedencia; na
+    // primeira vez, o proprio valor da coluna serve de ponto de partida.
+    async function prepararCampoChamada(tentativa = 0, token = 0) {
+        const el = campoChamada();
+        if (!el) return;
+        // Uma nova sequencia (por exemplo, ao remontar a barra) invalida a anterior:
+        // sem isto, varias cadeias de tentativas ficavam vivas ao mesmo tempo.
+        if (tentativa === 0) token = ++chamadaTentativaToken;
+        else if (token !== chamadaTentativaToken) return;
+
+        if (el.value.trim()) { revisarChamada(); return; }   // ja definido (guardado ou digitado)
+
+        const daColuna = lerChamadaDaTabela();
+        if (daColuna) chamadaColunaAtual = daColuna;
+
+        let guardado = '';
+        const DB = (typeof window !== 'undefined') ? window.JCRDBTools : null;
+        if (DB && typeof DB.getPiccChamadas === 'function') {
+            try {
+                const mapa = await DB.getPiccChamadas();
+                guardado = mapa[chaveChamada(chamadaColunaAtual)] || '';
+            } catch (e) {
+                console.warn('[piccTools] Falha ao ler os prefixos guardados:', e);
+            }
+        }
+
+        const valor = guardado || daColuna || '';
+        if (valor) el.value = valor;
+        // atualiza o destaque ANTES de gravar: a gravacao e assincrona e o campo nao
+        // pode ficar vermelho depois de ja ter valor
+        revisarChamada();
+        // primeira vez com a coluna presente: guarda o valor dela como ponto de partida
+        if (valor && !guardado) await guardarChamada(valor);
+
+        // A planilha monta as linhas por AJAX: quando a barra e injetada a coluna pode
+        // ainda nao existir. Sem isto, o primeiro uso caia sempre no campo em branco.
+        if (!valor && tentativa < 20 && token === chamadaTentativaToken) {
+            setTimeout(() => prepararCampoChamada(tentativa + 1, token), 500);
+        }
+    }
+
+    // Define o prefixo a partir do valor lido na propria extracao (ultima rede de
+    // seguranca: nesse ponto a tabela ja esta carregada com certeza).
+    async function definirChamadaSeVazia(valorColuna) {
+        const el = campoChamada();
+        if (!el || el.value.trim() || !valorColuna) return;
+        chamadaColunaAtual = valorColuna;
+        el.value = valorColuna;
+        revisarChamada();
+        await guardarChamada(valorColuna);
     }
 
     // Abrir um PDF de proposta direto no navegador NAO importa nada sozinho: apenas le o
@@ -1688,9 +1905,81 @@
                     setStatusGlobal('Parando apos concluir a proposta em andamento...', '#ffcc80');
                 });
 
+                // Prefixo da chamada: o trecho do endereco dos PDFs. Comeca com o valor
+                // da coluna "Chamada"; se o usuario corrigir, a correcao fica guardada.
+                const chamadaWrap = document.createElement('span');
+                chamadaWrap.style.cssText = 'display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; white-space: nowrap;';
+
+                const chamadaLabel = document.createElement('span');
+                chamadaLabel.innerText = 'Chamada:';
+                chamadaLabel.style.cssText = 'font-size: 13px; font-weight: bold;';
+
+                const chamadaInput = document.createElement('input');
+                chamadaInput.type = 'text';
+                chamadaInput.id = 'picc-chamada-input';
+                chamadaInput.placeholder = 'ex.: Universal_2026';
+                chamadaInput.style.cssText = `
+                    padding: 5px 10px;
+                    border: 1px solid #90CAF9;
+                    border-radius: 4px;
+                    font-size: 13px;
+                    width: 170px;
+                    outline: none;
+                    color: #333;
+                    background: white;
+                `;
+
+                const chamadaAviso = document.createElement('span');
+                chamadaAviso.id = 'picc-chamada-aviso';
+                chamadaAviso.innerText = '⚠';
+                chamadaAviso.style.cssText = 'color: #ffcdd2; font-weight: bold; display: none;';
+
+                chamadaInput.addEventListener('input', revisarChamada);
+                chamadaInput.addEventListener('change', async () => {
+                    revisarChamada();
+                    await guardarChamada(chamadaInput.value);
+                });
+
+                chamadaWrap.appendChild(chamadaLabel);
+                chamadaWrap.appendChild(chamadaInput);
+                chamadaWrap.appendChild(chamadaAviso);
+
+                // TEMPORARIO: junta os HTML brutos de "Producoes e orientacoes" das linhas
+                // visiveis numa pasta so, para estudarmos como extrair as informacoes.
+                // So aparece com MOSTRAR_BOTAO_BRUTOS ligado (nunca nas versoes da loja).
+                // Remover junto com extrairBrutosDaTabela() quando a extracao estiver pronta.
+                let brutosBtn = null;
+                if (MOSTRAR_BOTAO_BRUTOS) {
+                    brutosBtn = document.createElement('button');
+                    brutosBtn.id = 'picc-brutos-btn';
+                    brutosBtn.innerText = '🧪 HTML brutos';
+                    brutosBtn.title = 'Temporário: baixa o HTML original de "Produções e orientações" para '
+                        + 'Downloads/piccData/_brutos_producoes/. Usa a lista de processos ao lado; se ela estiver '
+                        + 'vazia, pega todas as linhas visíveis. Não altera o banco de dados.';
+                    brutosBtn.style.cssText = `
+                        background-color: #6A1B9A;
+                        color: white;
+                        border: none;
+                        padding: 6px 12px;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-weight: bold;
+                        transition: background 0.2s;
+                        white-space: nowrap;
+                        margin-left: 8px;
+                    `;
+                    brutosBtn.onmouseover = () => { if (!brutosBtn.disabled) brutosBtn.style.backgroundColor = '#4A148C'; };
+                    brutosBtn.onmouseout = () => { if (!brutosBtn.disabled) brutosBtn.style.backgroundColor = '#6A1B9A'; };
+                    brutosBtn.addEventListener('click', extrairBrutosDaTabela);
+                }
+
+                toolbar.appendChild(chamadaWrap);
                 toolbar.appendChild(filterInput);
                 toolbar.appendChild(extractBtn);
+                if (brutosBtn) toolbar.appendChild(brutosBtn);
                 toolbar.appendChild(stopBtn);
+
+                prepararCampoChamada();
             } else if (isPdfPage) {
                 // Nasce desabilitado: so a inspecao (que le o processo e consulta a base)
                 // define se a acao e "Processar este PDF" ou "Importar esta proposta".
@@ -1777,6 +2066,12 @@
 
     // Alterna a barra entre "ocioso" e "extraindo"
     function definirModoExtracao(extraindo) {
+        const brutosBtn = document.getElementById('picc-brutos-btn');   // TEMPORARIO
+        if (brutosBtn) {
+            brutosBtn.disabled = extraindo;
+            brutosBtn.style.opacity = extraindo ? '0.6' : '1';
+            brutosBtn.style.cursor = extraindo ? 'default' : 'pointer';
+        }
         const extractBtn = document.getElementById('picc-extract-btn');
         const stopBtn = document.getElementById('picc-stop-btn');
         if (extractBtn) {
@@ -1791,6 +2086,143 @@
         }
     }
 
+    // ------------------------------------------------------------------
+    // TEMPORARIO: junta numa pasta so o HTML bruto de "Producoes e orientacoes"
+    // de todas as linhas visiveis, para estudarmos a estrutura da pagina e definir
+    // como extrair as informacoes. Nao mexe no banco nem nas pastas das propostas.
+    // Sai daqui — junto com o botao — quando a extracao estiver definida.
+    // ------------------------------------------------------------------
+    const PASTA_BRUTOS = 'piccData/_brutos_producoes';
+
+    function linkProducoesDaLinha(row) {
+        const anchors = row.querySelectorAll('a');
+        for (const a of anchors) {
+            const href = a.getAttribute('href') || a.href || '';
+            const texto = (a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            if (href.includes('publicacao.do') || (texto.includes('orienta') && /produ[çc]/.test(texto))) {
+                const url = getValidUrlFromAnchor(a);
+                if (url) return url;
+            }
+        }
+        return '';
+    }
+
+    async function extrairBrutosDaTabela() {
+        const setStatus = (msg, cor) => setStatusGlobal(msg, cor);
+
+        // Mesma regra da atualizacao das propostas: com a lista preenchida, so esses
+        // processos; vazia, todas as linhas visiveis.
+        const filtroEl = document.getElementById('picc-process-filter-input');
+        const filtroBruto = filtroEl ? filtroEl.value.trim() : '';
+        const alvosPedidos = filtroBruto
+            ? filtroBruto.split(/[\s,;]+/).map(t => t.trim()).filter(t => t.length > 0) : [];
+        const normProc = (v) => String(v || '').replace(/[^0-9]/g, '');
+        const baseProc = (v) => String(v || '').split('/')[0].replace(/[^0-9]/g, '');
+        const casaProcesso = (naTabela, pedido) => {
+            if (!naTabela || !pedido) return false;
+            const a = naTabela.trim().toLowerCase(), b = pedido.trim().toLowerCase();
+            if (a === b) return true;
+            if (normProc(a) && normProc(a) === normProc(b)) return true;
+            return !!baseProc(a) && baseProc(a) === baseProc(b);
+        };
+        const encontrados = new Set();
+
+        const table = document.getElementById('tabelaPropostas')
+                   || document.querySelector('table.dataTable')
+                   || document.querySelector('table');
+        const tbody = table && (table.querySelector('tbody#tbodyPropostas') || table.querySelector('tbody'));
+        if (!tbody) {
+            setStatus('Erro: tabela de propostas não encontrada na página.', '#ffcccc');
+            return;
+        }
+
+        // indice da coluna do processo, so para nomear os arquivos
+        let idxProc = -1;
+        let cabecalho = Array.from(table.querySelectorAll('thead th, thead td'));
+        if (cabecalho.length === 0) {
+            const primeira = table.querySelector('tr');
+            if (primeira) cabecalho = Array.from(primeira.querySelectorAll('th, td'));
+        }
+        cabecalho.forEach((c, i) => {
+            const t = (c.innerText || c.textContent || '').trim().toLowerCase();
+            if (idxProc === -1 && t.includes('processo')) idxProc = i;
+        });
+        if (idxProc === -1) idxProc = 1;
+
+        const linhas = Array.from(tbody.querySelectorAll('tr[role="row"], tr'));
+        const alvos = [];
+        linhas.forEach((row, i) => {
+            const celulas = row.querySelectorAll('td');
+            const proc = (idxProc < celulas.length)
+                ? (celulas[idxProc].innerText || '').trim()
+                : '';
+
+            if (alvosPedidos.length > 0) {
+                const pedido = alvosPedidos.find(t => casaProcesso(proc, t));
+                if (!pedido) return;            // fora da lista: pula
+                encontrados.add(pedido);
+            }
+
+            const link = linkProducoesDaLinha(row);
+            if (!link) return;
+            alvos.push({ link, nome: proc || ('linha_' + (i + 1)) });
+        });
+
+        if (alvosPedidos.length > 0) {
+            const faltando = alvosPedidos.filter(t => !encontrados.has(t));
+            if (faltando.length > 0) {
+                alert(`⚠️ Os seguintes processos da lista não foram encontrados na tabela:\n\n• ${faltando.join('\n• ')}`);
+            }
+        }
+
+        if (alvos.length === 0) {
+            setStatus(alvosPedidos.length > 0
+                ? 'Nenhum dos processos da lista foi encontrado com o item "Produções e orientações".'
+                : 'Nenhuma linha visível tem o item "Produções e orientações".', '#ffcc80');
+            return;
+        }
+
+        piccAbortarExtracao = false;
+        definirModoExtracao(true);
+        const btnBrutos = document.getElementById('picc-brutos-btn');
+        if (btnBrutos) { btnBrutos.disabled = true; btnBrutos.style.opacity = '0.6'; }
+
+        let salvos = 0, falhas = 0;
+        for (let i = 0; i < alvos.length; i++) {
+            if (piccAbortarExtracao) {
+                setStatus(`Interrompido: ${salvos} arquivo(s) bruto(s) salvos em ${PASTA_BRUTOS}/.`, '#ffcc80');
+                break;
+            }
+            const alvo = alvos[i];
+            setStatus(`Baixando HTML bruto ${i + 1}/${alvos.length} (${alvo.nome})...`, '#fff59d');
+            try {
+                const prod = await extractProducoesHtml(alvo.link);
+                if (prod.bruto) {
+                    const seguro = String(alvo.nome).replace(/[\/\\?%*:|"<>]/g, '-').trim();
+                    requestDownload({
+                        action: 'download_data',
+                        data: prod.bruto,
+                        filename: `${PASTA_BRUTOS}/producoes_${seguro}_bruto.html`
+                    }, `o HTML bruto de ${alvo.nome}`);
+                    salvos++;
+                } else {
+                    falhas++;
+                }
+            } catch (e) {
+                console.warn('[piccTools] Falha ao baixar o HTML bruto de', alvo.nome, e);
+                falhas++;
+            }
+        }
+
+        definirModoExtracao(false);
+        if (btnBrutos) { btnBrutos.disabled = false; btnBrutos.style.opacity = '1'; }
+        if (!piccAbortarExtracao) {
+            const aviso = falhas > 0 ? ` (${falhas} sem resposta)` : '';
+            setStatus(`Pronto: ${salvos} de ${alvos.length} arquivo(s) bruto(s) em Downloads/${PASTA_BRUTOS}/${aviso}`,
+                      falhas > 0 ? '#ffcc80' : '#a5d6a7');
+        }
+    }
+
     async function extractTableData() {
         const statusLabel = document.getElementById('picc-tools-status');
         // Escrita de status tolerante à ausência do elemento (o restante da função
@@ -1800,6 +2232,13 @@
             statusLabel.innerText = msg;
             if (color) statusLabel.style.color = color;
         };
+
+        // Sem o prefixo da chamada nao da para montar o endereco dos PDFs. Nao aborta:
+        // algumas linhas trazem o link direto do PDF; so avisa e destaca o campo.
+        if (!prefixoChamada()) {
+            marcarChamada(true, DICA_CHAMADA_VAZIA);
+            setStatus('Informe o prefixo da chamada (campo destacado) — sem ele os PDFs das propostas não são encontrados.', '#ffcc80');
+        }
 
         const table = document.getElementById('tabelaPropostas') || document.querySelector('table.dataTable') || document.querySelector('table');
 
@@ -1888,6 +2327,9 @@
                 const uf = getCellText(colIndexes.uf);
                 const instituicao = getCellText(colIndexes.instituicao);
                 const chamadaVal = getCellText(colIndexes.chamada);
+                // primeira execucao com o campo vazio: adota o valor da coluna agora,
+                // antes de montar o endereco do PDF logo abaixo
+                if (chamadaVal && !prefixoChamada()) definirChamadaSeVazia(chamadaVal);
 
                 // If a process filter list was specified, skip rows that do not match any target process
                 if (targetProcesses.length > 0) {
@@ -1926,6 +2368,8 @@
                 }
 
                 let supplementaryLink = '';
+                let producoesLink = '';      // item "Producoes e orientacoes" do menu da linha
+                let pdfViaChamada = false;   // o endereco do PDF veio do prefixo da chamada?
                 const links = row.querySelectorAll('a');
                 links.forEach(a => {
                     const text = (a.innerText || a.textContent || '').toLowerCase();
@@ -1939,9 +2383,11 @@
                         if (cryptoMatch) {
                             const arg2 = cryptoMatch[2];
                             const firstChar = arg2 ? arg2.charAt(0) : '';
-                            const chamadaId = chamadaParaCaminho(chamadaVal);
+                            // prefixo definido na barra (comeca com o valor da coluna)
+                            const chamadaId = prefixoChamada();
                             if (chamadaId && arg2 && firstChar) {
                                 pdfLink = `http://anexosform.cnpq.br/doc/${chamadaId}/${firstChar}/${arg2}_cp.pdf`;
+                                pdfViaChamada = true;
                             }
                         }
                     }
@@ -1959,6 +2405,14 @@
                     if ((text.includes('anexo') || text.includes('suplementar') || text.includes('material') || text.includes('plano') || text.includes('documento') || hrefAttr.includes('anexo') || onclickAttr.includes('anexo')) && validUrl) {
                         supplementaryLink = validUrl;
                     }
+                    // "Producoes e orientacoes": pagina publicacao.do do proprio efomento.
+                    // Casa pelo endereco, que e estavel, e pelo texto como reserva.
+                    if (!producoesLink && validUrl &&
+                        (hrefAttr.includes('publicacao.do') ||
+                         (cleanText.includes('orienta') && /produ[çc]/.test(cleanText)))) {
+                        producoesLink = validUrl;
+                    }
+
                     // Fallback if Parecer AdHoc column was not mapped
                     if (colIndexes.parecerAdHoc === -1 && (text.includes('parecer ad') || hrefAttr.includes('emissaoParecer.do')) && validUrl) {
                         if (!reviewLinks.includes(validUrl)) {
@@ -1967,7 +2421,9 @@
                     }
                 });
 
-                let edital = chamadaVal || '';
+                // O que identifica a chamada na lista de propostas e o codigo do campo da
+                // barra (ex.: "Universal_2026"), nao o texto da coluna (ex.: "l 202 6").
+                let edital = prefixoChamada() || chamadaVal || '';
                 if (pdfLink && !edital) {
                     const editalMatch = pdfLink.match(/\/doc\/([^\/]+)\//i);
                     if (editalMatch) edital = editalMatch[1];
@@ -1988,6 +2444,8 @@
                             isVisible: true
                         },
                         pdfLink: pdfLink,
+                        pdfViaChamada: pdfViaChamada,
+                        producoesLink: producoesLink,
                         supplementaryLink: supplementaryLink,
                         reviewLinks: reviewLinks
                     });
@@ -2045,6 +2503,11 @@
 
                 // Fetch extra data on the fly from PDF
                 const pdfResult = item.pdfLink ? await extractTeamFromPDF(item.pdfLink) : { teamMembers: [], edital: '', faixa: '-' };
+                // Sem processData o PDF nao foi lido. Se o endereco tinha sido montado com
+                // o prefixo da chamada, o suspeito numero um e o proprio prefixo.
+                if (item.pdfViaChamada && !pdfResult.processData) {
+                    marcarChamada(true, DICA_CHAMADA_ERRADA);
+                }
                 const teamMembers = pdfResult.teamMembers || [];
                 if (pdfResult.processData && pdfResult.processData.parseWarning) {
                     parseWarnings.push(pdfResult.processData.parseWarning);
@@ -2088,9 +2551,13 @@
                 // Sem isto, apenas o supplementaryLink (1 anexo) era baixado.
                 if (attachments.length > 0) item.attachments = attachments;
                 const reviews = await extractReviewsFromAdHoc(item.reviewLinks);
+                if (item.producoesLink) {
+                    const prod = await extractProducoesHtml(item.producoesLink);
+                    item.producoesHtml = prod.html;
+                }
 
                 // Save PDF, Lattes HTML, and Parecer HTMLs (with full CSS & icons) to Downloads/picctool/<processId>/
-                await saveProcessFiles(item, cvResult.htmlText, reviews);
+                await saveProcessFiles(item, cvResult.htmlText, reviews, true);
 
                 const existingIndex = db.findIndex(entry => entry.processId === item.processId);
 
@@ -2107,10 +2574,19 @@
                     existing.quadroGeral = quadroGeral.length > 0 ? quadroGeral : (existing.quadroGeral || []);
                     existing.pdfLink = item.pdfLink || (pdfResult.processData && pdfResult.processData.pdfLink) || existing.pdfLink || '';
                     existing.lattesId = lattesId || existing.lattesId || '';
-                    existing.proponente = item.proponente;
-                    existing.teamMembers = teamMembers;
+                    // Reimportar atualiza os dados, mas nao apaga o que foi corrigido a mao
+                    // no relatorio (membros acrescentados, editados ou removidos).
+                    const DBm = (typeof window !== 'undefined') ? window.JCRDBTools : null;
+                    existing.proponente = (DBm && typeof DBm.mesclarProponente === 'function')
+                        ? DBm.mesclarProponente(item.proponente, existing.proponente)
+                        : item.proponente;
+                    existing.teamMembers = (DBm && typeof DBm.mesclarEquipe === 'function')
+                        ? DBm.mesclarEquipe(teamMembers, existing.teamMembers, existing.removedMembers)
+                        : teamMembers;
                     existing.attachments = attachments.length > 0 ? attachments : (existing.attachments || []);
                     existing.reviews = reviews;
+                    existing.producoesLink = item.producoesLink || existing.producoesLink || '';
+                    if (item.producoesHtml) existing.producoesHtml = item.producoesHtml;
                     existing.filesDownloaded = true;
                     existing.alreadyDownloaded = true;
                     db[existingIndex] = existing;
@@ -2134,6 +2610,8 @@
                         teamMembers: teamMembers,
                         attachments: attachments,
                         reviews: reviews,
+                        producoesLink: item.producoesLink || '',
+                        producoesHtml: item.producoesHtml || '',
                         pdfLink: item.pdfLink || (pdfResult.processData && pdfResult.processData.pdfLink) || '',
                         totalPapers: 0,
                         papersWithJcr: 0,

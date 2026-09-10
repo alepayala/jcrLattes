@@ -49,6 +49,55 @@ window.JCRDBTools = {
             .replace(/"/g, '&quot;');
     },
 
+    // ---------------------------------------------------------------------------
+    // Reimportar uma proposta nao pode apagar o que foi ajustado a mao. O editor da
+    // equipe deixa marcas no registro e a extracao as respeita:
+    //   manual: true   -> membro acrescentado a mao (a extracao nunca o traz)
+    //   editado: true  -> membro corrigido a mao (a versao do usuario vence)
+    //   removedMembers -> nomes apagados a mao (a extracao nao os traz de volta)
+    // ---------------------------------------------------------------------------
+    _chaveMembro: function (nome) {
+        return String(nome || '').trim().toLowerCase();
+    },
+
+    // Junta a equipe recem-extraida com a que ja estava no banco.
+    mesclarEquipe: function (extraidos, existentes, removidos) {
+        const novos = Array.isArray(extraidos) ? extraidos.filter(m => m && m.name) : [];
+        const antigos = Array.isArray(existentes) ? existentes.filter(m => m && m.name) : [];
+        const apagados = new Set((Array.isArray(removidos) ? removidos : []).map(n => this._chaveMembro(n)));
+
+        const porChave = new Map();
+        antigos.forEach(m => porChave.set(this._chaveMembro(m.name), m));
+
+        const resultado = [];
+        const usados = new Set();
+
+        novos.forEach(m => {
+            const k = this._chaveMembro(m.name);
+            if (apagados.has(k)) return;              // o usuario apagou: nao volta
+            if (usados.has(k)) return;                // nome repetido na extracao entra uma vez
+            usados.add(k);
+            const antigo = porChave.get(k);
+            // corrigido a mao vence a extracao; senao entra o dado novo
+            resultado.push((antigo && antigo.editado) ? antigo : m);
+        });
+
+        // acrescentados ou corrigidos a mao que a extracao nao trouxe continuam na lista
+        antigos.forEach(m => {
+            const k = this._chaveMembro(m.name);
+            if (usados.has(k) || apagados.has(k)) return;
+            if (m.manual || m.editado) { usados.add(k); resultado.push(m); }
+        });
+
+        return resultado;
+    },
+
+    // O proponente corrigido a mao tambem nao e sobrescrito pela extracao.
+    mesclarProponente: function (novo, existente) {
+        if (existente && existente.editado) return existente;
+        return novo || existente || {};
+    },
+
     // Nº de participantes da proposta: proponente + equipe, sem repetir nomes — a mesma
     // contagem que o relatorio da proposta mostra na tabela de equipe.
     _contarParticipantes: function (proc) {
@@ -274,6 +323,43 @@ window.JCRDBTools = {
                 else resolve();
             });
         });
+    },
+
+    // Prefixo da chamada usado no caminho dos PDFs em anexosform.cnpq.br/doc/<prefixo>/.
+    // Guardado por chamada (a chave e o valor da coluna "Chamada" da planilha, compactado),
+    // porque cada edital tem o seu. Vai junto no backup: quem leva a base para outra
+    // maquina nao precisa redescobrir o prefixo.
+    piccChamadasKey: 'jcr_picc_chamadas',
+
+    _chaveChamada: function (valorColuna) {
+        const c = String(valorColuna || '').replace(/\s+/g, '').toLowerCase();
+        return c || '(sem coluna)';
+    },
+
+    getPiccChamadas: function () {
+        return new Promise((resolve) => {
+            if (!chrome.runtime?.id) { resolve({}); return; }
+            chrome.storage.local.get(this.piccChamadasKey, (r) => {
+                if (chrome.runtime.lastError || !r) { resolve({}); return; }
+                const v = r[this.piccChamadasKey];
+                resolve((v && typeof v === 'object') ? v : {});
+            });
+        });
+    },
+
+    savePiccChamadas: async function (mapa) {
+        if (!chrome.runtime?.id || !mapa || typeof mapa !== 'object') return;
+        await new Promise((resolve) => {
+            chrome.storage.local.set({ [this.piccChamadasKey]: mapa }, () => resolve());
+        });
+    },
+
+    // Grava o prefixo de uma chamada, preservando os demais
+    setPiccChamada: async function (valorColuna, prefixo) {
+        const mapa = await this.getPiccChamadas();
+        mapa[this._chaveChamada(valorColuna)] = String(prefixo || '');
+        await this.savePiccChamadas(mapa);
+        return mapa;
     },
 
     // ---------------------------------------------------------------------------
@@ -2422,6 +2508,48 @@ window.JCRDBTools = {
         }
     },
 
+    // ---------------------------------------------------------------------------
+    // Fonte do relatorio consolidado: os CVs da equipe ou a pagina "Producoes e
+    // Orientacoes" do proponente. A pagina do efomento cobre apenas os ultimos 10
+    // anos e nao traz citacoes por artigo, mas serve quando nenhum membro tem CV
+    // no banco — que e o caso mais comum antes de abrir os curriculos no Lattes.
+    // ---------------------------------------------------------------------------
+    _cvDataDeProducoes: function (proc, htmlProducoes) {
+        if (!htmlProducoes || !window.JCRProducoes || typeof window.JCRProducoes.parse !== 'function') return null;
+        let lido;
+        try {
+            lido = window.JCRProducoes.parse(htmlProducoes);
+        } catch (e) {
+            console.warn('[dbTools] Falha ao ler a página de produções:', e);
+            return null;
+        }
+        if (!lido || (lido.publications.length === 0 && lido.supervisions.raw.length === 0 && lido.patents.length === 0)) {
+            return null;
+        }
+
+        const nome = lido.nome || (proc && proc.proponente && proc.proponente.name) || (proc && proc.name) || 'Proponente';
+        return {
+            name: nome,
+            lattesId: (proc && proc.proponente && proc.proponente.lattesId) || '',
+            dateAdded: new Date().toISOString(),
+            publications: lido.publications,
+            rawPatents: lido.patents,
+            rawEvents: [],                       // trabalhos em eventos ficam de fora
+            supervisions: lido.supervisions,
+            declaredCitations: lido.declaredCitations,
+            ridStats: null,
+            researcherIdLink: null,
+            highJcr: 7.0,
+            lowJcr: 1.5,
+            groupMembers: [],
+            allTeamCvs: [],
+            _fonte: 'producoes',
+            _fonteNome: nome,
+            _fonteAnos: { min: lido.anoMin, max: lido.anoMax },
+            _fonteNivel: lido.nivel
+        };
+    },
+
     renderProcessReport: async function(processData, newTab, sortedDb = null) {
         if (!processData || !newTab) return;
 
@@ -2561,7 +2689,34 @@ window.JCRDBTools = {
             allTeamCvs: combinedCvs
         };
 
-        return this.renderCVReport(groupCvData, newTab, sortedDb, processData);
+        // ---- Fonte do relatorio ----
+        // Preferencia gravada na proposta; sem ela, usa as producoes quando nenhum
+        // membro da equipe tem CV no banco.
+        let htmlProducoes = processData.producoesHtml || '';
+        if (!htmlProducoes && processData.processId) {
+            try {
+                const blobs = await this.getProcBlobs(processData.processId);
+                htmlProducoes = (blobs && blobs.producoes) || '';
+            } catch (e) { /* segue sem as producoes */ }
+        }
+        const temProducoes = !!htmlProducoes;
+        const temCvs = foundGroupCvs.length > 0;
+        const escolha = processData.fonteRelatorio;      // 'cvs' | 'producoes' | undefined
+        const usarProducoes = temProducoes && (escolha === 'producoes' || (!escolha && !temCvs));
+
+        let dadosRelatorio = groupCvData;
+        if (usarProducoes) {
+            const deProducoes = this._cvDataDeProducoes(processData, htmlProducoes);
+            if (deProducoes) {
+                deProducoes.allTeamCvs = combinedCvs;
+                dadosRelatorio = deProducoes;
+            }
+        }
+        dadosRelatorio._temProducoes = temProducoes;
+        dadosRelatorio._temCvs = temCvs;
+        dadosRelatorio._totalCvs = foundGroupCvs.length;
+
+        return this.renderCVReport(dadosRelatorio, newTab, sortedDb, processData);
     },
 
     renderCVReport: function(cvData, newTab, sortedDb = null, parentGroupData = null) {
@@ -2664,6 +2819,13 @@ window.JCRDBTools = {
                                 });
                             }
                             return html;
+                        })()}
+
+                        ${(() => {
+                            if (!proc.producoesLink && !proc.producoesHtml) return '';
+                            const onlineLabel = '📚 Produções e Orientações';
+                            const offlineLabel = `📚 producoes_${safeProcessId}.html`;
+                            return `<button id="btn-doc-producoes" class="btn-doc-item" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(proc.producoesLink || '')}" style="background: #00838F; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(onlineLabel)}">${this._esc(onlineLabel)}</button>`;
                         })()}
 
                         ${(() => {
@@ -2865,7 +3027,7 @@ window.JCRDBTools = {
 
             const foundCount = (cvData.groupMembers || []).length;
             const totalCount = teamMembers.length;
-            hasGroupCvs = foundCount > 0;
+            hasGroupCvs = foundCount > 0 || cvData._fonte === 'producoes';
 
             // ---- Quadro Geral: totais por categoria ----
             // Usa o quadro do proprio PDF da proposta (contagem oficial do CNPq). Se ele
@@ -2953,7 +3115,43 @@ window.JCRDBTools = {
                 </div>`;
             }
 
-            const integratedReportTitleHtml = foundCount > 0 ? `
+            // ---- Cabecalho do relatorio consolidado + escolha da fonte ----
+            const fonteProducoes = cvData._fonte === 'producoes';
+            const temProducoes = cvData._temProducoes === true;
+            const anosFonte = cvData._fonteAnos || {};
+            const seletorFonte = temProducoes ? `
+                <div class="no-print" style="display: flex; align-items: center; gap: 8px; background: #ffffff; border: 1px solid #90CAF9; padding: 5px 12px; border-radius: 20px; font-size: 0.85em; white-space: nowrap;">
+                    <span style="font-weight: bold; color: #0D47A1;">Fonte:</span>
+                    <label style="cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: bold; color: ${cvData._temCvs ? '#1565C0' : '#9e9e9e'};" title="${cvData._temCvs ? 'Usar os currículos Lattes da equipe salvos no banco' : 'Nenhum CV da equipe está salvo no banco'}">
+                        <input type="radio" name="fonte-relatorio" value="cvs" ${fonteProducoes ? '' : 'checked'} ${cvData._temCvs ? '' : 'disabled'} style="cursor: pointer; accent-color: #1565C0;"> 👥 CVs da equipe
+                    </label>
+                    <label style="cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: bold; color: #00838F;" title="Usar a página &quot;Produções e Orientações&quot; do proponente (últimos 10 anos)">
+                        <input type="radio" name="fonte-relatorio" value="producoes" ${fonteProducoes ? 'checked' : ''} style="cursor: pointer; accent-color: #00838F;"> 📚 Produções
+                    </label>
+                </div>` : '';
+
+            let integratedReportTitleHtml;
+            if (fonteProducoes) {
+                const faixaAnos = (anosFonte.min && anosFonte.max) ? `${anosFonte.min}–${anosFonte.max}` : '';
+                integratedReportTitleHtml = `
+                <div style="background: #E0F7FA; border: 1px solid #80DEEA; border-radius: 8px; padding: 15px 20px; margin: 25px 0 20px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h2 style="margin: 0; color: #006064; font-size: 1.3em; display: flex; align-items: center; gap: 8px;">
+                            <span>📚 Relatório de Produção do Proponente</span>
+                        </h2>
+                        <div style="margin-top: 5px; color: #00838F; font-size: 0.95em;">
+                            Gerado a partir da página <strong>Produções e Orientações</strong> de
+                            <strong>${this._esc(cvData._fonteNome || proponenteName)}</strong>${faixaAnos ? ` — produção de <strong>${faixaAnos}</strong>` : ''}.
+                            ${cvData._temCvs ? '' : 'Nenhum integrante tem currículo no banco; para o consolidado da equipe, abra os CVs pelos links 🔗 da tabela acima.'}
+                        </div>
+                        <div style="margin-top: 4px; color: #00838F; font-size: 0.82em; opacity: 0.9;">
+                            Esta fonte não traz citações por artigo, Scopus, orientações em andamento nem trabalhos em eventos.
+                        </div>
+                    </div>
+                    ${seletorFonte}
+                </div>`;
+            } else if (foundCount > 0) {
+                integratedReportTitleHtml = `
                 <div style="background: #E3F2FD; border: 1px solid #90CAF9; border-radius: 8px; padding: 15px 20px; margin: 25px 0 20px 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                     <div>
                         <h2 style="margin: 0; color: #0D47A1; font-size: 1.3em; display: flex; align-items: center; gap: 8px;">
@@ -2963,21 +3161,26 @@ window.JCRDBTools = {
                             Estatísticas agregadas considerando <strong>${foundCount} de ${totalCount} membro(s)</strong> da equipe com Currículo Lattes cadastrado no Banco de Dados.
                         </div>
                     </div>
-                    <span style="background: #1565C0; color: white; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 0.9em;">
-                        ${foundCount} CV(s) na DB
-                    </span>
-                </div>
-            ` : `
-                <div style="background: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 8px; padding: 18px 22px; margin: 25px 0 20px 0; display: flex; align-items: center; gap: 15px;">
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        ${seletorFonte}
+                        <span style="background: #1565C0; color: white; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 0.9em;">
+                            ${foundCount} CV(s) na DB
+                        </span>
+                    </div>
+                </div>`;
+            } else {
+                integratedReportTitleHtml = `
+                <div style="background: #FFF3E0; border: 1px solid #FFE0B2; border-radius: 8px; padding: 18px 22px; margin: 25px 0 20px 0; display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
                     <div style="font-size: 2.2em; line-height: 1;">⚠️</div>
-                    <div>
+                    <div style="flex: 1 1 320px; min-width: 0;">
                         <h3 style="margin: 0; color: #E65100; font-size: 1.15em;">Nenhum Currículo Lattes Cadastrado no Banco de Dados</h3>
                         <div style="margin-top: 5px; color: #D84315; font-size: 0.95em;">
                             Nenhum dos <strong>${totalCount} integrante(s)</strong> da proposta possui currículo no Banco de Dados. Clique nos links 🔗 da tabela acima para abrir os CVs e salvar seus dados na DB.
                         </div>
                     </div>
-                </div>
-            `;
+                    ${seletorFonte}
+                </div>`;
+            }
 
             const reviewerNotesHtml = `
                 <details ${(proc.reviewerNotes || '').trim() ? 'open' : ''} data-collapse-key="anotacoes-do-parecerista" style="margin-bottom: 25px; background: #FFFDE7; border: 1px solid #FFE082; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
@@ -3045,6 +3248,20 @@ window.JCRDBTools = {
         
         newTab.reportState = this.reportState;
         const state = newTab.reportState;
+
+        // A pagina de producoes cobre uma janela curta (uns 10 anos). Os campos de
+        // periodo das listas vem com 5 anos, o que esconderia metade dos dados: para
+        // esta fonte eles passam a cobrir toda a extensao disponivel. Uma vez que o
+        // usuario mexa no campo, a escolha dele e mantida.
+        if (cvData._fonte === 'producoes' && !this._periodoProducoesAjustado) {
+            const anos = cvData._fonteAnos || {};
+            if (anos.min && anos.max && anos.max >= anos.min) {
+                const extensao = anos.max - anos.min + 1;
+                if (state.pubListYears === 5) state.pubListYears = extensao;
+                if (state.journalYears === 5) state.journalYears = extensao;
+            }
+            this._periodoProducoesAjustado = true;
+        }
         const targetRank = parseInt(state.targetAuthorRank) || 1;
         const startYearRecent = currentYear - 5;
         const startYearLast10 = currentYear - 10;
@@ -3097,7 +3314,8 @@ window.JCRDBTools = {
         const maxYear = stats.maxYear;
 
         let navButtonsHTML = '';
-        if (sortedDb && sortedDb.length > 1 && !cvData.name.startsWith('Grupo:')) {
+        const ehRelatorioDeProposta = !!(parentGroupData && (parentGroupData.processId || parentGroupData.isProcesso));
+        if (sortedDb && sortedDb.length > 1 && !cvData.name.startsWith('Grupo:') && !ehRelatorioDeProposta) {
             const currentIndex = sortedDb.findIndex(cv => cv.name === cvData.name);
             if (currentIndex !== -1) {
                 const prevIndex = currentIndex > 0 ? currentIndex - 1 : sortedDb.length - 1;
@@ -3138,7 +3356,7 @@ window.JCRDBTools = {
                     <div>
                         <h2 style="margin: 0; color: ${COLORS.footerText};">Relatório: ${this._esc(cvData.name)}</h2>
                         <div style="margin-top: 4px; color: #666; font-size: 0.85em;">
-                            ${cvData.name.startsWith('Grupo:') ? '' : `ID Lattes: <a href="http://lattes.cnpq.br/${this._esc(cvData.lattesId)}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(cvData.lattesId)}</a> &nbsp;&middot;&nbsp; `}Sincronizado em: ${new Date(cvData.dateAdded).toLocaleDateString()}
+                            ${(cvData.name.startsWith('Grupo:') || !cvData.lattesId) ? '' : `ID Lattes: <a href="http://lattes.cnpq.br/${this._esc(cvData.lattesId)}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(cvData.lattesId)}</a> &nbsp;&middot;&nbsp; `}Sincronizado em: ${new Date(cvData.dateAdded).toLocaleDateString()}
                         </div>
                     </div>
                     <div>
@@ -3787,6 +4005,7 @@ window.JCRDBTools = {
                 if (!blobs || Object.keys(blobs).length === 0) return;
                 if (blobs.pdfData && !parentGroupData.pdfData) parentGroupData.pdfData = blobs.pdfData;
                 if (blobs.cvHtml && !parentGroupData.cvHtml) parentGroupData.cvHtml = blobs.cvHtml;
+                if (blobs.producoes && !parentGroupData.producoesHtml) parentGroupData.producoesHtml = blobs.producoes;
                 if (Array.isArray(parentGroupData.reviews)) {
                     parentGroupData.reviews.forEach((rev, i) => {
                         if (rev && typeof rev === 'object' && !rev.html && blobs['review_' + i]) {
@@ -3940,6 +4159,85 @@ window.JCRDBTools = {
                     // 4. Fallback: Display complete local folder path notice
                     this.showAlert(`📂 Cópia do CV Lattes Congelado salva na pasta de backup local:\n\nDownloads/${localFolder}/${offlineFilename}`, newTab);
                 }
+            });
+        }
+
+        // Troca da fonte do relatorio consolidado (CVs da equipe x pagina de producoes).
+        // A escolha fica na propria proposta: cada uma pode ter a sua.
+        const radiosFonte = doc.querySelectorAll('input[name="fonte-relatorio"]');
+        if (radiosFonte.length > 0 && parentGroupData) {
+            radiosFonte.forEach(radio => {
+                radio.addEventListener('change', async () => {
+                    if (!radio.checked) return;
+                    parentGroupData.fonteRelatorio = radio.value;
+                    if (typeof window !== 'undefined' && window.JCRDBTools
+                        && typeof window.JCRDBTools.saveCVs === 'function') {
+                        await window.JCRDBTools.saveCVs([parentGroupData]);
+                    }
+                    this.renderProcessReport(parentGroupData, newTab, sortedDb);
+                });
+            });
+        }
+
+        // 2b. Produções e Orientações
+        const btnDocProducoes = doc.getElementById('btn-doc-producoes');
+        if (btnDocProducoes && parentGroupData) {
+            btnDocProducoes.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await hydrateProcBlobs();
+                const mode = getDocSourceMode();
+                const onlineUrl = btnDocProducoes.getAttribute('data-online-url');
+                const offlineFilename = `producoes_${safeProcId}.html`;
+
+                const abrirHtml = (htmlText) => {
+                    const fnFormat = window.JCRReportUtils?.makeSelfContainedHtml || window.makeSelfContainedHtml;
+                    const formatado = fnFormat ? fnFormat(htmlText, onlineUrl || 'http://efomento.cnpq.br/efomento/') : htmlText;
+                    const blob = new Blob([formatado], { type: 'text/html;charset=utf-8' });
+                    const blobUrl = newTab.URL ? newTab.URL.createObjectURL(blob) : URL.createObjectURL(blob);
+                    newTab.open(blobUrl, '_blank');
+                };
+
+                if (mode === 'online' && onlineUrl) {
+                    newTab.open(onlineUrl, '_blank');
+                    return;
+                }
+
+                // 1. cópia no banco
+                if (parentGroupData.producoesHtml) { abrirHtml(parentGroupData.producoesHtml); return; }
+
+                // 2. pasta piccData sincronizada
+                const arq = await lerDaPasta(offlineFilename);
+                if (arq) { abrirArquivoLocal(arq); return; }
+
+                // 3. origem no efomento, guardando para as próximas aberturas
+                if (onlineUrl && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+                    const rotulo = btnDocProducoes.textContent;
+                    btnDocProducoes.textContent = '⏳ Carregando produções...';
+                    let res = null;
+                    try {
+                        res = await new Promise((resolve) => {
+                            chrome.runtime.sendMessage({ action: 'fetch_url', url: onlineUrl }, (r) => resolve(r));
+                        });
+                    } catch (err) {
+                        console.warn('[dbTools] Falha no fetch on-the-fly das produções:', err);
+                    }
+                    btnDocProducoes.textContent = rotulo;
+
+                    if (res && res.success && res.text) {
+                        const fnFormat = window.JCRReportUtils?.makeSelfContainedHtml || window.makeSelfContainedHtml;
+                        const formatado = fnFormat ? fnFormat(res.text, onlineUrl) : res.text;
+                        parentGroupData.producoesHtml = formatado;
+                        try {
+                            await this.saveProcBlobs(parentGroupData.processId, { producoes: formatado });
+                        } catch (saveErr) {
+                            console.warn('[dbTools] Falha ao guardar as produções:', saveErr);
+                        }
+                        abrirHtml(formatado);
+                        return;
+                    }
+                }
+
+                this.showAlert(`📂 Não há cópia das Produções e Orientações no banco e não foi possível buscá-las na origem.\n\nO arquivo salvo está em:\nDownloads/${localFolder}/${offlineFilename}`, newTab);
             });
         }
 
@@ -4265,6 +4563,7 @@ window.JCRDBTools = {
                     propAtual.instituicao = instituicao;
                     propAtual.lattesId = lattes;
                     propAtual.cvLink = cvLink;
+                    propAtual.editado = true;   // reimportar nao sobrescreve
                     parentGroupData.lattesId = lattes;
                 } else {
                     if (!Array.isArray(parentGroupData.teamMembers)) parentGroupData.teamMembers = [];
@@ -4282,8 +4581,9 @@ window.JCRDBTools = {
                         // do que veio da extracao do PDF
                         parentGroupData.teamMembers.push(Object.assign({ manual: true }, dados));
                     } else if (parentGroupData.teamMembers[srcIdxAtual]) {
+                        // editado: true faz esta versao vencer numa reimportacao
                         parentGroupData.teamMembers[srcIdxAtual] =
-                            Object.assign({}, parentGroupData.teamMembers[srcIdxAtual], dados);
+                            Object.assign({}, parentGroupData.teamMembers[srcIdxAtual], dados, { editado: true });
                     }
                 }
                 await persistir();
@@ -4331,6 +4631,13 @@ window.JCRDBTools = {
                     if (!newTab.confirm('Remover "' + nome + '" da equipe desta proposta?')) return;
 
                     const removido = parentGroupData.teamMembers.splice(srcIdx, 1)[0] || {};
+                    // guarda o nome apagado: sem isto, reimportar a proposta o traria de volta
+                    if (!removido.manual && removido.name) {
+                        if (!Array.isArray(parentGroupData.removedMembers)) parentGroupData.removedMembers = [];
+                        if (!parentGroupData.removedMembers.some(n => this._chaveMembro(n) === this._chaveMembro(removido.name))) {
+                            parentGroupData.removedMembers.push(removido.name);
+                        }
+                    }
                     // limpa a marca de "desconsiderado no consolidado" do membro removido
                     if (Array.isArray(parentGroupData.excludedCvKeys)) {
                         const chaves = [removido.lattesId, removido.name].filter(Boolean);
@@ -4772,7 +5079,8 @@ window.JCRDBTools = {
     // da origem quando faltam.
     _blobEhTexto: function (chave, valor) {
         if (typeof valor !== 'string') return false;
-        return chave === 'cvHtml' || chave.indexOf('review_') === 0 || chave.indexOf('memberCv_') === 0;
+        return chave === 'cvHtml' || chave === 'producoes'
+            || chave.indexOf('review_') === 0 || chave.indexOf('memberCv_') === 0;
     },
 
     exportJSON: async function (targetTab = null, isProcessoOnly = false) {
@@ -4797,7 +5105,13 @@ window.JCRDBTools = {
                 if (Object.keys(textos).length > 0) proc[this.blobsBackupField] = textos;
             }
 
+            const chamadas = await this.getPiccChamadas();
             const combined = [...propostas, ...piccCvs];
+            // registro de configuracao: a importacao o reconhece pelo marcador e o
+            // codigo antigo simplesmente o ignora (nao tem processId nem name)
+            if (Object.keys(chamadas).length > 0) {
+                combined.push({ __piccConfig: true, chamadas: chamadas });
+            }
             if (combined.length === 0) {
                 this.showAlert("A base de dados do piccTools (propostas e CVs) está vazia.", targetTab);
                 return;
@@ -4855,8 +5169,13 @@ window.JCRDBTools = {
                     const toSet = {};
                     const blobsARestaurar = [];
 
+                    let chamadasImportadas = null;
                     for (const item of importedDB) {
                         if (!item) continue;
+                        if (item.__piccConfig) {
+                            if (item.chamadas && typeof item.chamadas === 'object') chamadasImportadas = item.chamadas;
+                            continue;
+                        }
                         const isProc = !!(item.isProcesso || item.processId);
                         if (isProc) {
                             // Os HTMLs voltam para jcr_proc_blob:<processId> e saem do
@@ -4883,6 +5202,13 @@ window.JCRDBTools = {
                                 else res();
                             });
                         });
+                    }
+
+                    if (chamadasImportadas) {
+                        // o que ja existe aqui tem precedencia: o usuario pode ter
+                        // corrigido o prefixo nesta maquina
+                        const atuais = await this.getPiccChamadas();
+                        await this.savePiccChamadas(Object.assign({}, chamadasImportadas, atuais));
                     }
 
                     // saveProcBlobs mescla: nao apaga PDFs/anexos ja baixados nesta maquina

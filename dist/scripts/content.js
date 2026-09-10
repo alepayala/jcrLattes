@@ -2069,6 +2069,15 @@ async function saveCvToProposalFolders(nameLink, tentativa = 0) {
       console.warn(`[JCRLattes] Tempo esgotado: ${pendentes} fator(es) de impacto nao chegaram. Salvando assim mesmo.`);
     }
 
+    // Sem proposta esperando por este CV nao ha o que salvar: sai antes de montar a
+    // copia autossuficiente, que clona a pagina e embute CSS e imagens.
+    const propostasAlvo = (typeof DB.findProposalsForResearcher === 'function')
+        ? await DB.findProposalsForResearcher(lattesId, nome) : [];
+    if (!propostasAlvo || propostasAlvo.length === 0) {
+        window.__jcrCvProposalSaveDone = true;
+        return;
+    }
+
     window.__jcrCvProposalSaveDone = true;
     const html = await buildStandaloneCvHtml();
     const res = await DB.saveCvToMatchingProposals(lattesId, nome, html);

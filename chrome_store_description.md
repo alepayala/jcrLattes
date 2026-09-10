@@ -1,4 +1,4 @@
-JCRLattes - Versão 1.7.0
+JCRLattes - Versão 1.7.6
 
 Resumo:
 Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes, autoria e orientações em segundos.
@@ -74,6 +74,68 @@ O JCRLattes é um projeto de código aberto! Acesse o nosso repositório oficial
 
 --------------------------------------------------
 Eleve o nível de sua gestão acadêmica e análise de produção científica com o JCRLattes.
+
+--------------------------------------------------
+
+### 🔒 SEÇÃO PRIVADA — FORMULÁRIO DE ENVIO (NÃO É TEXTO PÚBLICO DA LOJA)
+
+> O que segue destina-se aos campos de justificativa do Chrome Web Store Developer
+> Console. Não aparece na página pública da extensão e não deve ser copiado para a
+> descrição, para o resumo nem para as capturas de tela.
+
+--------------------------------------------------
+
+### ✅ CHECKLIST ANTES DE GERAR O ZIP DA LOJA
+
+* `dist/scripts/picc_content.js` → `MOSTRAR_BOTAO_BRUTOS = false`.
+  O botão **🧪 HTML brutos** da barra do piccTools é ferramenta de desenvolvimento
+  (baixa em lote o HTML original de "Produções e orientações" para estudo da página)
+  e **nunca** vai nas distribuições da Chrome Web Store. Ligue apenas em cópias
+  locais e desligue antes de empacotar.
+* piccTools continua **desabilitado por padrão** e fora de todo texto público.
+* Versão do `dist/manifest.json` incrementada em relação à publicada.
+
+--------------------------------------------------
+
+### 📝 JUSTIFICATIVA DAS PERMISSÕES DE HOST (CHROME WEB STORE SUBMISSION FORM)
+
+**English (Recommended for Chrome Web Store Developer Console Form):**
+> * `buscatextual.cnpq.br` — the Lattes CV pages themselves. The extension annotates the
+>   impact factor of each article directly in the CV the user is already viewing.
+> * `researcherid.com` / `webofscience.com` — read the user's public citation and h-index
+>   figures to complete the production report.
+> * `efomento.cnpq.br` — CNPq's grant management system. For users who are already
+>   authorized reviewers, the extension reads the judgment spreadsheet **they already have
+>   access to** and organizes the proposals under their review into a local database.
+> * `anexosform.cnpq.br` — the host that serves the proposal PDFs and their attachments,
+>   linked from that same spreadsheet.
+> * `plsql1.cnpq.br` — frozen (archived) Lattes CVs linked from the proposals.
+>
+> The extension only reads pages the signed-in user can already open by hand; it never
+> creates sessions, never sends data to third parties, and stores everything locally.
+
+**Português (para conferência do desenvolvedor):**
+> * `buscatextual.cnpq.br` — as próprias páginas de currículo Lattes, onde o fator de
+>   impacto é anotado.
+> * `researcherid.com` / `webofscience.com` — leitura das citações e do índice h públicos.
+> * `efomento.cnpq.br` — sistema de fomento do CNPq. Para quem já é avaliador autorizado,
+>   a extensão lê a planilha de julgamento **à qual essa pessoa já tem acesso** e organiza
+>   localmente as propostas sob sua responsabilidade.
+> * `anexosform.cnpq.br` — servidor dos PDFs das propostas e dos anexos.
+> * `plsql1.cnpq.br` — currículos Lattes congelados vinculados às propostas.
+>
+> A extensão só lê páginas que o usuário autenticado já consegue abrir manualmente; não
+> cria sessões, não envia dados a terceiros e guarda tudo localmente.
+
+--------------------------------------------------
+
+### 📝 JUSTIFICATIVA DAS DEMAIS PERMISSÕES
+
+> * `storage` / `unlimitedStorage` — o banco de dados de currículos e propostas fica no
+>   navegador do usuário; `unlimitedStorage` é necessário porque cópias de currículos e
+>   documentos ultrapassam a cota padrão.
+> * `tabs` — abrir a página do banco de dados e os relatórios em novas abas.
+> * `scripting` — anotar o currículo aberto e montar os relatórios na própria página.
 
 --------------------------------------------------
 

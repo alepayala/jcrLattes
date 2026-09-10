@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JCRLattes",
-  "version": "1.7.0",
+  "version": "1.7.6",
   "description": "Anote o Fator de Impacto (JCR) no Currículo Lattes, analise autoria e gere relatórios estatísticos de produção científica.",
   "permissions": [
     "storage",
@@ -59,6 +59,7 @@
       "js": [
         "scripts/report_utils.js",
         "scripts/db_tools.js",
+        "scripts/producoes_parser.js",
         "scripts/pdf.min.js",
         "scripts/picc_content.js"
       ]

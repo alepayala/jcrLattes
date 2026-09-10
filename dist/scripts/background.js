@@ -164,6 +164,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 
  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'download_file' && request.url && request.filename) {
+        if (!chrome.downloads) { sendResponse({ success: false, error: 'permissão "downloads" indisponível' }); return; }
         chrome.downloads.download({
             url: request.url,
             filename: request.filename,
@@ -181,6 +182,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     }
 
     if (request.action === 'download_data' && request.data && request.filename) {
+        if (!chrome.downloads) { sendResponse({ success: false, error: 'permissão "downloads" indisponível' }); return; }
         const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(request.data);
         chrome.downloads.download({
             url: dataUrl,
