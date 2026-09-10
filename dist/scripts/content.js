@@ -2002,6 +2002,39 @@ async function buildStandaloneCvHtml() {
     if (icone) icone.textContent = '[-]';
   });
 
+  // Os icones de link do Lattes (DOI, INPI, curriculo de coautor) sao sprites baixados
+  // do servidor: na copia salva viram um retangulo vazio e o link so se revela ao passar
+  // o mouse. Cada um deles ganha um icone de link desenhado no proprio arquivo — pela
+  // posicao no CV ja se sabe para onde o link leva.
+  const ICONE_LINK =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" '
+    + 'fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" '
+    + 'stroke-linejoin="round" style="vertical-align: middle;">'
+    + '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>'
+    + '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'
+    + '</svg>';
+
+  clone.querySelectorAll('a[href]').forEach(a => {
+    const href = (a.getAttribute('href') || '').trim();
+    // Ancoras internas (#secao) e javascript: nao levam a lugar nenhum na copia
+    if (!/^https?:/i.test(href)) return;
+    // So os links sem nada visivel: os que tem texto ou imagem propria ja se anunciam
+    if (a.textContent.trim() !== '' || a.querySelector('img, svg')) return;
+    // A barra do topo do Lattes (fonte, contraste, ajuda) nao faz parte do curriculo
+    const classes = (a.getAttribute('class') || '').split(/\s+/).filter(Boolean);
+    if (classes.some(c => c === 'bt-menu-header' || c.indexOf('icons-top') === 0)) return;
+
+    // Sem as classes de sprite o link deixa de reservar o retangulo vazio
+    const restantes = classes.filter(c => c.indexOf('icone-') !== 0 && c.indexOf('icons-') !== 0);
+    if (restantes.length > 0) a.setAttribute('class', restantes.join(' '));
+    else a.removeAttribute('class');
+
+    if (!a.getAttribute('title')) a.setAttribute('title', href);
+    a.style.cssText = 'display: inline-block; width: auto; height: auto; background: none; '
+      + 'margin: 0 4px 0 0; color: #3a52cb; text-decoration: none; line-height: 1;';
+    a.innerHTML = ICONE_LINK;
+  });
+
   let html = '<!DOCTYPE html>' + String.fromCharCode(10) + clone.outerHTML;
 
   // Os assets sao buscados pelo service worker (evita bloqueios de origem cruzada)
