@@ -512,20 +512,19 @@ async function checkAndUpdateProponenteLattesId(nameLink, finalStats = null, sup
   }
 }
 
+// Onde procurar os artigos. Eles moram em #artigos-completos; a secao "Educacao e
+// Popularizacao de C & T" repete, com a mesma classe .artigo-completo, artigos que ja
+// estao ali — varrer a pagina inteira contava esses repetidos (e o JCR deles) de novo.
+// So se o container nao existir a busca cai para o documento todo.
+function articlesRoot() {
+  return document.getElementById('artigos-completos') || document;
+}
+
 // Annotate and extract journal info form Lattes page
 function annotateLattesPage(highJcr, lowJcr, authorNames) {
   console.log('Searching for journal publications...');
 
-  // find all full articles - be resilient to different page structures
-  let pubElems = document.querySelectorAll("div[class='artigo-completo']");
-
-  // if not found, try to look inside the specific div if it exists
-  if (pubElems.length === 0) {
-    const startElem = document.getElementById('artigos-completos');
-    if (startElem) {
-      pubElems = startElem.querySelectorAll("div[class='artigo-completo']");
-    }
-  }
+  const pubElems = articlesRoot().querySelectorAll("div[class='artigo-completo']");
 
   if (pubElems.length === 0) return [];
 
@@ -1416,7 +1415,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   reportContent.appendChild(toggleContainer);
 
   // --- Cache DB Elements ---
-  const cachedPubElems = Array.from(document.querySelectorAll('.artigo-completo')).map(el => {
+  const cachedPubElems = Array.from(articlesRoot().querySelectorAll('.artigo-completo')).map(el => {
     const yearStr = el.getAttribute('data-year');
     const rankStr = el.getAttribute('data-author-rank');
     return {

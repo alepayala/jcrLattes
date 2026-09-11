@@ -38,6 +38,7 @@ window.JCRDBTools = {
     settingsKey: 'jcr_private_settings',
     currentCvData: null,
     sortConfig: { key: 'name', ascending: true },
+    faixaFilter: '',                 // '' = todas as faixas; '-' = propostas sem faixa
     lastArgs: null,
     DB_SCHEMA_VERSION: 2,
 
@@ -125,6 +126,12 @@ window.JCRDBTools = {
         if (key === 'teamCount') return this._contarParticipantes(cv);
         if (key === 'reviewCount') return this._contarPareceres(cv);
         return cv[key];
+    },
+
+    // Faixa da proposta como aparece na tabela: maiuscula, ou '-' quando nao ha
+    _faixaDe: function (cv) {
+        const f = cv && cv.faixa;
+        return (f !== undefined && f !== null && String(f).trim() !== '') ? String(f).trim().toUpperCase() : '-';
     },
 
     // Chave estavel de um bloco recolhivel do relatorio, derivada do proprio titulo
@@ -1429,6 +1436,22 @@ window.JCRDBTools = {
             return this.sortConfig.ascending ? comparison : -comparison;
         });
 
+        // Filtro por faixa (so na tabela de propostas). As opcoes saem da lista completa,
+        // para que qualquer faixa continue selecionavel depois de filtrar; daqui em diante
+        // `db` e a lista visivel — selecao, exclusao e navegacao seguem o que esta na tela.
+        const totalSemFiltro = db.length;
+        let faixasDisponiveis = [];
+        if (isProcessoOnly) {
+            const contagem = new Map();
+            db.forEach(cv => { const f = this._faixaDe(cv); contagem.set(f, (contagem.get(f) || 0) + 1); });
+            faixasDisponiveis = Array.from(contagem.entries())
+                .sort((a, b) => (a[0] === '-') - (b[0] === '-') || a[0].localeCompare(b[0], undefined, { numeric: true }));
+            if (this.faixaFilter && !contagem.has(this.faixaFilter)) this.faixaFilter = '';   // faixa sumiu do banco
+            if (this.faixaFilter) db = db.filter(cv => this._faixaDe(cv) === this.faixaFilter);
+        } else {
+            this.faixaFilter = '';
+        }
+
         let newTab = existingTab;
         if (!newTab || newTab.closed) {
             newTab = window.open('', '_blank');
@@ -1439,7 +1462,7 @@ window.JCRDBTools = {
         }
 
         const titleText = isProcessoOnly ? 'piccTools - Banco de Propostas' : 'JCR Lattes - Banco de CVs';
-        const headerTitle = isProcessoOnly ? `piccTools - Banco de Propostas (${db.length})` : `JCR Lattes - Banco de CVs (${db.length})`;
+        const headerTitle = isProcessoOnly ? `piccTools - Banco de Propostas (${db.length}${this.faixaFilter ? ' de ' + totalSemFiltro : ''})` : `JCR Lattes - Banco de CVs (${db.length})`;
 
         // Generate HTML for the table
         let tableHtml = `
@@ -1529,7 +1552,7 @@ window.JCRDBTools = {
                 <div class="table-container">
         `;
 
-        if (db.length === 0) {
+        if (totalSemFiltro === 0) {
             let emptyMsg = isProcessoOnly ? "Nenhuma Proposta/Processo (piccTools) salva no banco de dados." : "Nenhum CV salvo no banco de dados.";
             tableHtml += `<div class="empty-msg" style="padding: 20px; text-align: center; color: #777;">${this._esc(emptyMsg)}</div>`;
         } else {
@@ -1615,7 +1638,18 @@ window.JCRDBTools = {
                 if (m.key === 'instituicaoExecutora') classes.push('executora-cell');
                 const classAttr = ` class="${classes.join(' ')}"`;
                 
-                if (m.key === 'customId') {
+                if (m.key === 'faixa' && isProcessoOnly) {
+                    const opcoes = [`<option value=""${this.faixaFilter === '' ? ' selected' : ''}>Todas (${totalSemFiltro})</option>`]
+                        .concat(faixasDisponiveis.map(([f, n]) =>
+                            `<option value="${this._esc(f)}"${this.faixaFilter === f ? ' selected' : ''}>${f === '-' ? 'Sem faixa' : 'Faixa ' + this._esc(f)} (${n})</option>`))
+                        .join('');
+                    const filtrando = this.faixaFilter !== '';
+                    theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>
+                        ${label}<span class="sort-indicator">${arrow}</span><br>
+                        <select id="faixa-filter-select" title="Mostrar só as propostas de uma faixa"
+                            style="margin-top: 4px; max-width: 100%; padding: 2px 4px; font-weight: ${filtrando ? 'bold' : 'normal'}; border: 1px solid ${filtrando ? '#E65100' : '#ccc'}; border-radius: 3px; background: ${filtrando ? '#FFF3E0' : 'white'}; color: ${filtrando ? '#E65100' : 'inherit'}; cursor: pointer;">${opcoes}</select>
+                    </th>`;
+                } else if (m.key === 'customId') {
                     theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>
                         ${label}<span class="sort-indicator">${arrow}</span><br>
                         <div style="display: flex; gap: 2px; margin-top: 4px;">
@@ -1638,6 +1672,12 @@ window.JCRDBTools = {
             </th></tr>`;
 
             let tbodyHtml = ``;
+            if (db.length === 0 && this.faixaFilter) {
+                const colunas = (theadHtml.match(/<th\b/g) || []).length;
+                tbodyHtml += `<tr><td colspan="${colunas}" style="padding: 20px; text-align: center; color: #777;">
+                    Nenhuma proposta ${this.faixaFilter === '-' ? 'sem faixa' : 'na faixa ' + this._esc(this.faixaFilter)}.
+                </td></tr>`;
+            }
             db.forEach(cv => {
                 tbodyHtml += `<tr>`;
                 tbodyHtml += `<td style="text-align: center;"><input type="checkbox" class="row-checkbox" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" data-needs-update="${this.cvNeedsUpdate(cv) ? 'true' : 'false'}"></td>`;
@@ -2242,6 +2282,16 @@ window.JCRDBTools = {
                 handleOpenReport(e.currentTarget);
             });
         });
+
+        // Filtro por faixa
+        const faixaSelect = newTab.document.getElementById('faixa-filter-select');
+        if (faixaSelect) {
+            faixaSelect.addEventListener('click', (e) => e.stopPropagation());   // o <th> em volta ordena ao clicar
+            faixaSelect.addEventListener('change', (e) => {
+                this.faixaFilter = e.target.value;
+                this.viewDB(newTab, { processOnly: isProcessoOnly });
+            });
+        }
 
         // Add sorting event listeners to headers
         const headers = newTab.document.querySelectorAll('.sortable-header');
