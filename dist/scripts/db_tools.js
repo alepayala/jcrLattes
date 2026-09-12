@@ -2596,7 +2596,8 @@ window.JCRDBTools = {
             _fonte: 'producoes',
             _fonteNome: nome,
             _fonteAnos: { min: lido.anoMin, max: lido.anoMax },
-            _fonteNivel: lido.nivel
+            _fonteNivel: lido.nivel,
+            _fonteDuplicatas: lido.duplicatasRemovidas || 0
         };
     },
 
@@ -3195,7 +3196,7 @@ window.JCRDBTools = {
                             ${cvData._temCvs ? '' : 'Nenhum integrante tem currículo no banco; para o consolidado da equipe, abra os CVs pelos links 🔗 da tabela acima.'}
                         </div>
                         <div style="margin-top: 4px; color: #00838F; font-size: 0.82em; opacity: 0.9;">
-                            Esta fonte não traz citações por artigo, Scopus, orientações em andamento nem trabalhos em eventos.
+                            Esta fonte não traz citações por artigo, Scopus, orientações em andamento nem trabalhos em eventos.${cvData._fonteDuplicatas > 0 ? ` <strong>${cvData._fonteDuplicatas}</strong> linha(s) repetida(s) da página (mesmo artigo com o nome do periódico por extenso e abreviado) foram unificadas.` : ''}
                         </div>
                     </div>
                     ${seletorFonte}

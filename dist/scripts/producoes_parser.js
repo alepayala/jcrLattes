@@ -284,6 +284,94 @@
     }
 
     // ---------------------------------------------------------------------
+    // Artigos repetidos
+    // ---------------------------------------------------------------------
+    // A página lista o mesmo artigo mais de uma vez — em geral uma linha com o
+    // nome completo do periódico ("The Astrophysical Journal") e outra com o
+    // abreviado ("Astrophys J"), mesmo DOI, mesmo título. Nos 46 arquivos de
+    // amostra isso era ~17% das linhas. Há ainda repetições em que um dos
+    // títulos vem com marcação matemática (<math>, $$...$$) e o outro sem.
+    //
+    // O que NÃO é repetição, e por isso o DOI sozinho não basta: alguns CVs
+    // (grandes colaborações) trazem artigos DIFERENTES com o mesmo DOI errado.
+    // Regra: mesmo DOI + mesmo título (ou título quase igual, no mesmo ano e
+    // com volume/página compatíveis); sem DOI, só título idêntico no mesmo ano.
+
+    // Título reduzido a palavras: sem tags, entidades, fórmulas e acentos
+    function tituloChave(t) {
+        return semAcento(String(t || '')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&[a-z#0-9]+;/gi, ' ')
+            .replace(/\$\$[\s\S]*?\$\$/g, ' '))
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+    }
+
+    // Fração das palavras do título menor que aparecem no maior
+    function sobreposicao(chaveA, chaveB) {
+        const A = new Set(chaveA.split(' ').filter(Boolean));
+        const B = new Set(chaveB.split(' ').filter(Boolean));
+        if (!A.size || !B.size) return 0;
+        let comuns = 0;
+        A.forEach(function (w) { if (B.has(w)) comuns++; });
+        return comuns / Math.min(A.size, B.size);
+    }
+
+    const semValor = (v) => { const t = String(v || '').trim(); return !t || t === '-'; };
+
+    function paginasCompativeis(a, b) {
+        if (!semValor(a.volume) && !semValor(b.volume) && a.volume !== b.volume) return false;
+        const pa = String(a.pages || '').split('-')[0], pb = String(b.pages || '').split('-')[0];
+        if (!semValor(pa) && !semValor(pb) && pa !== pb) return false;
+        return true;
+    }
+
+    function mesmoArtigo(a, b) {
+        const doiA = String(a.doi || '').toLowerCase(), doiB = String(b.doi || '').toLowerCase();
+        if (doiA && doiB) {
+            if (doiA !== doiB) return false;
+            if (a._chave && a._chave === b._chave) return true;
+            return a.year === b.year && paginasCompativeis(a, b) && sobreposicao(a._chave, b._chave) >= 0.7;
+        }
+        return !!a._chave && a._chave === b._chave && a.year === b.year;
+    }
+
+    // Quanto mais completa a linha, mais ela merece ficar: nome de periódico por
+    // extenso, ISSN, DOI, JCR.
+    function completude(p) {
+        return String(p.journalName || '').length
+            + (p.issn ? 50 : 0) + (p.doi ? 50 : 0) + (p.jif > 0 ? 20 : 0);
+    }
+
+    const CAMPOS_MESCLAVEIS = ['doi', 'issn', 'jif', 'jcrYear', 'authorCount', 'authorRank',
+                               'qualis', 'classificacaoRevista', 'volume', 'pages', 'fasciculo'];
+
+    // Devolve { lista, removidos }: a lista sem repetições (na ordem original) e
+    // quantas linhas foram unificadas.
+    function deduplicarArtigos(lista) {
+        lista.forEach(function (p) { p._chave = tituloChave(p.paperTitle); });
+        const unicos = [];
+        let removidos = 0;
+        lista.forEach(function (p) {
+            const i = unicos.findIndex(u => mesmoArtigo(u, p));
+            if (i < 0) { unicos.push(p); return; }
+            removidos++;
+            let fica = unicos[i], sai = p;
+            if (completude(p) > completude(fica)) { fica = p; sai = unicos[i]; unicos[i] = p; }
+            CAMPOS_MESCLAVEIS.forEach(function (c) {
+                const vazio = fica[c] === '' || fica[c] === 0 || fica[c] === -1 || fica[c] === undefined || fica[c] === null;
+                if (vazio && sai[c] !== undefined && sai[c] !== null && sai[c] !== '' && sai[c] !== 0 && sai[c] !== -1) fica[c] = sai[c];
+            });
+            if (fica.authorCount > 0 && fica.authorRank > 0) {
+                fica.isFirstAuthor = fica.authorRank === 1;
+                fica.isLastAuthor = fica.authorRank === fica.authorCount;
+            }
+        });
+        unicos.forEach(function (p) { delete p._chave; });
+        return { lista: unicos, removidos: removidos };
+    }
+
+    // ---------------------------------------------------------------------
     // Cabeçalho
     // ---------------------------------------------------------------------
     function cabecalho(doc) {
@@ -309,7 +397,8 @@
         const vazio = {
             nome: '', nivel: '', publications: [], patents: [],
             supervisions: { raw: [], concluded: {}, inCourse: {} },
-            declaredCitations: null, anoMin: 0, anoMax: 0, secoesIgnoradas: []
+            declaredCitations: null, anoMin: 0, anoMax: 0, secoesIgnoradas: [],
+            duplicatasRemovidas: 0
         };
         if (!htmlText || typeof DOMParser === 'undefined') return vazio;
 
@@ -322,7 +411,7 @@
         if (!doc || !doc.body) return vazio;
 
         const cab = cabecalho(doc);
-        const publications = [];
+        let publications = [];
         const patents = [];
         const raw = [];
         const ignoradas = [];
@@ -340,6 +429,9 @@
             else if (alvo.tipo === PATENTES) patents.push(...patentes(cols, dados));
             else if (alvo.tipo === ORIENTACOES) raw.push(...orientacoes(alvo.categoria, cols, dados));
         });
+
+        const dedup = deduplicarArtigos(publications);
+        publications = dedup.lista;
 
         // concluded/inCourse no formato que o relatório já usa para os totais
         const concluded = {};
@@ -370,7 +462,8 @@
             totalTrabalhosWos: cab.totalTrabalhos,
             anoMin: anos.length ? Math.min(...anos) : 0,
             anoMax: anos.length ? Math.max(...anos) : 0,
-            secoesIgnoradas: ignoradas
+            secoesIgnoradas: ignoradas,
+            duplicatasRemovidas: dedup.removidos
         };
     }
 
@@ -381,6 +474,8 @@
         urlDoi: urlDoi,
         _periodico: periodico,
         _fatorImpacto: fatorImpacto,
-        _classificar: classificar
+        _classificar: classificar,
+        _deduplicarArtigos: deduplicarArtigos,
+        _tituloChave: tituloChave
     };
 })(typeof window !== 'undefined' ? window : globalThis);
