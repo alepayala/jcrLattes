@@ -3196,7 +3196,7 @@ window.JCRDBTools = {
                             ${cvData._temCvs ? '' : 'Nenhum integrante tem currículo no banco; para o consolidado da equipe, abra os CVs pelos links 🔗 da tabela acima.'}
                         </div>
                         <div style="margin-top: 4px; color: #00838F; font-size: 0.82em; opacity: 0.9;">
-                            Esta fonte não traz citações por artigo, Scopus, orientações em andamento nem trabalhos em eventos.${cvData._fonteDuplicatas > 0 ? ` <strong>${cvData._fonteDuplicatas}</strong> linha(s) repetida(s) da página (mesmo artigo com o nome do periódico por extenso e abreviado) foram unificadas.` : ''}
+                            Esta fonte não traz citações por artigo, Scopus, orientações em andamento nem trabalhos em eventos.${cvData._fonteDuplicatas > 0 ? ` <span style="color: #c62828; font-weight: 700;">${cvData._fonteDuplicatas} linha(s) repetida(s) da página (mesmo artigo com o nome do periódico por extenso e abreviado) foram unificadas.</span>` : ''}
                         </div>
                     </div>
                     ${seletorFonte}
