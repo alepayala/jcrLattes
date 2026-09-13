@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ' *)",
+      "PowerShell(git add dist/manifest.json)",
+      "PowerShell(git add dist/scripts/db_tools.js dist/manifest.json)",
+      "PowerShell(git add dist/scripts/db_tools.js)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/check-js.js"
+            ],
+            "timeout": 30,
+            "statusMessage": "Verificando sintaxe JS..."
+          }
+        ]
+      }
+    ]
+  }
+}

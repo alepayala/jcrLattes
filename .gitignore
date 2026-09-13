@@ -26,3 +26,7 @@ test_pages/
 
 # MacOS
 .DS_Store
+
+# Claude Code: settings.json e hooks/ sao versionados (config do projeto);
+# settings.local.json e pessoal de cada maquina
+.claude/settings.local.json
