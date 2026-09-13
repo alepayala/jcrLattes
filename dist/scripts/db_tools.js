@@ -2817,6 +2817,21 @@ window.JCRDBTools = {
                 }
             }
 
+            // Prioridade editavel no proprio relatorio: mesmos valores e mesmo destino
+            // da coluna Prioridade da tabela de propostas, para o revisor classificar
+            // sem ter de voltar a tabela. Fica em linha propria (flex-basis 100%) no
+            // rodape do bloco de acoes, abaixo de Imprimir / Voltar as Propostas.
+            const prioridadeAtual = (proc.prioridade !== undefined && proc.prioridade !== null && String(proc.prioridade).trim() !== '')
+                ? String(proc.prioridade).trim() : '-';
+            const prioridadeOpcoes = ['-', '0', '1', '2', '3', '4']
+                .map(o => `<option value="${o}"${o === prioridadeAtual ? ' selected' : ''}>${o}</option>`).join('');
+            const prioridadeHTML = `
+                <div style="flex: 1 0 100%; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 2px;">
+                    <label for="proc-priority-select" style="font-weight: bold; font-size: 0.9em;" title="Prioridade da Proposta (-, 0, 1, 2, 3, 4)">🎯 Prioridade:</label>
+                    <select id="proc-priority-select" style="padding: 4px 10px; border: 1px solid #ccc; border-radius: 3px; font-weight: bold; background: white; cursor: pointer;">${prioridadeOpcoes}</select>
+                    <span id="proc-priority-status" style="font-size: 0.8em; color: #1B5E20; font-weight: bold; display: none; background: #E8F5E9; padding: 2px 8px; border-radius: 10px; border: 1px solid #A5D6A7;">✓ Salvo</span>
+                </div>`;
+
             // Documents Card
             let filesHtml = `
                 <div style="background: #E8F5E9; border: 1px solid #C8E6C9; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
@@ -3260,6 +3275,7 @@ window.JCRDBTools = {
                         ${procNavHTML}
                         <button id="btn-print-report" style="padding: 8px 15px; background: #7f8c8d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">🖨️ Imprimir</button>
                         <button id="btn-back-proc-db" style="padding: 8px 15px; background: #ffffff; color: #1565C0; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">⬅️ Voltar às Propostas</button>
+                        ${prioridadeHTML}
                     </div>
                 </div>
                 ${filesHtml}
@@ -4463,6 +4479,24 @@ window.JCRDBTools = {
         };
         navegarProposta(doc.getElementById('btn-prev-proc'));
         navegarProposta(doc.getElementById('btn-next-proc'));
+
+        // Prioridade escolhida no cabecalho do relatorio. Grava no mesmo campo que a
+        // coluna Prioridade da tabela; como parentGroupData e o proprio objeto da
+        // lista, a tabela ja volta com o valor novo sem precisar reler o banco.
+        const prioSelect = doc.getElementById('proc-priority-select');
+        const prioStatus = doc.getElementById('proc-priority-status');
+        if (prioSelect && parentGroupData) {
+            prioSelect.addEventListener('change', async () => {
+                parentGroupData.prioridade = prioSelect.value;
+                if (typeof window !== 'undefined' && window.JCRDBTools && typeof window.JCRDBTools.saveCVs === 'function') {
+                    await window.JCRDBTools.saveCVs([parentGroupData]);
+                }
+                if (prioStatus) {
+                    prioStatus.style.display = 'inline-block';
+                    setTimeout(() => { prioStatus.style.display = 'none'; }, 2000);
+                }
+            });
+        }
 
         const btnPrev = doc.getElementById('btn-prev-cv');
         if (btnPrev) {
