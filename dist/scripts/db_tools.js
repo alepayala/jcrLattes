@@ -1103,6 +1103,99 @@ window.JCRDBTools = {
     // HTML + OK. Um confirm() nativo nao aceita caixa de selecao, entao e montado no
     // documento da aba (sem handler inline: a CSP da pagina da extensao bloqueia).
     // Resolve { ok, comHtml }; o valor da caixa fica guardado nas configuracoes.
+    // Lista dos numeros de processo pronta para colar no campo "Processos" da barra do
+    // piccTools, na planilha de julgamento. Aquele campo aceita espaco, virgula ou ponto
+    // e virgula como separador; usamos espaco, que e o que o placeholder dele pede.
+    // `origem` so descreve de onde veio a lista (selecao ou tabela inteira).
+    mostrarListaProcessos: function (targetTab, processos, origem) {
+        const alvo = (targetTab && !targetTab.closed && targetTab.document) ? targetTab
+                   : ((typeof window !== 'undefined' && window.document) ? window : null);
+        const doc = alvo && alvo.document;
+        if (!doc || !doc.body) return;
+
+        const lista = (Array.isArray(processos) ? processos : []).join(' ');
+
+        const fundo = doc.createElement('div');
+        fundo.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 10000; display: flex; align-items: center; justify-content: center;';
+
+        const cartao = doc.createElement('div');
+        cartao.style.cssText = 'background: #fff; border-radius: 8px; padding: 22px; width: min(620px, 92vw); box-shadow: 0 8px 30px rgba(0,0,0,0.35); font-family: \'Segoe UI\', Tahoma, Geneva, Verdana, sans-serif; color: #333;';
+
+        const titulo = doc.createElement('h3');
+        titulo.textContent = '\u{1F4CB} Processos para extração';
+        titulo.style.cssText = 'margin: 0 0 10px 0; color: #1565C0;';
+
+        const texto = doc.createElement('p');
+        texto.style.cssText = 'margin: 0 0 14px 0; font-size: 0.9em; line-height: 1.5; color: #555;';
+        texto.innerHTML = 'Cole no campo <strong>Processos</strong> da barra do piccTools, na planilha de julgamento, '
+            + 'e extraia somente estas propostas.<br><span style="color:#777;">'
+            + processos.length + ' processo(s) — ' + origem + '.</span>';
+
+        const area = doc.createElement('textarea');
+        area.readOnly = true;
+        area.value = lista;
+        area.style.cssText = 'width: 100%; height: 110px; padding: 10px; border: 1px solid #90CAF9; border-radius: 6px; font-family: Consolas, monospace; font-size: 13px; resize: vertical; box-sizing: border-box; background: #F5F9FF; color: #333; line-height: 1.5;';
+
+        const barra = doc.createElement('div');
+        barra.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 16px;';
+
+        const aviso = doc.createElement('span');
+        aviso.style.cssText = 'font-size: 0.85em; font-weight: bold; color: #2E7D32; visibility: hidden;';
+        aviso.textContent = '✓ Copiado';
+
+        const acoes = doc.createElement('div');
+        acoes.style.cssText = 'display: flex; gap: 10px;';
+
+        const btnCopiar = doc.createElement('button');
+        btnCopiar.textContent = '\u{1F4CB} Copiar';
+        btnCopiar.style.cssText = 'padding: 8px 16px; background: #1565C0; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;';
+
+        const btnFechar = doc.createElement('button');
+        btnFechar.textContent = 'Fechar';
+        btnFechar.style.cssText = 'padding: 8px 16px; background: #ECEFF1; color: #37474F; border: 1px solid #CFD8DC; border-radius: 4px; cursor: pointer; font-weight: bold;';
+
+        const fechar = () => { if (fundo.parentNode) fundo.parentNode.removeChild(fundo); };
+
+        btnCopiar.addEventListener('click', async () => {
+            let copiou = false;
+            try {
+                if (alvo.navigator && alvo.navigator.clipboard) {
+                    await alvo.navigator.clipboard.writeText(lista);
+                    copiou = true;
+                }
+            } catch (e) { /* sem permissao de clipboard: cai no execCommand */ }
+            if (!copiou) {
+                // Fallback para quando a aba nao tem acesso a API de clipboard
+                area.select();
+                try { copiou = doc.execCommand('copy'); } catch (e) { copiou = false; }
+            }
+            aviso.textContent = copiou ? '✓ Copiado' : 'Copie com Ctrl+C (texto já selecionado)';
+            aviso.style.color = copiou ? '#2E7D32' : '#E65100';
+            aviso.style.visibility = 'visible';
+            if (!copiou) area.select();
+        });
+
+        btnFechar.addEventListener('click', fechar);
+        fundo.addEventListener('click', (e) => { if (e.target === fundo) fechar(); });
+        doc.addEventListener('keydown', function esc(e) {
+            if (e.key === 'Escape') { fechar(); doc.removeEventListener('keydown', esc); }
+        });
+
+        acoes.appendChild(btnCopiar);
+        acoes.appendChild(btnFechar);
+        barra.appendChild(aviso);
+        barra.appendChild(acoes);
+        cartao.appendChild(titulo);
+        cartao.appendChild(texto);
+        cartao.appendChild(area);
+        cartao.appendChild(barra);
+        fundo.appendChild(cartao);
+        doc.body.appendChild(fundo);
+
+        area.focus();
+        area.select();
+    },
+
     perguntarOpcoesBackup: function (targetTab = null) {
         return new Promise((resolve) => {
             const alvo = (targetTab && !targetTab.closed && targetTab.document) ? targetTab
@@ -1666,6 +1759,7 @@ window.JCRDBTools = {
                 <div style="margin-top: 4px;">
                     ${isProcessoOnly ? '' : `<button id="bulk-btn-report" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Relatório dos Selecionados">📊</button>`}
                     ${isProcessoOnly ? '' : `<button id="bulk-btn-clear" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Limpar ID dos Selecionados">🧹</button>`}
+                    ${isProcessoOnly ? `<button id="bulk-btn-proclist" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Lista dos números de processo para colar no campo &quot;Processos&quot; da planilha do piccTools (os selecionados ou, sem seleção, todos os da tabela)">📋</button>` : ''}
                     <button id="bulk-btn-delete" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="${isProcessoOnly ? 'Excluir Propostas Selecionadas' : 'Excluir Selecionados'}">🗑️</button>
                     ${isProcessoOnly ? '' : `<button id="bulk-btn-open" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Abrir CVs selecionados no Lattes para atualizar">🔄</button>`}
                 </div>
@@ -2169,6 +2263,29 @@ window.JCRDBTools = {
                     await this.saveCVs(modifiedCvs);
                     this.viewDB(newTab, { processOnly: isProcessoOnly });
                 }
+            });
+        }
+
+        // Lista de processos para colar na planilha do piccTools. Com linhas marcadas,
+        // leva so elas; sem marcacao, leva a tabela inteira — que ja e o resultado do
+        // filtro de faixa, porque ele e aplicado antes da renderizacao (as linhas de fora
+        // nao chegam a existir).
+        const bulkBtnProcList = newTab.document.getElementById('bulk-btn-proclist');
+        if (bulkBtnProcList) {
+            bulkBtnProcList.addEventListener('click', () => {
+                const selecionados = selectedCheckboxData();
+                const usouSelecao = selecionados.length > 0;
+                const fonte = usouSelecao
+                    ? selecionados.map(s => s.processId)
+                    : Array.from(rowCheckboxes).map(cb => cb.getAttribute('data-processid'));
+                const processos = [...new Set(fonte.map(p => String(p || '').trim()).filter(Boolean))];
+                if (processos.length === 0) {
+                    newTab.alert('Nenhuma proposta com número de processo na tabela.');
+                    return;
+                }
+                this.mostrarListaProcessos(newTab, processos, usouSelecao
+                    ? 'apenas as propostas selecionadas'
+                    : 'todas as propostas da tabela, já com o filtro atual');
             });
         }
 
