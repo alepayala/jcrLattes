@@ -12,7 +12,9 @@ JCRLattes is a Manifest V3 Chrome extension (vanilla JS, no framework, no bundle
 
 - **Run/reload the extension**: `chrome://extensions/` → enable Developer Mode → "Load unpacked" → select `dist/`. After editing any file under `dist/`, reload the extension there and refresh the target tab.
 - **Syntax-check a changed JS file** (do this automatically after every edit to a `.js` file, per `.agents/AGENTS.md` — don't ask first): `node -c dist/scripts/<file>.js`
-- **No automated test suite exists.** Verification is manual: load the unpacked extension and open real or saved pages from `test_pages/` (sample Lattes CVs, "Produções e Orientações" pages, proposal PDFs — gitignored, kept locally for manual regression checks).
+- **Run the unit tests**: `node --test` (from the repo root). Uses Node's built-in runner — no `package.json`, no dependencies, nothing to install. Run it after touching any pure helper.
+- **Test suite scope**: `tests/` covers only the *pure* functions of `producoes_parser.js`, `report_utils.js`, and `db_tools.js` — parsing, deduplication, key derivation, stats, HTML escaping, and the `mesclarEquipe` hand-edit contract. `tests/helpers/load.js` loads the extension scripts in Node by supplying a minimal `window` global; the production files are untouched and require no module system. Anything that needs the DOM, `chrome.*`, or a real page is **not** covered.
+- **Everything else is still verified manually**: load the unpacked extension and open real or saved pages from `test_pages/` (sample Lattes CVs, "Produções e Orientações" pages, proposal PDFs — gitignored, kept locally for manual regression checks).
 - **Python collaboration-graph tool** (independent of the extension, only shares its JSON data format):
   ```bash
   pip install networkx matplotlib
