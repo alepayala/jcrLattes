@@ -2261,6 +2261,7 @@
             instituicao: -1,
             chamada: -1,
             parecerAdHoc: -1,
+            parecerTecnico: -1,
             acoes: -1
         };
 
@@ -2279,6 +2280,10 @@
                 colIndexes.chamada = idx;
             } else if (text.includes('parecer ad') || text.includes('parecer adhoc') || text.includes('parecer ad-hoc')) {
                 colIndexes.parecerAdHoc = idx;
+            } else if (text.includes('parecer téc') || text.includes('parecer tec')) {
+                // Coluna "Parecer técnico": vazia, "Pré-selecionado" ou "Não pré-selecionado".
+                // Checada depois de "parecer ad" para nao roubar aquela coluna.
+                colIndexes.parecerTecnico = idx;
             } else if (text.includes('açõ') || text.includes('acoes')) {
                 colIndexes.acoes = idx;
             }
@@ -2327,6 +2332,7 @@
                 const uf = getCellText(colIndexes.uf);
                 const instituicao = getCellText(colIndexes.instituicao);
                 const chamadaVal = getCellText(colIndexes.chamada);
+                const parecerTecnico = getCellText(colIndexes.parecerTecnico);
                 // primeira execucao com o campo vazio: adota o valor da coluna agora,
                 // antes de montar o endereco do PDF logo abaixo
                 if (chamadaVal && !prefixoChamada()) definirChamadaSeVazia(chamadaVal);
@@ -2434,6 +2440,7 @@
                         processId: processo,
                         numeroProtocolo: numeroProtocolo,
                         edital: edital,
+                        parecerTecnico: parecerTecnico,
                         proponente: {
                             name: proponente,
                             cvLink: cvLink,
@@ -2569,6 +2576,9 @@
                     existing.processId = item.processId;
                     existing.numeroProtocolo = item.numeroProtocolo;
                     existing.edital = edital || existing.edital || '';
+                    // Coluna vazia normalmente significa que ela nao estava habilitada na
+                    // planilha, e nao que o parecer sumiu: preserva o que ja havia.
+                    existing.parecerTecnico = item.parecerTecnico || existing.parecerTecnico || '';
                     existing.faixa = faixa || existing.faixa || '-';
                     existing.instituicaoExecutora = instExecutora || existing.instituicaoExecutora || '';
                     existing.quadroGeral = quadroGeral.length > 0 ? quadroGeral : (existing.quadroGeral || []);
@@ -2598,6 +2608,7 @@
                         processId: item.processId,
                         numeroProtocolo: item.numeroProtocolo,
                         edital: edital,
+                        parecerTecnico: item.parecerTecnico || '',
                         faixa: faixa || '-',
                         instituicaoExecutora: instExecutora,
                         quadroGeral: quadroGeral,

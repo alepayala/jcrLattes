@@ -2817,6 +2817,22 @@ window.JCRDBTools = {
                 }
             }
 
+            // Parecer tecnico lido da coluna homonima da planilha: vazio, "Pre-selecionado"
+            // ou "Nao pre-selecionado". Etiqueta de fundo BRANCO, com texto e borda na cor
+            // do estado. Texto vermelho direto sobre o azul #1565C0 do cabecalho nao serve
+            // (1,02:1 de contraste, some), e fundo vermelho vivo tambem nao (1,15:1): as
+            // duas cores tem luminancia parecida. O branco e o que salta do cabecalho
+            // (5,75:1), e a borda vermelha da a leitura de alerta.
+            const parecerTexto = String(proc.parecerTecnico || '').trim();
+            const parecerNegativo = parecerTexto
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().startsWith('nao');
+            const parecerEstilo = parecerNegativo
+                ? 'background: #ffffff; color: #C62828; border: 2px solid #C62828;'
+                : 'background: #ffffff; color: #1B5E20; border: 2px solid #2E7D32;';
+            const parecerTecnicoHTML = parecerTexto
+                ? `<div style="margin-top: 6px; font-size: 0.85em;">📋 <strong>Parecer técnico:</strong> <span style="${parecerEstilo} font-weight: bold; padding: 3px 10px; border-radius: 4px;">${parecerNegativo ? '⚠️ ' : ''}${this._esc(parecerTexto)}</span></div>`
+                : '';
+
             // Prioridade editavel no proprio relatorio: mesmos valores e mesmo destino
             // da coluna Prioridade da tabela de propostas, para o revisor classificar
             // sem ter de voltar a tabela. Fica em linha propria (flex-basis 100%) no
@@ -3268,8 +3284,8 @@ window.JCRDBTools = {
                             <strong>Proponente:</strong> ${this._esc(proponenteName)} ${prop.bolsa && prop.bolsa !== '-' ? `<span style="background: #E8F5E9; color: #1B5E20; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; font-weight: bold; margin-left: 4px;">🎖️ Bolsa: ${this._esc(prop.bolsa)}</span>` : ''} &nbsp;|&nbsp; <strong>Instituição:</strong> ${this._esc(inst)}
                         </div>
                         ${proc.instituicaoExecutora ? `<div style="margin-top: 4px; font-size: 0.9em; opacity: 0.95;">🏛️ <strong>Instituição Executora/Sede:</strong> ${this._esc(proc.instituicaoExecutora)}</div>` : ''}
-                        ${proc.numeroProtocolo ? `<div style="margin-top: 4px; font-size: 0.85em; opacity: 0.85;">Protocolo Nº: ${this._esc(proc.numeroProtocolo)}</div>` : ''}
                         ${(proc.edital || (proc.faixa && proc.faixa !== '-')) ? `<div style="margin-top: 4px; font-size: 0.85em; opacity: 0.85;">${proc.edital ? `📜 <strong>Edital:</strong> ${this._esc(proc.edital)}` : ''}${(proc.edital && proc.faixa && proc.faixa !== '-') ? ' &nbsp;|&nbsp; ' : ''}${(proc.faixa && proc.faixa !== '-') ? `🎯 <strong>Faixa:</strong> ${this._esc(proc.faixa)}` : ''}</div>` : ''}
+                        ${parecerTecnicoHTML}
                     </div>
                     <div id="proc-header-actions" class="no-print" style="flex: 0 0 320px; width: 320px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: flex-end;">
                         ${procNavHTML}
