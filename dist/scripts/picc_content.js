@@ -313,10 +313,18 @@
 
     function isValidBolsa(b) {
         if (!b || typeof b !== 'string') return false;
-        const clean = b.trim();
+        const clean = b.trim().replace(/\s+/g, ' ');
         if (clean === '' || clean === '-') return false;
-        // Strict literal level match ONLY: PQ or DT followed by 1A, 1B, 1C, 1D, 2, SR
-        return /^(PQ|DT)\s*[-–\s]?\s*(1A|1B|1C|1D|2|SR)$/i.test(clean);
+        // Niveis aceitos: 1A-1D, 2 e SR, alem de A, B e C — estes aparecem na coluna
+        // BOLSA do PDF separados por espaco ("Doutorado PQ C Universidade..."), e sem
+        // eles mais da metade dos membros de equipe das propostas de amostra perdia o
+        // nivel e ficava com "-".
+        //
+        // 1A-1D, 2 e SR podem vir colados ao prefixo ("PQ1A"); a letra sozinha exige
+        // separador, senao "DTA" — analise termica, comum no texto das propostas —
+        // seria lido como bolsa DT nivel A.
+        return /^(PQ|DT)\s*[-–]?\s*(1[A-D]|2|SR)$/i.test(clean)
+            || /^(PQ|DT)\s*[-–\s]\s*[A-C]$/i.test(clean);
     }
 
     // Implementação única em JCRReportUtils (report_utils.js), carregado antes deste
