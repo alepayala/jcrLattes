@@ -1181,6 +1181,15 @@
         }
     }
 
+    // Resultado e justificativa do parecer. Implementacao unica em JCRDBTools
+    // (db_tools.js), carregado antes deste script, porque o relatorio da proposta
+    // tambem precisa dela para completar pareceres importados antes desta leitura.
+    function extrairAvaliacaoAdHoc(htmlText) {
+        return (window.JCRDBTools && typeof window.JCRDBTools._lerAvaliacaoParecer === 'function')
+            ? window.JCRDBTools._lerAvaliacaoParecer(htmlText)
+            : { resultado: '', justificativa: '' };
+    }
+
     async function extractReviewsFromAdHoc(reviewLinks) {
         if (!Array.isArray(reviewLinks) || reviewLinks.length === 0) return [];
         
@@ -1218,10 +1227,13 @@
                     const parecerEl = doc.querySelector('.parecer-conteudo, #conteudoParecer, .texto-parecer, #divParecer, .form-group, fieldset');
                     const text = parecerEl ? parecerEl.innerText.trim() : doc.body.innerText.trim();
                     const selfContainedReviewHtml = makeSelfContainedHtml(htmlText, link || 'https://chagas.cnpq.br/chagas/');
+                    const avaliacao = extrairAvaliacaoAdHoc(htmlText);
                     reviews.push({
                         link: link,
                         text: text.substring(0, 4000),
-                        html: selfContainedReviewHtml
+                        html: selfContainedReviewHtml,
+                        resultado: avaliacao.resultado,
+                        justificativa: avaliacao.justificativa
                     });
                 }
             } catch (e) {

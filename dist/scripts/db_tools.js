@@ -134,6 +134,55 @@ window.JCRDBTools = {
         return (f !== undefined && f !== null && String(f).trim() !== '') ? String(f).trim().toUpperCase() : '-';
     },
 
+    // Le "Resultado da avaliação" e a justificativa do HTML de uma pagina de parecer.
+    //
+    // So aceita parecer AD HOC: a pagina de pre-selecao usa exatamente os mesmos ids
+    // (listaResultadoContent / listaJustificativaContent), mas com resultado de outra
+    // natureza; o titulo da pagina e o que separa as duas. Paginas que nao sao parecer
+    // nao tem os blocos e voltam vazias.
+    //
+    // Mora aqui, e nao em picc_content.js, porque tem dois chamadores: a importacao
+    // pela planilha e o proprio relatorio da proposta, que roda em db.html — onde
+    // picc_content.js nao e carregado.
+    _lerAvaliacaoParecer: function (htmlText) {
+        const vazio = { resultado: '', justificativa: '' };
+        if (!htmlText || typeof DOMParser === 'undefined') return vazio;
+
+        let doc = null;
+        try { doc = new DOMParser().parseFromString(String(htmlText), 'text/html'); } catch (e) { return vazio; }
+        if (!doc) return vazio;
+
+        const elTitulo = doc.querySelector('title');
+        if (!/parecer\s*ad[\s-]?hoc/i.test(elTitulo ? String(elTitulo.textContent || '') : '')) return vazio;
+
+        const texto = (el) => el
+            ? String(el.textContent || '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
+            : '';
+
+        return {
+            // o resultado e uma linha so; a justificativa preserva os paragrafos
+            resultado: texto(doc.getElementById('listaResultadoContent')).replace(/\s+/g, ' '),
+            justificativa: texto(doc.getElementById('listaJustificativaContent'))
+        };
+    },
+
+    // Traduz o "Resultado da avaliação" de um parecer ad hoc para o que a interface
+    // precisa: o texto como veio, a sigla e as cores. Parecer sem resultado — porque a
+    // pagina nao era ad hoc, ou nao trazia o bloco, ou foi importado antes desta leitura
+    // existir — fica neutro, com o mesmo laranja de sempre.
+    _avaliacaoParecer: function (rev) {
+        const neutro = { resultado: '', sigla: '', cor: '#F57C00', corClara: '#FFF3E0', corBorda: '#FFE082', corTexto: '#E65100' };
+        const resultado = (rev && typeof rev === 'object' && rev.resultado) ? String(rev.resultado).trim() : '';
+        if (!resultado) return neutro;
+        if (/^n[ãa]o/i.test(resultado)) {
+            return { resultado: resultado, sigla: 'NR', cor: '#C62828', corClara: '#FFEBEE', corBorda: '#FFCDD2', corTexto: '#B71C1C' };
+        }
+        if (/^recomendad/i.test(resultado)) {
+            return { resultado: resultado, sigla: 'R', cor: '#2E7D32', corClara: '#E8F5E9', corBorda: '#C8E6C9', corTexto: '#1B5E20' };
+        }
+        return Object.assign({}, neutro, { resultado: resultado });
+    },
+
     // Chave estavel de um bloco recolhivel do relatorio, derivada do proprio titulo
     // ("Limiares e Filtros" -> "limiares-e-filtros"). Assim o estado independe da
     // proposta ou do CV aberto.
@@ -2934,6 +2983,51 @@ window.JCRDBTools = {
                 }
             }
 
+            // Bloco "Pareceres Ad-Hoc": um recolhivel por parecer, com o resultado no
+            // titulo e a justificativa no corpo. O botao de abrir apenas aciona o botao
+            // ja existente no card de documentos, para nao duplicar a cadeia de decisao
+            // on-line / copia no banco / pasta sincronizada / busca na origem.
+            const pareceresAdHocHtml = (() => {
+                const lista = Array.isArray(proc.reviews) ? proc.reviews : [];
+                if (lista.length === 0) return '';
+
+                const avaliacoes = lista.map(r => this._avaliacaoParecer(r));
+                const nR = avaliacoes.filter(a => a.sigla === 'R').length;
+                const nNR = avaliacoes.filter(a => a.sigla === 'NR').length;
+                const nSem = avaliacoes.length - nR - nNR;
+                const resumo = [
+                    nR ? `${nR} recomendada${nR > 1 ? 's' : ''}` : '',
+                    nNR ? `${nNR} não recomendada${nNR > 1 ? 's' : ''}` : '',
+                    nSem ? `${nSem} sem resultado` : ''
+                ].filter(Boolean).join(', ');
+
+                const blocos = lista.map((rev, idx) => {
+                    const av = avaliacoes[idx];
+                    const titulo = av.resultado || 'sem resultado de ad hoc';
+                    const justificativa = (rev && typeof rev === 'object' && rev.justificativa)
+                        ? String(rev.justificativa).trim() : '';
+                    const corpo = justificativa
+                        ? `<div style="margin-top: 10px; font-size: 0.9em; line-height: 1.55; color: #333; white-space: pre-wrap; word-break: break-word;">${this._esc(justificativa)}</div>`
+                        : `<div style="margin-top: 10px; font-size: 0.85em; color: #777; font-style: italic;">Sem justificativa registrada nesta leitura. Abra o parecer para ver o conteúdo completo.</div>`;
+                    return `
+                        <details data-collapse-key="parecer-ad-hoc-${idx + 1}" style="background: #fff; border: 1px solid ${av.corBorda}; border-left: 5px solid ${av.cor}; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px;">
+                            <summary style="cursor: pointer; font-weight: bold; color: ${av.corTexto}; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+                                <span>Ad-Hoc #${idx + 1}: ${this._esc(titulo)}</span>
+                                <button class="btn-abrir-parecer no-print" data-parecer-idx="${idx}" style="background: ${av.cor}; color: white; border: none; padding: 3px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.8em;" title="Abrir o parecer completo">📄 abrir</button>
+                            </summary>
+                            ${corpo}
+                        </details>`;
+                }).join('');
+
+                return `
+                <details data-collapse-key="pareceres-ad-hoc" style="margin-bottom: 20px; background: #FFF8E1; border: 1px solid #FFE082; border-radius: 8px; padding: 15px;">
+                    <summary style="cursor: pointer; font-weight: bold; color: #E65100; font-size: 1.1em; list-style: none;">
+                        ⚖️ Pareceres Ad-Hoc <span style="font-weight: normal; font-size: 0.82em; color: #795548;">(${lista.length}${resumo ? ' — ' + resumo : ''})</span>
+                    </summary>
+                    <div style="margin-top: 12px;">${blocos}</div>
+                </details>`;
+            })();
+
             // Parecer tecnico lido da coluna homonima da planilha: vazio, "Pre-selecionado"
             // ou "Nao pre-selecionado". Etiqueta de fundo BRANCO, com texto e borda na cor
             // do estado. Texto vermelho direto sobre o azul #1565C0 do cabecalho nao serve
@@ -2991,7 +3085,7 @@ window.JCRDBTools = {
                             const pdfOnlineUrl = proc.pdfLink || '';
                             const onlineLabel = '📄 Proposta';
                             const offlineLabel = `📄 proposta_${safeProcessId}.pdf`;
-                            return `<button id="btn-doc-proposta" class="btn-doc-item" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(pdfOnlineUrl)}" style="background: #D32F2F; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(onlineLabel)}">${this._esc(onlineLabel)}</button>`;
+                            return `<button id="btn-doc-proposta" class="btn-doc-item" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(pdfOnlineUrl)}" style="background: #37474F; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(onlineLabel)}">${this._esc(onlineLabel)}</button>`;
                         })()}
 
                         ${(() => {
@@ -3012,9 +3106,18 @@ window.JCRDBTools = {
                             if (reviewsList.length > 0) {
                                 reviewsList.forEach((rev, idx) => {
                                     const onlineUrl = (typeof rev === 'string') ? rev : (rev.link || '');
-                                    const onlineLabel = reviewsList.length > 1 ? `📝 Parecer Ad-Hoc #${idx + 1}` : `📝 Parecer Ad-Hoc`;
-                                    const offlineLabel = `📝 parecer_${idx + 1}.html`;
-                                    html += `<button id="btn-doc-parecer-${idx + 1}" class="btn-doc-item btn-doc-parecer-item" data-idx="${idx}" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(onlineUrl)}" style="background: #F57C00; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(onlineLabel)}">${this._esc(onlineLabel)}</button>`;
+                                    // A sigla entra no lugar do icone e a cor acompanha, para dar
+                                    // para varrer os pareceres de relance. Vai no proprio texto do
+                                    // rotulo (e nao como marcacao) porque updateDocButtonsUI troca
+                                    // os rotulos por textContent ao alternar on-line/backup.
+                                    const av = this._avaliacaoParecer(rev);
+                                    const marca = av.sigla ? `[${av.sigla}] ` : '📝 ';
+                                    const onlineLabel = reviewsList.length > 1 ? `${marca}Parecer Ad-Hoc #${idx + 1}` : `${marca}Parecer Ad-Hoc`;
+                                    const offlineLabel = `${marca}parecer_${idx + 1}.html`;
+                                    const titulo = av.resultado
+                                        ? `${onlineLabel} — ${av.resultado}`
+                                        : onlineLabel;
+                                    html += `<button id="btn-doc-parecer-${idx + 1}" class="btn-doc-item btn-doc-parecer-item" data-idx="${idx}" data-online-label="${this._esc(onlineLabel)}" data-offline-label="${this._esc(offlineLabel)}" data-online-url="${this._esc(onlineUrl)}" style="background: ${av.cor}; color: white; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.85em; display: inline-flex; align-items: center; gap: 5px;" title="${this._esc(titulo)}">${this._esc(onlineLabel)}</button>`;
                                 });
                             }
                             return html;
@@ -3152,7 +3255,7 @@ window.JCRDBTools = {
                     <tr style="border-bottom: 1px solid #eee; ${isExcluded ? 'background: #FFFDE7; opacity: 0.8;' : ''}">
                         <td style="padding: 8px; text-align: center;">${idx + 1}</td>
                         <td style="padding: 8px; text-align: left; font-weight: bold;">
-                            ${this._esc(member.name)} ${isExcluded ? '<span style="font-size: 0.75em; color: #E65100; font-weight: normal; margin-left: 6px;">(Desconsiderado no Consolidado)</span>' : ''}
+                            ${this._esc(member.name)}
                             <br><span style="font-size: 0.8em; color: #1565C0; font-weight: normal;">${this._esc(roleAndFormacao)}</span>
                         </td>
                         <td style="padding: 8px; text-align: center; white-space: nowrap;">
@@ -3412,6 +3515,7 @@ window.JCRDBTools = {
                     </div>
                 </div>
                 ${filesHtml}
+                ${pareceresAdHocHtml}
                 ${reviewerNotesHtml}
                 ${teamTableHtml}
                 ${quadroGeralHtml}
@@ -4616,6 +4720,68 @@ window.JCRDBTools = {
         // Prioridade escolhida no cabecalho do relatorio. Grava no mesmo campo que a
         // coluna Prioridade da tabela; como parentGroupData e o proprio objeto da
         // lista, a tabela ja volta com o valor novo sem precisar reler o banco.
+        // Botao "abrir" dentro do bloco Pareceres Ad-Hoc: aciona o botao correspondente
+        // do card de documentos, herdando dele toda a cadeia de decisao (on-line, copia
+        // no banco, pasta sincronizada, busca na origem). preventDefault/stopPropagation
+        // porque o botao mora dentro do <summary> e o clique colapsaria a secao.
+        doc.querySelectorAll('.btn-abrir-parecer').forEach(btnAbrir => {
+            btnAbrir.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const i = parseInt(btnAbrir.getAttribute('data-parecer-idx'), 10);
+                const alvo = isNaN(i) ? null : doc.getElementById('btn-doc-parecer-' + (i + 1));
+                if (alvo) alvo.click();
+            });
+        });
+
+        // Pareceres importados antes desta leitura existir ficam sem resultado. Em vez
+        // de obrigar a reimportar a carteira inteira, completa na abertura do relatorio
+        // a partir do que ja esta a mao: a copia guardada no banco ou o arquivo na pasta
+        // piccData. A leitura da pasta NAO pede permissao — apenas aproveita a que ja
+        // foi concedida —, porque isso roda sozinho, sem clique do usuario.
+        const completarPareceresSalvos = async () => {
+            const lista = (parentGroupData && Array.isArray(parentGroupData.reviews)) ? parentGroupData.reviews : [];
+            const pendente = (r) => r && typeof r === 'object' && !r.resultado && !r.avaliacaoLida;
+            if (!lista.some(pendente)) return;
+
+            await hydrateProcBlobs();
+
+            let ganhouDados = false, mudouAlgo = false;
+            for (let i = 0; i < lista.length; i++) {
+                const rev = lista[i];
+                if (!pendente(rev)) continue;
+
+                let html = rev.html || rev.htmlContent || '';
+                if (!html) {
+                    try {
+                        const arq = await this.lerArquivoDaProposta(parentGroupData, `parecer_${i + 1}.html`, false);
+                        if (arq) html = await arq.text();
+                    } catch (e) { /* sem pasta ou sem permissao: fica para a reimportacao */ }
+                }
+                if (!html) continue;
+
+                const av = this._lerAvaliacaoParecer(html);
+                rev.avaliacaoLida = true;   // ja tentamos: nao reler o arquivo a cada abertura
+                mudouAlgo = true;
+                if (av.resultado || av.justificativa) {
+                    rev.resultado = av.resultado;
+                    rev.justificativa = av.justificativa;
+                    ganhouDados = true;
+                }
+            }
+
+            if (!mudouAlgo) return;
+            try {
+                await this.saveCVs([parentGroupData]);
+            } catch (e) {
+                console.warn('[dbTools] Falha ao guardar a avaliação dos pareceres:', e);
+            }
+            // remonta so quando ha o que mostrar; na volta nenhum parecer fica pendente,
+            // entao nao ha como isto se repetir
+            if (ganhouDados) this.renderProcessReport(parentGroupData, newTab, sortedDb);
+        };
+        completarPareceresSalvos();
+
         const prioSelect = doc.getElementById('proc-priority-select');
         const prioStatus = doc.getElementById('proc-priority-status');
         if (prioSelect && parentGroupData) {
