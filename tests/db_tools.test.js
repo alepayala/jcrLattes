@@ -187,6 +187,176 @@ describe('_contarParticipantes', () => {
     });
 });
 
+// Base da matriz de coautoria: dois pesquisadores colaboram quando os conjuntos
+// de artigos deles se cruzam, e a chave e o que decide se e o mesmo artigo.
+describe('_chaveArtigo', () => {
+    test('o DOI manda, normalizado', () => {
+        assert.strictEqual(B._chaveArtigo({ doi: '10.1103/X' }), B._chaveArtigo({ doi: ' 10.1103/x ' }));
+    });
+
+    test('DOI tem precedencia sobre o titulo', () => {
+        // o mesmo DOI casa mesmo com titulos grafados de formas diferentes
+        assert.strictEqual(
+            B._chaveArtigo({ doi: '10.1/a', paperTitle: 'Um titulo' }),
+            B._chaveArtigo({ doi: '10.1/a', paperTitle: 'Outro titulo qualquer' }));
+    });
+
+    test('sem DOI, casa por titulo normalizado e ano', () => {
+        assert.strictEqual(
+            B._chaveArtigo({ paperTitle: 'Ação do <i>Fe</i>!', year: 2024 }),
+            B._chaveArtigo({ paperTitle: 'Acao do Fe', year: 2024 }));
+    });
+
+    test('sem DOI, anos diferentes nao casam', () => {
+        assert.notStrictEqual(
+            B._chaveArtigo({ paperTitle: 'Mesmo titulo', year: 2024 }),
+            B._chaveArtigo({ paperTitle: 'Mesmo titulo', year: 2025 }));
+    });
+
+    test('artigos diferentes nao casam', () => {
+        assert.notStrictEqual(
+            B._chaveArtigo({ paperTitle: 'Raman spectroscopy', year: 2020 }),
+            B._chaveArtigo({ paperTitle: 'Thermal analysis', year: 2020 }));
+    });
+
+    test('sem DOI e sem titulo nao gera chave', () => {
+        assert.strictEqual(B._chaveArtigo({}), '');
+        assert.strictEqual(B._chaveArtigo(null), '');
+        assert.strictEqual(B._chaveArtigo({ paperTitle: '   ' }), '');
+    });
+});
+
+describe('_artigosDoCv', () => {
+    test('descarta repetidos e entradas sem identidade', () => {
+        const cv = { publications: [{ doi: '10.1/a' }, { paperTitle: 'Estudo X', year: 2020 }, { doi: '10.1/a' }, {}] };
+        assert.strictEqual(B._artigosDoCv(cv).size, 2);
+    });
+
+    test('CV sem publicacoes devolve conjunto vazio', () => {
+        assert.strictEqual(B._artigosDoCv({}).size, 0);
+        assert.strictEqual(B._artigosDoCv(null).size, 0);
+    });
+
+    test('a intersecao entre dois CVs e o numero de artigos em comum', () => {
+        const a = B._artigosDoCv({ publications: [{ doi: '10.1/p1' }, { doi: '10.1/p2' }, { doi: '10.1/p3' }] });
+        const b = B._artigosDoCv({ publications: [{ doi: '10.1/p2' }, { doi: '10.1/p3' }, { doi: '10.1/p9' }] });
+        let comuns = 0;
+        a.forEach(k => { if (b.has(k)) comuns++; });
+        assert.strictEqual(comuns, 2);
+    });
+
+    test('o mesmo artigo em dois CVs conta uma vez, mesmo sem DOI num deles', () => {
+        const a = B._artigosDoCv({ publications: [{ doi: '10.1/p1', paperTitle: 'Spin chains', year: 2021 }] });
+        const b = B._artigosDoCv({ publications: [{ paperTitle: 'Spin chains', year: 2021 }] });
+        let comuns = 0;
+        a.forEach(k => { if (b.has(k)) comuns++; });
+        // um tem DOI e o outro nao: as chaves diferem, e a coautoria passa despercebida
+        assert.strictEqual(comuns, 0);
+    });
+});
+
+describe('_matrizCoautoria', () => {
+    const cv = (nome, pubs) => ({ name: nome, publications: pubs });
+    const P = (doi, ano) => ({ doi: doi, year: ano });
+    const equipe = () => [
+        cv('Ana',   [P('10/a', 2018), P('10/b', 2024), P('10/c', 2025)]),
+        cv('Bruno', [P('10/a', 2018), P('10/b', 2024)]),
+        cv('Carla', [P('10/z', 2010)])
+    ];
+
+    test('conta os artigos em comum de cada par', () => {
+        const r = B._matrizCoautoria(equipe(), [], 0, 2026);
+        assert.strictEqual(r.gente.length, 3);
+        assert.strictEqual(r.m[0][1], 2);       // Ana e Bruno
+        assert.strictEqual(r.m[0][2], 0);       // Ana e Carla
+        assert.strictEqual(r.pares, 1);
+        assert.strictEqual(r.maior, 2);
+    });
+
+    test('a matriz e simetrica e tem diagonal zerada', () => {
+        const r = B._matrizCoautoria(equipe(), [], 0, 2026);
+        for (let i = 0; i < r.gente.length; i++) {
+            assert.strictEqual(r.m[i][i], 0);
+            for (let j = 0; j < r.gente.length; j++) assert.strictEqual(r.m[i][j], r.m[j][i]);
+        }
+    });
+
+    test('anos = 0 considera toda a carreira', () => {
+        assert.strictEqual(B._matrizCoautoria(equipe(), [], 0, 2026).m[0][1], 2);
+    });
+
+    test('a janela de anos corta os artigos antigos', () => {
+        // ultimos 3 anos a partir de 2026 = 2023 em diante: sobra so o de 2024
+        assert.strictEqual(B._matrizCoautoria(equipe(), [], 3, 2026).m[0][1], 1);
+    });
+
+    test('janela larga o bastante devolve tudo', () => {
+        assert.strictEqual(B._matrizCoautoria(equipe(), [], 20, 2026).m[0][1], 2);
+    });
+
+    test('tecnicos e alunos ficam de fora', () => {
+        const fichas = [
+            { name: 'Ana', role: 'Pesquisador', formacao: 'Doutorado' },
+            { name: 'Bruno', role: 'Técnico', formacao: 'Doutorado' },
+            { name: 'Carla', role: 'Aluno', formacao: '' }
+        ];
+        const r = B._matrizCoautoria(equipe(), fichas, 0, 2026);
+        assert.deepStrictEqual(r.gente.map(g => g.nome), ['Ana']);
+    });
+
+    test('titulacao que nao e doutorado exclui; em branco NAO exclui', () => {
+        const fichas = [
+            { name: 'Ana', role: 'Pesquisador', formacao: 'Doutorado' },
+            { name: 'Bruno', role: 'Pesquisador', formacao: 'Mestrado' },
+            { name: 'Carla', role: 'Pesquisador', formacao: '' }   // vem vazia do PDF
+        ];
+        const r = B._matrizCoautoria(equipe(), fichas, 0, 2026);
+        assert.deepStrictEqual(r.gente.map(g => g.nome), ['Ana', 'Carla']);
+    });
+
+    test('sem fichas (relatorio de grupo) ninguem e filtrado', () => {
+        assert.strictEqual(B._matrizCoautoria(equipe(), [], 0, 2026).gente.length, 3);
+    });
+
+    test('o coordenador vem primeiro, mesmo fora da ordem alfabetica', () => {
+        const fichas = [
+            { name: 'Zeca', role: 'Proponente', formacao: 'Doutorado' },
+            { name: 'Ana', role: 'Pesquisador', formacao: 'Doutorado' }
+        ];
+        const cvs = [cv('Ana', [P('10/a', 2020)]), cv('Zeca', [P('10/a', 2020)])];
+        const r = B._matrizCoautoria(cvs, fichas, 0, 2026);
+        assert.deepStrictEqual(r.gente.map(g => g.nome), ['Zeca', 'Ana']);
+        assert.strictEqual(r.gente[0].coordenador, true);
+        assert.strictEqual(r.gente[1].coordenador, false);
+    });
+
+    test('"Coordenador" tambem marca, nao so "Proponente"', () => {
+        const fichas = [{ name: 'Zeca', role: 'Coordenador do projeto', formacao: '' }];
+        const r = B._matrizCoautoria([cv('Ana', []), cv('Zeca', [])], fichas, 0, 2026);
+        assert.strictEqual(r.gente[0].nome, 'Zeca');
+        assert.strictEqual(r.gente[0].coordenador, true);
+    });
+
+    test('sem coordenador identificado, a ordem e so alfabetica', () => {
+        const fichas = [{ name: 'Zeca', role: 'Pesquisador', formacao: '' }];
+        const r = B._matrizCoautoria([cv('Zeca', []), cv('Ana', [])], fichas, 0, 2026);
+        assert.deepStrictEqual(r.gente.map(g => g.nome), ['Ana', 'Zeca']);
+        assert.ok(r.gente.every(g => g.coordenador === false));
+    });
+
+    test('os nomes saem em ordem alfabetica', () => {
+        const fora = [cv('Zeca', [P('10/a', 2020)]), cv('Ana', [P('10/a', 2020)])];
+        assert.deepStrictEqual(B._matrizCoautoria(fora, [], 0, 2026).gente.map(g => g.nome), ['Ana', 'Zeca']);
+    });
+
+    test('lista vazia ou com um so CV nao quebra', () => {
+        assert.strictEqual(B._matrizCoautoria([], [], 0, 2026).gente.length, 0);
+        assert.strictEqual(B._matrizCoautoria(null, null, 0, 2026).gente.length, 0);
+        const um = B._matrizCoautoria([cv('Ana', [P('10/a', 2020)])], [], 0, 2026);
+        assert.strictEqual(um.pares, 0);
+    });
+});
+
 describe('_valorColuna', () => {
     test('teamCount e calculado, nao lido do registro', () => {
         const proc = { teamCount: 99, proponente: { name: 'Ana' }, teamMembers: [{ name: 'Bruno' }] };

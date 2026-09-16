@@ -134,6 +134,109 @@ window.JCRDBTools = {
         return (f !== undefined && f !== null && String(f).trim() !== '') ? String(f).trim().toUpperCase() : '-';
     },
 
+    // Identidade de um artigo, para reconhecer o mesmo trabalho em CVs diferentes.
+    // Mesma ideia do tools/parse_jcr_backup.py: o DOI manda; sem ele, o titulo
+    // normalizado mais o ano. Nao depende de producoes_parser.js porque o relatorio
+    // tambem roda na pagina do Lattes, onde aquele script nao e carregado.
+    _chaveArtigo: function (pub) {
+        if (!pub) return '';
+        const doi = String(pub.doi || '').trim().toLowerCase();
+        if (doi) return 'doi:' + doi;
+        const titulo = String(pub.paperTitle || pub.title || '')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&[a-z#0-9]+;/gi, ' ')
+            .replace(/\$\$[\s\S]*?\$\$/g, ' ')
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+        if (!titulo) return '';
+        return 'tt:' + titulo + '|' + (pub.year || '');
+    },
+
+    // Conjunto de artigos de um CV, para as intersecoes da matriz de coautoria.
+    _artigosDoCv: function (cv) {
+        const chaves = new Set();
+        const pubs = (cv && Array.isArray(cv.publications)) ? cv.publications : [];
+        pubs.forEach(p => {
+            const k = this._chaveArtigo(p);
+            if (k) chaves.add(k);
+        });
+        return chaves;
+    },
+
+    // Matriz de coautoria de um conjunto de curriculos.
+    //   cvs      curriculos a considerar (os incluidos no consolidado)
+    //   fichas   {name, lattesId, role, formacao} da equipe da proposta, para o filtro;
+    //            lista vazia (relatorio de grupo) = ninguem e filtrado
+    //   anos     0 = toda a carreira; N = ultimos N anos
+    // Devolve { gente: [{nome, artigos}], m: matriz NxN, maior, pares }.
+    _matrizCoautoria: function (cvs, fichas, anos, anoAtual) {
+        const lista = Array.isArray(cvs) ? cvs : [];
+        const fichasArr = Array.isArray(fichas) ? fichas : [];
+
+        // Entram os doutores com curriculo no banco; tecnicos e alunos ficam de fora.
+        // Titulacao em branco NAO exclui: ela vem do PDF e nem sempre esta preenchida,
+        // e perder um pesquisador em silencio e pior do que listar um a mais.
+        const elegivel = (cv) => {
+            if (fichasArr.length === 0) return true;
+            const f = fichasArr.find(x => this.cvMatches(cv, x.name, x.lattesId));
+            if (!f) return true;
+            if (/^(t[ée]cnic|aluno|estudante)/i.test(String(f.role || '').trim())) return false;
+            const formacao = String(f.formacao || '').trim();
+            if (formacao && !/doutor/i.test(formacao)) return false;
+            return true;
+        };
+
+        // 0 significa sem corte. Difere da Lista de Publicacoes, onde 0 deixa so o ano
+        // corrente: numa matriz de colaboracao o util por omissao e a carreira inteira.
+        const janela = Number(anos) || 0;
+        const corte = janela > 0 ? ((Number(anoAtual) || new Date().getFullYear()) - janela) : null;
+
+        const artigosDe = (cv) => {
+            const chaves = new Set();
+            const pubs = (cv && Array.isArray(cv.publications)) ? cv.publications : [];
+            pubs.forEach(p => {
+                if (corte !== null) {
+                    const ano = parseInt(p && p.year, 10);
+                    if (isNaN(ano) || ano < corte) return;
+                }
+                const k = this._chaveArtigo(p);
+                if (k) chaves.add(k);
+            });
+            return chaves;
+        };
+
+        // O coordenador abre a lista: e a partir dele que se le a rede da equipe.
+        // Os demais em ordem alfabetica.
+        const gente = lista.filter(elegivel)
+            .map(cv => {
+                const f = fichasArr.find(x => this.cvMatches(cv, x.name, x.lattesId));
+                const coordenador = !!(f && /^(proponente|coordenador)/i.test(String(f.role || '').trim()));
+                return { nome: cv.name || '(sem nome)', artigos: artigosDe(cv), coordenador: coordenador };
+            })
+            .sort((a, b) => {
+                if (a.coordenador !== b.coordenador) return a.coordenador ? -1 : 1;
+                return a.nome.localeCompare(b.nome, 'pt-BR');
+            });
+
+        const n = gente.length;
+        const m = Array.from({ length: n }, () => new Array(n).fill(0));
+        let maior = 0, pares = 0;
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                // percorre o menor conjunto: a intersecao custa o tamanho dele
+                const a = gente[i].artigos, b = gente[j].artigos;
+                const [curto, longo] = a.size <= b.size ? [a, b] : [b, a];
+                let comuns = 0;
+                curto.forEach(k => { if (longo.has(k)) comuns++; });
+                m[i][j] = m[j][i] = comuns;
+                if (comuns > 0) { pares++; if (comuns > maior) maior = comuns; }
+            }
+        }
+        return { gente: gente, m: m, maior: maior, pares: pares };
+    },
+
     // Le "Resultado da avaliação" e a justificativa do HTML de uma pagina de parecer.
     //
     // So aceita parecer AD HOC: a pagina de pre-selecao usa exatamente os mesmos ids
@@ -3910,6 +4013,30 @@ window.JCRDBTools = {
             `;
         }
 
+        // ---- Matriz de coautoria ----
+        // Aqui vai so o esqueleto da secao: a tabela e montada sob demanda pelo listener,
+        // como a Lista de Publicacoes, para o filtro de anos refazer a conta sem remontar
+        // o relatorio inteiro. O calculo mora em _matrizCoautoria.
+        const temEquipeParaCoautoria = Array.isArray(cvData.groupMembers) && cvData.groupMembers.length > 1;
+        const matrizCoautoriaHTML = !temEquipeParaCoautoria ? '' : `
+                    <div class="collapsible-section" id="sec-coautoria">
+                        <div class="collapsible-header" id="header-coautoria" data-collapse-key="matriz-de-coautoria">
+                            <div style="display: flex; align-items: center; gap: 15px;">
+                                <h3 style="margin: 0;">Matriz de Coautoria</h3>
+                                <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                    <span>Período (anos): <input type="number" id="inp-coautoria-anos" value="${state.coautoriaAnos !== undefined ? state.coautoriaAnos : 0}" min="0" style="width: 50px; padding: 2px;" title="0 considera toda a carreira"></span>
+                                    <button id="btn-coautoria-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                </div>
+                            </div>
+                            <span class="toggle-icon">[+]</span>
+                        </div>
+                        <div class="collapsible-content" style="display: none;" id="content-coautoria">
+                            <div id="coautoria-container" style="padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 4px; overflow-x: auto;">
+                                <div style="color: #777; text-align: center;">Carregando...</div>
+                            </div>
+                        </div>
+                    </div>`;
+
         const fullHTML = `
             <!DOCTYPE html>
             <html lang="pt-BR">
@@ -4119,6 +4246,8 @@ window.JCRDBTools = {
                             </div>
                         </div>
                     </div>` : ''}
+
+                    ${matrizCoautoriaHTML}
 
                     <div style="margin-top: 40px; text-align: center; color: #999; font-size: 0.85em; border-top: 1px solid #eee; padding-top: 15px;">
                         Gerado por JCR Lattes em ${new Date().toLocaleString()}
@@ -5213,6 +5342,109 @@ window.JCRDBTools = {
             });
         });
 
+        // Matriz de coautoria: montada sob demanda, como a Lista de Publicacoes, para o
+        // filtro de anos refazer a conta sem remontar o relatorio.
+        const headerCoautoria = doc.getElementById('header-coautoria');
+        const contentCoautoria = doc.getElementById('content-coautoria');
+        const coautoriaContainer = doc.getElementById('coautoria-container');
+        const inpCoautoriaAnos = doc.getElementById('inp-coautoria-anos');
+        const btnCoautoriaUpdate = doc.getElementById('btn-coautoria-update');
+        let coautoriaGerada = false;
+
+        const gerarMatrizCoautoria = () => {
+            if (!coautoriaContainer) return;
+            const anos = parseInt(inpCoautoriaAnos && inpCoautoriaAnos.value, 10) || 0;
+            state.coautoriaAnos = anos;
+
+            // categoria e titulacao so existem quando o relatorio e de uma proposta
+            const fichas = [];
+            if (parentGroupData) {
+                const prop = parentGroupData.proponente;
+                if (prop && prop.name) {
+                    fichas.push({ name: prop.name, lattesId: parentGroupData.lattesId || prop.lattesId || '', role: 'Proponente', formacao: prop.formacao || '' });
+                }
+                (Array.isArray(parentGroupData.teamMembers) ? parentGroupData.teamMembers : []).forEach(tm => {
+                    if (tm && tm.name) fichas.push({ name: tm.name, lattesId: tm.lattesId || '', role: tm.categoria || tm.role || '', formacao: tm.formacao || '' });
+                });
+            }
+
+            const r = this._matrizCoautoria(cvData.groupMembers, fichas, anos, currentYear);
+            const gente = r.gente, m = r.m, n = gente.length;
+
+            if (n < 2) {
+                coautoriaContainer.innerHTML = '<div style="color: #777; text-align: center; padding: 10px;">São necessários ao menos dois currículos no consolidado (fora técnicos e alunos) para montar a matriz.</div>';
+                coautoriaGerada = true;
+                return;
+            }
+
+            const periodo = anos > 0 ? `últimos ${anos} anos` : 'toda a carreira';
+            const totalPares = (n * (n - 1)) / 2;
+
+            // realce do coordenador: linha e coluna dele, para o cruzamento ficar obvio
+            const FUNDO_COORD = '#FFF8E1';
+            const cabecalho = gente.map((g, i) => `
+                <th style="padding: 4px 6px; text-align: center; font-size: 0.8em; border-left: 1px solid #E3F2FD; color: #0D47A1;${g.coordenador ? ` background: ${FUNDO_COORD};` : ''}" title="${this._esc(g.nome)}${g.coordenador ? ' (coordenador)' : ''}">${i + 1}</th>`).join('');
+
+            const linhas = gente.map((g, i) => {
+                const total = m[i].reduce((s, v) => s + v, 0);
+                const celulas = gente.map((outro, j) => {
+                    // a coluna do coordenador so recebe o fundo quando a celula esta vazia:
+                    // com valor, a intensidade da cor e que precisa ser lida
+                    const fundoColuna = (outro.coordenador && !m[i][j]) ? ` background: ${FUNDO_COORD};` : '';
+                    if (i === j) return `<td style="padding: 4px 6px; text-align: center; background: #FAFAFA; color: #BDBDBD;">—</td>`;
+                    const v = m[i][j];
+                    if (!v) return `<td style="padding: 4px 6px; text-align: center; color: #E0E0E0;${fundoColuna}">·</td>`;
+                    const alpha = (0.15 + 0.6 * (v / (r.maior || 1))).toFixed(2);
+                    return `<td style="padding: 4px 6px; text-align: center; font-weight: bold; color: #0D47A1; background: rgba(21,101,192,${alpha});" title="${this._esc(g.nome)} e ${this._esc(outro.nome)}: ${v} artigo(s) em comum">${v}</td>`;
+                }).join('');
+                const selo = g.coordenador
+                    ? '<span style="background: #FFE082; color: #E65100; border: 1px solid #FFCC80; font-weight: bold; padding: 0 6px; border-radius: 10px; font-size: 0.72em; margin-right: 6px;" title="Proponente / coordenador da proposta">coord.</span>'
+                    : '';
+                return `
+                    <tr style="border-bottom: 1px solid #f0f0f0;${g.coordenador ? ` background: ${FUNDO_COORD};` : ''}">
+                        <td style="padding: 4px 8px; text-align: right; color: #0D47A1; font-weight: bold;">${i + 1}</td>
+                        <td style="padding: 4px 8px; white-space: nowrap;${g.coordenador ? ' font-weight: bold;' : ''}">${selo}${this._esc(g.nome)}</td>
+                        <td style="padding: 4px 8px; text-align: center; color: #666; font-size: 0.85em;" title="Artigos identificados no período">${g.artigos.size}</td>
+                        ${celulas}
+                        <td style="padding: 4px 8px; text-align: center; border-left: 2px solid #90CAF9; font-weight: bold; color: #1B5E20;">${total}</td>
+                    </tr>`;
+            }).join('');
+
+            coautoriaContainer.innerHTML = `
+                <div style="font-size: 0.85em; color: #777; margin-bottom: 10px;">
+                    ${n} pesquisadores — ${r.pares} de ${totalPares} pares com artigo em comum (${periodo}).
+                    Contados por DOI e, na falta dele, por título e ano. Técnicos e alunos ficam de fora.
+                    ${r.pares === 0 ? '<strong style="color:#E65100;">Nenhuma coautoria encontrada entre os currículos disponíveis.</strong>' : ''}
+                </div>
+                <table style="border-collapse: collapse; font-size: 0.9em;">
+                    <thead>
+                        <tr style="background: #E3F2FD; color: #0D47A1;">
+                            <th style="padding: 4px 8px;">#</th>
+                            <th style="padding: 4px 8px; text-align: left;">Pesquisador</th>
+                            <th style="padding: 4px 8px;" title="Artigos identificados no período">Artigos</th>
+                            ${cabecalho}
+                            <th style="padding: 4px 8px; border-left: 2px solid #90CAF9;" title="Soma dos artigos em comum com os demais">Σ</th>
+                        </tr>
+                    </thead>
+                    <tbody>${linhas}</tbody>
+                </table>`;
+            coautoriaGerada = true;
+        };
+
+        if (headerCoautoria) {
+            headerCoautoria.addEventListener('click', () => {
+                if (!coautoriaGerada) gerarMatrizCoautoria();
+            });
+        }
+        if (btnCoautoriaUpdate) {
+            btnCoautoriaUpdate.addEventListener('click', (e) => {
+                e.stopPropagation();
+                gerarMatrizCoautoria();
+                contentCoautoria.style.display = 'block';
+                headerCoautoria.querySelector('.toggle-icon').textContent = '[-]';
+            });
+        }
+
         const headerPubList = doc.getElementById('header-pub-list');
         const contentPubList = doc.getElementById('content-pub-list');
         const pubContainer = doc.getElementById('pub-list-container');
@@ -5457,6 +5689,7 @@ window.JCRDBTools = {
             if (!recolhido) {
                 if (header === headerPubList && !isPubListGenerated) generatePubList();
                 if (header === headerJournalList && !isJournalGenerated) generateJournalList();
+                if (header === headerCoautoria && !coautoriaGerada) gerarMatrizCoautoria();
             }
             content.style.display = recolhido ? 'none' : '';
             const icon = header.querySelector('.toggle-icon');
