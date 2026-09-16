@@ -3252,7 +3252,7 @@ window.JCRDBTools = {
                 `;
 
                 teamRows += `
-                    <tr style="border-bottom: 1px solid #eee; ${isExcluded ? 'background: #FFFDE7; opacity: 0.8;' : ''}">
+                    <tr style="border-bottom: 1px solid #eee;">
                         <td style="padding: 8px; text-align: center;">${idx + 1}</td>
                         <td style="padding: 8px; text-align: left; font-weight: bold;">
                             ${this._esc(member.name)}
@@ -3380,6 +3380,7 @@ window.JCRDBTools = {
                 return d !== 0 ? d : String(a.categoria).localeCompare(String(b.categoria), 'pt-BR');
             });
 
+
             let quadroGeralHtml = '';
             if (quadroLinhas.length > 0) {
                 const totalParticipantes = quadroLinhas.reduce((soma, q) => soma + (Number(q.quantidade) || 0), 0);
@@ -3388,33 +3389,98 @@ window.JCRDBTools = {
                 const valores = quadroLinhas.map(q => `
                     <td style="padding: 10px 12px; text-align: center; border-left: 1px solid #E3F2FD; font-size: 1.25em; font-weight: bold; color: #0D47A1;">${this._esc(String(q.quantidade))}</td>`).join('');
 
+                // ---- Distribuição por instituição ----
+                // Agrupa por cadeia EXATA: os nomes chegam do PDF em grafias diversas
+                // (com e sem departamento, sigla, acentuação irregular) e casá-las
+                // automaticamente erra mais do que acerta. Para unir duas grafias, o
+                // revisor corrige o nome pelo ✏️ da tabela de equipe acima — assim a
+                // ligação entre membro e instituição nunca se perde.
+                const chaveCat = (c) => semAcento(c);
+                const colunasInfo = quadroLinhas.map((q, i) => ({ i, chave: chaveCat(q.categoria), bucket: ordemCategoria(q.categoria) }));
+                // casa a categoria do membro com uma coluna: primeiro pelo nome, depois
+                // pela familia (Pesquisador/Pesquisadores caem na mesma), e só quando ela
+                // identifica uma coluna sozinha
+                const colunaDoMembro = (m) => {
+                    const bruto = (m && (m.role || m.categoria)) || '';
+                    const exata = colunasInfo.find(x => x.chave === chaveCat(bruto));
+                    if (exata) return exata.i;
+                    const mesmos = colunasInfo.filter(x => x.bucket === ordemCategoria(bruto));
+                    return mesmos.length === 1 ? mesmos[0].i : -1;
+                };
+
+                // A sede e a instituicao do coordenador, e nao o campo instituicaoExecutora
+                // da proposta. Os dois saem de blocos diferentes do PDF, com formatos
+                // diferentes ("Nome - SIGLA, UF, Brasil" no bloco INSTITUICOES ENVOLVIDAS
+                // contra "Nome / Departamento-SIGLA-UF-Brasil-" na tabela de equipe): em
+                // 11 propostas de amostra, nenhuma casava por cadeia exata. Pelo
+                // coordenador a marcacao e exata por construcao, porque e a mesma cadeia
+                // que agrupou a linha dele.
+                const membroCoord = teamMembers.find(m => m && m.srcIdx === -1);
+                const executora = membroCoord ? (String(membroCoord.instituicao || '').trim() || '-') : '';
+                const porInstituicao = new Map();
+                teamMembers.forEach(m => {
+                    const nome = String(m.instituicao || '').trim() || '-';
+                    if (!porInstituicao.has(nome)) {
+                        porInstituicao.set(nome, { total: 0, cols: new Array(quadroLinhas.length).fill(0) });
+                    }
+                    const reg = porInstituicao.get(nome);
+                    reg.total++;
+                    const ci = colunaDoMembro(m);
+                    if (ci >= 0) reg.cols[ci]++;
+                });
+
+                const linhasInst = [...porInstituicao.entries()].sort((a, b) => {
+                    const ea = !!executora && a[0] === executora;
+                    const eb = !!executora && b[0] === executora;
+                    if (ea !== eb) return ea ? -1 : 1;              // a do coordenador no topo
+                    if (b[1].total !== a[1].total) return b[1].total - a[1].total;
+                    return String(a[0]).localeCompare(String(b[0]), 'pt-BR');
+                });
+
+                const corpoInst = linhasInst.map(([nome, reg], pos) => {
+                    const ehExecutora = !!executora && nome === executora;
+                    // a primeira linha carrega o separador que a destaca dos totais
+                    const separador = pos === 0 ? ' border-top: 3px double #90CAF9;' : '';
+                    const celulas = reg.cols.map(n => `
+                        <td style="padding: 6px 12px; text-align: center; border-left: 1px solid #E3F2FD; color: ${n ? '#0D47A1' : '#CFD8DC'};${separador}">${n || '–'}</td>`).join('');
+                    return `
+                        <tr style="border-bottom: 1px solid #f0f0f0;${ehExecutora ? ' background: #F1F8E9;' : ''}">
+                            <td style="padding: 6px 12px; text-align: left; font-size: 0.95em;${separador}" title="${this._esc(nome)}">
+                                ${ehExecutora ? '<span style="background: #C8E6C9; color: #1B5E20; border: 1px solid #A5D6A7; font-weight: bold; padding: 0 6px; border-radius: 10px; font-size: 0.75em; margin-right: 6px;" title="Instituição do coordenador — sede da proposta">🏛️ sede</span>' : ''}${this._esc(nome)}
+                            </td>
+                            ${celulas}
+                            <td style="padding: 6px 12px; text-align: center; border-left: 2px solid #90CAF9; font-weight: bold; color: #1B5E20;${separador}">${reg.total}</td>
+                        </tr>`;
+                }).join('');
+
                 quadroGeralHtml = `
-                <div style="margin-bottom: 25px; background: white; border: 1px solid #BBDEFB; border-radius: 8px; padding: 15px;">
-                    <div style="color: #1565C0; font-weight: bold; font-size: 1.05em; margin-bottom: 10px;">
+                <details open data-collapse-key="quadro-geral-da-equipe" style="margin-bottom: 25px; background: white; border: 1px solid #BBDEFB; border-radius: 8px; padding: 15px;">
+                    <summary style="color: #1565C0; font-weight: bold; font-size: 1.05em; cursor: pointer; list-style: none; user-select: none;">
                         👥 Quadro Geral da Equipe
                         <span style="font-size: 0.8em; color: #666; font-weight: normal;">(${this._esc(quadroOrigem)})</span>
                         ${(totalEquipe > 0 && totalParticipantes !== totalEquipe) ? `
                         <div style="margin-top: 6px; font-size: 0.8em; font-weight: normal; color: #E65100;" title="A extração do PDF pode ter perdido ou duplicado membros da equipe">
                             ⚠️ A soma (${totalParticipantes}) não confere com os ${totalEquipe} participantes listados na tabela de equipe.
                         </div>` : ''}
-                    </div>
-                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                    </summary>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em; margin-top: 10px;">
                         <thead>
                             <tr style="background: #E3F2FD; color: #0D47A1;">
-                                <th style="padding: 8px 12px; text-align: left; white-space: nowrap;">Participantes</th>
+                                <th style="padding: 8px 12px; text-align: left; white-space: nowrap;">Instituição</th>
                                 ${colunas}
                                 <th style="padding: 8px 12px; text-align: center; border-left: 2px solid #90CAF9; white-space: nowrap;">Total</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr>
-                                <td style="padding: 10px 12px; text-align: left; color: #555;">Nº de participantes</td>
+                            <tr style="background: #FAFCFF;">
+                                <td style="padding: 10px 12px; text-align: left; color: #0D47A1; font-weight: bold;">Nº de participantes</td>
                                 ${valores}
                                 <td style="padding: 10px 12px; text-align: center; border-left: 2px solid #90CAF9; font-size: 1.25em; font-weight: bold; color: #1B5E20; background: #E8F5E9;">${totalParticipantes}</td>
                             </tr>
+                            ${corpoInst}
                         </tbody>
                     </table>
-                </div>`;
+                </details>`;
             }
 
             // ---- Cabecalho do relatorio consolidado + escolha da fonte ----
@@ -4781,6 +4847,7 @@ window.JCRDBTools = {
             if (ganhouDados) this.renderProcessReport(parentGroupData, newTab, sortedDb);
         };
         completarPareceresSalvos();
+
 
         const prioSelect = doc.getElementById('proc-priority-select');
         const prioStatus = doc.getElementById('proc-priority-status');
