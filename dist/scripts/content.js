@@ -2077,6 +2077,16 @@ async function saveCvToProposalFolders(nameLink, tentativa = 0) {
   const nome = (nameLink && nameLink.name) || '';
   if (!lattesId && !nome) return;
 
+  // Trava de execucao em curso. processLattesPage roda a cada re-render do relatorio
+  // (chegada dos JCR, do RID, mudanca de filtro) e cada passagem agenda o seu proprio
+  // salvamento. Entre a entrada aqui e a marca __jcrCvProposalSaveDone ha DUAS leituras
+  // completas de chrome.storage (findProposalsForResearcher -> getDB -> get(null)), que
+  // num banco grande levam tempo de sobra para uma segunda chamada entrar e salvar de
+  // novo: dois downloads do mesmo arquivo, e o Chrome abre "Salvar como" no segundo
+  // porque nao consegue sobrescrever o que o primeiro ainda esta escrevendo.
+  if (window.__jcrCvProposalSaveEmCurso) return;
+  window.__jcrCvProposalSaveEmCurso = true;
+
   try {
     const alvos = await DB.findProposalsForResearcher(lattesId, nome);
     if (!alvos || alvos.length === 0) return;   // nao pertence a nenhuma proposta: nada a fazer
@@ -2123,6 +2133,9 @@ async function saveCvToProposalFolders(nameLink, tentativa = 0) {
   } catch (e) {
     window.__jcrCvProposalSaveDone = false;   // permite nova tentativa
     console.warn('JCRLattes: falha ao salvar o CV nas pastas das propostas', e);
+  } finally {
+    // libera em qualquer saida, inclusive nos returns do caminho de espera pelos JCR
+    window.__jcrCvProposalSaveEmCurso = false;
   }
 }
 

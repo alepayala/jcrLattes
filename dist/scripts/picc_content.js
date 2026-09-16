@@ -756,6 +756,22 @@
             if (xAreas === null || xAreas <= xInst) xAreas = xInst + 140;
 
             const folga = 6;   // itens podem comecar poucos pontos a esquerda do rotulo
+
+            // LIMITACAO CONHECIDA: o cabecalho se repete a cada bloco de membro e NAO fica
+            // sempre no mesmo x — numa mesma proposta houve blocos com INSTITUICAO em 412 e
+            // outros em 398, e nas 12 propostas de amostra o desvio dentro do mesmo PDF vai
+            // de 0 a 17 pontos. Como as colunas sao derivadas uma unica vez, do primeiro
+            // cabecalho, um bloco deslocado mais que a folga perde os pedacos que comecam na
+            // margem e pode engolir o traco da coluna vizinha: "European Organization for /
+            // Nuclear Research-CERN--Suica-" virou "Organization for - Research-CERN--Suica".
+            //
+            // Alargar a faixa (fronteiras no meio do vao) corrige esse caso, mas mudou a
+            // instituicao extraida de 46 dos 155 membros da amostra, e nao ha como validar
+            // isso fora do navegador: o pdf.js quebra os itens de texto de forma diferente
+            // do que se consegue simular. Como o estrago potencial e maior que o ganho — o
+            // nome sai truncado, e corrigi-lo a mao pelo lapis da tabela de equipe leva
+            // segundos — a faixa continua conservadora. O caminho certo, quando houver
+            // tempo, e derivar as colunas POR BLOCO de membro em vez de uma vez so.
             return {
                 nome: xNome - folga,
                 formacao: xForm - folga,
@@ -808,15 +824,20 @@
             for (let j = prevBound; j < sectionABound; j++) {
                 const item = allPageItems[j];
                 if (item.x < 100) {
-                    const catMatch = item.str.match(/^(Pesquisador|Aluno|Colaborador|Pesquisador\s+Estrangeiro|P[óo]s-Doutorando|T[ée]cnico|Especialista)$/i);
-                    if (catMatch) {
+                    // O composto e testado ANTES do simples. O PDF quebra "Pesquisador
+                    // Estrangeiro" em dois itens de texto, e testando o simples primeiro
+                    // o "Pesquisador" casava sozinho, o ramo de combinacao nunca era
+                    // alcancado e o estrangeiro entrava como pesquisador comum — o que
+                    // fazia a coluna Pesquisador da distribuicao somar os dois grupos.
+                    const COMPOSTA = /^(Pesquisador\s+Estrangeiro|Pesquisador\s+Colaborador|Aluno\s+de\s+Inicia[çc][ãa]o\s+Cient[íi]fica)$/i;
+                    const SIMPLES = /^(Pesquisador\s+Estrangeiro|Pesquisador|Aluno|Colaborador|P[óo]s-Doutorando|T[ée]cnico|Especialista)$/i;
+                    const proximo = allPageItems[j + 1]?.str || '';
+                    const combinado = (item.str + ' ' + proximo).replace(/\s+/g, ' ').trim();
+                    if (COMPOSTA.test(combinado)) {
+                        currentCategory = combinado;
+                    } else if (SIMPLES.test(item.str.trim())) {
+                        // cobre tambem o caso em que a categoria composta vem num item so
                         currentCategory = item.str.trim();
-                    } else {
-                        const nextStr = allPageItems[j + 1]?.str || '';
-                        const combined = (item.str + ' ' + nextStr).trim();
-                        if (/^(Pesquisador\s+Estrangeiro|Pesquisador\s+Colaborador|Aluno\s+de\s+Inicia[çc][ãa]o\s+Cient[íi]fica)$/i.test(combined)) {
-                            currentCategory = combined;
-                        }
                     }
                 }
             }
@@ -993,15 +1014,32 @@
                         return;
                     }
                     if (/^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.\-]*$/.test(t) && t.length <= 40) {
-                        categorias.push({ y: it.y, texto: t.replace(/\s+/g, ' ').trim() });
+                        categorias.push({ y: it.y, x: it.x, texto: t.replace(/\s+/g, ' ').trim() });
                     }
                 });
 
-                // Layout em duas colunas: casa cada categoria com o numero de y proximo
+                // Layout em duas colunas: casa cada LINHA de categoria com o numero de y
+                // proximo. Os pedacos de uma mesma linha sao juntados antes: o PDF quebra
+                // "Pesquisador Estrangeiro" em dois itens de texto com o mesmo y, e casar
+                // cada pedaco com o numero da linha criava duas categorias — "Pesquisador"
+                // e "Estrangeiro" —, ambas com a mesma quantidade, inflando o total.
                 if (quadroGeral.length === 0) {
+                    const linhasCat = [];
                     categorias.forEach(c => {
-                        const n = numeros.find(v => Math.abs(v.y - c.y) <= 4);
-                        if (n) quadroGeral.push({ categoria: c.texto, quantidade: n.valor });
+                        const alvo = linhasCat.find(l => Math.abs(l.y - c.y) <= 4);
+                        if (alvo) alvo.partes.push(c);
+                        else linhasCat.push({ y: c.y, partes: [c] });
+                    });
+                    linhasCat.forEach(l => {
+                        const texto = l.partes
+                            .slice()
+                            .sort((a, b) => a.x - b.x)      // remonta a linha na ordem de leitura
+                            .map(p => p.texto)
+                            .join(' ')
+                            .replace(/\s+/g, ' ')
+                            .trim();
+                        const n = numeros.find(v => Math.abs(v.y - l.y) <= 4);
+                        if (texto && n) quadroGeral.push({ categoria: texto, quantidade: n.valor });
                     });
                 }
             }
