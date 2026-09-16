@@ -337,6 +337,21 @@ describe('_matrizCoautoria', () => {
         assert.strictEqual(r.gente[0].coordenador, true);
     });
 
+    test('a instituicao vem da ficha da equipe', () => {
+        const fichas = [
+            { name: 'Ana', role: 'Pesquisador', formacao: 'Doutorado', instituicao: 'UFPA' },
+            { name: 'Zeca', role: 'Proponente', formacao: 'Doutorado', instituicao: 'UFMG' }
+        ];
+        const r = B._matrizCoautoria([cv('Ana', []), cv('Zeca', [])], fichas, 0, 2026);
+        assert.strictEqual(r.gente[0].instituicao, 'UFMG');   // Zeca, coordenador, vem primeiro
+        assert.strictEqual(r.gente[1].instituicao, 'UFPA');
+    });
+
+    test('sem ficha correspondente a instituicao fica vazia', () => {
+        const r = B._matrizCoautoria([cv('Ana', [])], [], 0, 2026);
+        assert.strictEqual(r.gente[0].instituicao, '');
+    });
+
     test('sem coordenador identificado, a ordem e so alfabetica', () => {
         const fichas = [{ name: 'Zeca', role: 'Pesquisador', formacao: '' }];
         const r = B._matrizCoautoria([cv('Zeca', []), cv('Ana', [])], fichas, 0, 2026);

@@ -213,7 +213,14 @@ window.JCRDBTools = {
             .map(cv => {
                 const f = fichasArr.find(x => this.cvMatches(cv, x.name, x.lattesId));
                 const coordenador = !!(f && /^(proponente|coordenador)/i.test(String(f.role || '').trim()));
-                return { nome: cv.name || '(sem nome)', artigos: artigosDe(cv), coordenador: coordenador };
+                // a instituicao vem da ficha da equipe; o CV do Lattes nao a traz
+                const instituicao = String((f && f.instituicao) || '').trim();
+                return {
+                    nome: cv.name || '(sem nome)',
+                    artigos: artigosDe(cv),
+                    coordenador: coordenador,
+                    instituicao: instituicao
+                };
             })
             .sort((a, b) => {
                 if (a.coordenador !== b.coordenador) return a.coordenador ? -1 : 1;
@@ -5361,10 +5368,10 @@ window.JCRDBTools = {
             if (parentGroupData) {
                 const prop = parentGroupData.proponente;
                 if (prop && prop.name) {
-                    fichas.push({ name: prop.name, lattesId: parentGroupData.lattesId || prop.lattesId || '', role: 'Proponente', formacao: prop.formacao || '' });
+                    fichas.push({ name: prop.name, lattesId: parentGroupData.lattesId || prop.lattesId || '', role: 'Proponente', formacao: prop.formacao || '', instituicao: prop.instituicao || '' });
                 }
                 (Array.isArray(parentGroupData.teamMembers) ? parentGroupData.teamMembers : []).forEach(tm => {
-                    if (tm && tm.name) fichas.push({ name: tm.name, lattesId: tm.lattesId || '', role: tm.categoria || tm.role || '', formacao: tm.formacao || '' });
+                    if (tm && tm.name) fichas.push({ name: tm.name, lattesId: tm.lattesId || '', role: tm.categoria || tm.role || '', formacao: tm.formacao || '', instituicao: tm.instituicao || '' });
                 });
             }
 
@@ -5407,6 +5414,7 @@ window.JCRDBTools = {
                         <td style="padding: 4px 8px; text-align: center; color: #666; font-size: 0.85em;" title="Artigos identificados no período">${g.artigos.size}</td>
                         ${celulas}
                         <td style="padding: 4px 8px; text-align: center; border-left: 2px solid #90CAF9; font-weight: bold; color: #1B5E20;">${total}</td>
+                        <td style="padding: 4px 10px; border-left: 1px solid #E3F2FD; color: #555; font-size: 0.85em; max-width: 0; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this._esc(g.instituicao || 'Instituição não registrada na equipe')}">${g.instituicao ? this._esc(g.instituicao) : '<span style="color:#BDBDBD;">—</span>'}</td>
                     </tr>`;
             }).join('');
 
@@ -5416,7 +5424,7 @@ window.JCRDBTools = {
                     Contados por DOI e, na falta dele, por título e ano. Técnicos e alunos ficam de fora.
                     ${r.pares === 0 ? '<strong style="color:#E65100;">Nenhuma coautoria encontrada entre os currículos disponíveis.</strong>' : ''}
                 </div>
-                <table style="border-collapse: collapse; font-size: 0.9em;">
+                <table style="border-collapse: collapse; font-size: 0.9em; width: 100%; table-layout: auto;">
                     <thead>
                         <tr style="background: #E3F2FD; color: #0D47A1;">
                             <th style="padding: 4px 8px;">#</th>
@@ -5424,6 +5432,7 @@ window.JCRDBTools = {
                             <th style="padding: 4px 8px;" title="Artigos identificados no período">Artigos</th>
                             ${cabecalho}
                             <th style="padding: 4px 8px; border-left: 2px solid #90CAF9;" title="Soma dos artigos em comum com os demais">Σ</th>
+                            <th style="padding: 4px 10px; text-align: left; border-left: 1px solid #E3F2FD;">Instituição</th>
                         </tr>
                     </thead>
                     <tbody>${linhas}</tbody>
