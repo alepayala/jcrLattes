@@ -3872,10 +3872,15 @@ window.JCRDBTools = {
                 </div>`;
             }
 
+            // Anotacoes vazias ficam SEMPRE recolhidas: sem data-collapse-key a memoria
+            // de colapso nao se aplica nem grava nada, entao um "expandido" guardado de
+            // quando havia texto nao volta a abrir um campo que nao tem o que mostrar.
+            // Com texto, o bloco entra aberto e segue a memoria como os demais.
+            const temAnotacoes = !!(proc.reviewerNotes || '').trim();
             const reviewerNotesHtml = `
-                <details ${(proc.reviewerNotes || '').trim() ? 'open' : ''} data-collapse-key="anotacoes-do-parecerista" style="margin-bottom: 25px; background: #FFFDE7; border: 1px solid #FFE082; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <details ${temAnotacoes ? 'open data-collapse-key="anotacoes-do-parecerista"' : ''} style="margin-bottom: 25px; background: #FFFDE7; border: 1px solid #FFE082; border-radius: 8px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                     <summary style="color: #F57F17; margin-top: 0; padding-bottom: 4px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 1.1em; list-style: none; user-select: none;">
-                        <span>📝 Anotações do Revisor <span style="font-size: 0.8em; color: #795548; font-weight: normal;">(Campo de texto livre - Clique para colapsar/expandir)</span></span>
+                        <span>📝 Anotações do Revisor <span style="font-size: 0.8em; color: #795548; font-weight: normal;">(Campo de texto livre)</span></span>
                         <span id="reviewer-notes-status" style="font-size: 0.8em; color: #2E7D32; font-weight: bold; display: none; background: #E8F5E9; padding: 2px 8px; border-radius: 10px; border: 1px solid #A5D6A7;">✓ Salvo</span>
                     </summary>
                     <div style="margin-top: 12px;">
