@@ -337,6 +337,91 @@ describe('_matrizCoautoria', () => {
         assert.strictEqual(r.gente[0].coordenador, true);
     });
 
+    test('agrupa quem colabora junto e separa os grupos desconexos', () => {
+        // {Coord, Bia, Caio} colaboram; {Dora, Edu} colaboram entre si; Zara e isolada
+        const cvs = [
+            cv('Zara',  [P('x1', 2024)]),
+            cv('Dora',  [P('d1', 2024), P('d2', 2024)]),
+            cv('Bia',   [P('c1', 2024), P('c2', 2024)]),
+            cv('Edu',   [P('d1', 2024), P('d2', 2024)]),
+            cv('Caio',  [P('c1', 2024)]),
+            cv('Coord', [P('c1', 2024), P('c2', 2024)])
+        ];
+        const fichas = [{ name: 'Coord', role: 'Proponente', formacao: 'Doutorado' }];
+        const r = B._matrizCoautoria(cvs, fichas, 0, 2026);
+
+        assert.strictEqual(r.gente[0].nome, 'Coord');            // coordenador abre
+        assert.strictEqual(r.grupos, 3);
+        // o grupo do coordenador vem inteiro antes dos demais
+        const grupos = r.gente.map(g => g.grupo);
+        assert.deepStrictEqual(grupos, [...grupos].sort((a, b) => a - b));
+        const doCoord = r.gente.filter(g => g.grupo === 1).map(g => g.nome).sort();
+        assert.deepStrictEqual(doCoord, ['Bia', 'Caio', 'Coord']);
+        assert.deepStrictEqual(r.gente.filter(g => g.grupo === 2).map(g => g.nome).sort(), ['Dora', 'Edu']);
+        assert.deepStrictEqual(r.gente.filter(g => g.grupo === 3).map(g => g.nome), ['Zara']);
+    });
+
+    test('marca onde comeca cada grupo, e nao a primeira linha', () => {
+        const cvs = [cv('Ana', [P('a', 2024)]), cv('Bia', [P('b', 2024)])];
+        const r = B._matrizCoautoria(cvs, [], 0, 2026);
+        assert.strictEqual(r.gente[0].primeiroDoGrupo, false);   // a primeira nunca separa
+        assert.strictEqual(r.gente[1].primeiroDoGrupo, true);    // sem colaboracao: outro grupo
+    });
+
+    test('a matriz acompanha a reordenacao e continua simetrica', () => {
+        const cvs = [
+            cv('Zeca', [P('p1', 2024), P('p2', 2024)]),
+            cv('Ana',  [P('p1', 2024)]),
+            cv('Bia',  [P('p2', 2024)])
+        ];
+        const r = B._matrizCoautoria(cvs, [], 0, 2026);
+        const idx = (nome) => r.gente.findIndex(g => g.nome === nome);
+        assert.strictEqual(r.m[idx('Zeca')][idx('Ana')], 1);
+        assert.strictEqual(r.m[idx('Zeca')][idx('Bia')], 1);
+        assert.strictEqual(r.m[idx('Ana')][idx('Bia')], 0);
+        for (let i = 0; i < r.gente.length; i++) {
+            assert.strictEqual(r.m[i][i], 0);
+            for (let j = 0; j < r.gente.length; j++) assert.strictEqual(r.m[i][j], r.m[j][i]);
+        }
+    });
+
+    test('no empate de vinculo, sobe quem colabora mais no total', () => {
+        // Alvaro e Bruno tem o mesmo vinculo com o grupo; Yara colabora muito mais.
+        // Pelo alfabeto Alvaro viria primeiro — a centralidade tem de vencer.
+        const cvs = [
+            cv('Zeca',   [P('p1', 2024), P('p2', 2024), P('p3', 2024), P('p4', 2024)]),
+            cv('Alvaro', [P('p1', 2024)]),
+            cv('Yara',   [P('p1', 2024), P('p2', 2024), P('p3', 2024)]),
+            cv('Bruno',  [P('p2', 2024)])
+        ];
+        const fichas = [{ name: 'Zeca', role: 'Proponente', formacao: 'Doutorado' }];
+        const r = B._matrizCoautoria(cvs, fichas, 0, 2026);
+        assert.strictEqual(r.gente[0].nome, 'Zeca');
+        assert.strictEqual(r.gente[1].nome, 'Yara');
+    });
+
+    test('equipe toda conectada da um grupo so', () => {
+        const cvs = [
+            cv('Zeca',  [P('p1', 2024), P('p2', 2024)]),
+            cv('Ana',   [P('p1', 2024)]),
+            cv('Bruno', [P('p2', 2024), P('p1', 2024)])
+        ];
+        const r = B._matrizCoautoria(cvs, [], 0, 2026);
+        assert.strictEqual(r.grupos, 1);
+        // com um grupo unico nenhuma linha carrega separador
+        assert.ok(r.gente.every(g => g.primeiroDoGrupo === false));
+    });
+
+    test('sem coordenador, a semente e quem mais colabora', () => {
+        const cvs = [
+            cv('Ana',  [P('p1', 2024)]),
+            cv('Bia',  [P('p1', 2024), P('p2', 2024)]),
+            cv('Caio', [P('p2', 2024)])
+        ];
+        const r = B._matrizCoautoria(cvs, [], 0, 2026);
+        assert.strictEqual(r.gente[0].nome, 'Bia');   // 2 colaboracoes, contra 1 dos outros
+    });
+
     test('a instituicao vem da ficha da equipe', () => {
         const fichas = [
             { name: 'Ana', role: 'Pesquisador', formacao: 'Doutorado', instituicao: 'UFPA' },

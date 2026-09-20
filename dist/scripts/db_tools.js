@@ -241,7 +241,65 @@ window.JCRDBTools = {
                 if (comuns > 0) { pares++; if (comuns > maior) maior = comuns; }
             }
         }
-        return { gente: gente, m: m, maior: maior, pares: pares };
+
+        // ---- Agrupamento: quem colabora junto fica junto ----
+        // Seriacao gulosa. Comeca pelo coordenador (na falta dele, por quem mais
+        // colabora) e, a cada passo, puxa quem tem mais artigos em comum com os ja
+        // posicionados. Esgotado um grupo conectado, abre o proximo pelo restante de
+        // maior colaboracao. Nao e clusterizacao otima — isso exigiria algo como
+        // Louvain, fora de proposito aqui —, mas concentra os blocos na diagonal, roda
+        // em O(n^2) e e deterministica, que e o que a leitura da matriz pede.
+        const somaDe = (i) => m[i].reduce((s, v) => s + v, 0);
+        const restantes = new Set(gente.map((_, i) => i));
+        const ordem = [];
+        const grupo = new Array(n).fill(0);
+        let g = 0;
+
+        while (restantes.size > 0) {
+            g++;
+            // semente do grupo: o coordenador abre o primeiro; depois, o mais colaborativo
+            let semente = -1;
+            restantes.forEach(i => {
+                if (semente === -1) { semente = i; return; }
+                if (gente[i].coordenador !== gente[semente].coordenador) {
+                    if (gente[i].coordenador) semente = i;
+                    return;
+                }
+                const di = somaDe(i), ds = somaDe(semente);
+                if (di > ds || (di === ds && gente[i].nome.localeCompare(gente[semente].nome, 'pt-BR') < 0)) semente = i;
+            });
+            restantes.delete(semente);
+            ordem.push(semente);
+            grupo[semente] = g;
+
+            // cresce o grupo enquanto houver quem colabore com ele
+            for (;;) {
+                let escolhido = -1, peso = 0;
+                restantes.forEach(i => {
+                    let p = 0;
+                    ordem.forEach(j => { if (grupo[j] === g) p += m[i][j]; });
+                    if (p > peso) { peso = p; escolhido = i; }
+                    else if (p === peso && p > 0 && escolhido >= 0) {
+                        // empate no vinculo com o grupo: sobe quem colabora mais no total,
+                        // para os centrais ficarem perto do coordenador. Numa equipe em que
+                        // todos publicam juntos os empates sao a regra, e sem este criterio
+                        // a ordem caia direto no alfabeto e nao dizia nada.
+                        const si = somaDe(i), se = somaDe(escolhido);
+                        if (si > se || (si === se && gente[i].nome.localeCompare(gente[escolhido].nome, 'pt-BR') < 0)) escolhido = i;
+                    }
+                });
+                if (escolhido === -1 || peso <= 0) break;
+                restantes.delete(escolhido);
+                ordem.push(escolhido);
+                grupo[escolhido] = g;
+            }
+        }
+
+        // aplica a ordem a lista e a matriz
+        const genteOrd = ordem.map((idx, pos) => Object.assign({}, gente[idx], { grupo: grupo[idx], primeiroDoGrupo: pos > 0 && grupo[idx] !== grupo[ordem[pos - 1]] }));
+        const mOrd = ordem.map(i => ordem.map(j => m[i][j]));
+
+        return { gente: genteOrd, m: mOrd, maior: maior, pares: pares, grupos: g };
     },
 
     // Le "Resultado da avaliação" e a justificativa do HTML de uma pagina de parecer.
@@ -5395,20 +5453,25 @@ window.JCRDBTools = {
             const linhas = gente.map((g, i) => {
                 const total = m[i].reduce((s, v) => s + v, 0);
                 const celulas = gente.map((outro, j) => {
+                    // linha vertical em toda celula: sem ela o olho perde a coluna no meio
+                    // da matriz e deixa de associar o valor ao numero do cabecalho
+                    const grade = 'border-left: 1px solid #E3F2FD;';
                     // a coluna do coordenador so recebe o fundo quando a celula esta vazia:
                     // com valor, a intensidade da cor e que precisa ser lida
                     const fundoColuna = (outro.coordenador && !m[i][j]) ? ` background: ${FUNDO_COORD};` : '';
-                    if (i === j) return `<td style="padding: 4px 6px; text-align: center; background: #FAFAFA; color: #BDBDBD;">—</td>`;
+                    if (i === j) return `<td style="padding: 4px 6px; text-align: center; ${grade} background: #FAFAFA; color: #BDBDBD;">—</td>`;
                     const v = m[i][j];
-                    if (!v) return `<td style="padding: 4px 6px; text-align: center; color: #E0E0E0;${fundoColuna}">·</td>`;
+                    if (!v) return `<td style="padding: 4px 6px; text-align: center; ${grade} color: #E0E0E0;${fundoColuna}">·</td>`;
                     const alpha = (0.15 + 0.6 * (v / (r.maior || 1))).toFixed(2);
-                    return `<td style="padding: 4px 6px; text-align: center; font-weight: bold; color: #0D47A1; background: rgba(21,101,192,${alpha});" title="${this._esc(g.nome)} e ${this._esc(outro.nome)}: ${v} artigo(s) em comum">${v}</td>`;
+                    return `<td style="padding: 4px 6px; text-align: center; ${grade} font-weight: bold; color: #0D47A1; background: rgba(21,101,192,${alpha});" title="${this._esc(g.nome)} e ${this._esc(outro.nome)}: ${v} artigo(s) em comum">${v}</td>`;
                 }).join('');
                 const selo = g.coordenador
                     ? '<span style="background: #FFE082; color: #E65100; border: 1px solid #FFCC80; font-weight: bold; padding: 0 6px; border-radius: 10px; font-size: 0.72em; margin-right: 6px;" title="Proponente / coordenador da proposta">coord.</span>'
                     : '';
+                // traco grosso onde comeca outro grupo de colaboracao
+                const separaGrupo = g.primeiroDoGrupo ? ' border-top: 2px solid #90CAF9;' : '';
                 return `
-                    <tr style="border-bottom: 1px solid #f0f0f0;${g.coordenador ? ` background: ${FUNDO_COORD};` : ''}">
+                    <tr style="border-bottom: 1px solid #f0f0f0;${separaGrupo}${g.coordenador ? ` background: ${FUNDO_COORD};` : ''}">
                         <td style="padding: 4px 8px; text-align: right; color: #0D47A1; font-weight: bold;">${i + 1}</td>
                         <td style="padding: 4px 8px; white-space: nowrap;${g.coordenador ? ' font-weight: bold;' : ''}">${selo}${this._esc(g.nome)}</td>
                         <td style="padding: 4px 8px; text-align: center; color: #666; font-size: 0.85em;" title="Artigos identificados no período">${g.artigos.size}</td>
@@ -5420,7 +5483,8 @@ window.JCRDBTools = {
 
             coautoriaContainer.innerHTML = `
                 <div style="font-size: 0.85em; color: #777; margin-bottom: 10px;">
-                    ${n} pesquisadores — ${r.pares} de ${totalPares} pares com artigo em comum (${periodo}).
+                    ${n} pesquisadores — ${r.pares} de ${totalPares} pares com artigo em comum (${periodo})${r.grupos > 1 ? `, em <strong>${r.grupos}</strong> grupos de colaboração` : ''}.
+                    As linhas estão agrupadas por colaboração, começando pelo coordenador; o traço horizontal separa um grupo do seguinte.
                     Contados por DOI e, na falta dele, por título e ano. Técnicos e alunos ficam de fora.
                     ${r.pares === 0 ? '<strong style="color:#E65100;">Nenhuma coautoria encontrada entre os currículos disponíveis.</strong>' : ''}
                 </div>
