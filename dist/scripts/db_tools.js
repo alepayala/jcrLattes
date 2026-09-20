@@ -302,6 +302,160 @@ window.JCRDBTools = {
         return { gente: genteOrd, m: mOrd, maior: maior, pares: pares, grupos: g };
     },
 
+    // Carrega o pdf.js sob demanda. A pagina do banco nao o inclui de partida: sao
+    // 320 KB que so fazem falta quando ha uma proposta sem titulo/resumo para ler do
+    // PDF. Em db.html o script e da propria extensao, entao e mesma origem.
+    _pdfJsCarregando: null,
+    _garantirPdfJs: function () {
+        if (typeof pdfjsLib !== 'undefined') return Promise.resolve(true);
+        if (typeof document === 'undefined' || typeof chrome === 'undefined' ||
+            !chrome.runtime || typeof chrome.runtime.getURL !== 'function') {
+            return Promise.resolve(false);
+        }
+        if (!this._pdfJsCarregando) {
+            this._pdfJsCarregando = new Promise((resolve) => {
+                const tag = document.createElement('script');
+                tag.src = chrome.runtime.getURL('scripts/pdf.min.js');
+                tag.onload = () => resolve(typeof pdfjsLib !== 'undefined');
+                tag.onerror = () => resolve(false);
+                (document.head || document.documentElement).appendChild(tag);
+            });
+        }
+        return this._pdfJsCarregando;
+    },
+
+    // Titulo (em portugues) e Resumo do projeto, a partir dos itens de texto do PDF da
+    // proposta ja ordenados por pagina/linha (o mesmo material que o piccTools monta).
+    //
+    // O titulo esta numa tabela de duas colunas dentro do bloco PROJETO. O rotulo fica
+    // centrado verticalmente na celula, entao parte do valor pode aparecer ACIMA do
+    // proprio rotulo na ordenacao por coordenada — e o rotulo ainda pode quebrar em duas
+    // linhas ("TITULO (em" / "portugues):"). Por isso nao da para recortar o texto linear
+    // entre os rotulos: o titulo em ingles vazaria para o campo do portugues. Trabalhamos
+    // com as duas colunas e cortamos os blocos no maior espaco vertical da faixa que
+    // separa um rotulo do seguinte.
+    //
+    // Mora aqui, e nao em picc_content.js, porque tem dois chamadores: a importacao das
+    // propostas e o proprio relatorio, que roda em db.html — onde picc_content.js nao e
+    // carregado.
+    _lerTituloResumoPdf: function (allPageItems, allLines, fullText) {
+        const resultado = { tituloProjeto: '', resumoProjeto: '' };
+        if (!Array.isArray(allPageItems) || !Array.isArray(allLines) || !fullText) return resultado;
+
+        const semAcento = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+        const iProjeto = allPageItems.findIndex(it => /^PROJETO$/i.test(String(it.str || '').trim()));
+        if (iProjeto >= 0) {
+            const pag = allPageItems[iProjeto].page;
+            const yProjeto = allPageItems[iProjeto].y;
+            const linhasPag = allLines.filter(l => l.length && l[0].page === pag && l[0].y < yProjeto);
+            const linhaInicio = linhasPag.find(l => /^IN[ÍI]CIO:?$/i.test(String(l[0].str || '').trim()));
+            if (linhaInicio && linhaInicio.length > 1) {
+                const xValor = linhaInicio[1].x;
+                const yInicio = linhaInicio[0].y;
+                const rotulos = [], valores = [];
+                linhasPag.filter(l => l[0].y < yInicio).forEach(l => {
+                    const esq = l.filter(i => i.x < xValor - 10);
+                    const dir = l.filter(i => i.x >= xValor - 10);
+                    if (esq.length) rotulos.push({ y: esq[0].y, texto: esq.map(i => i.str).join(' ') });
+                    if (dir.length) valores.push({ y: dir[0].y, texto: dir.map(i => i.str).join(' ') });
+                });
+                // Um rotulo pode ocupar ate 3 linhas da coluna da esquerda.
+                const acharRotulo = (re) => {
+                    for (let i = 0; i < rotulos.length; i++) {
+                        for (let k = 0; k < 3 && i + k < rotulos.length; k++) {
+                            const txt = rotulos.slice(i, i + k + 1).map(l => l.texto).join(' ').replace(/\s+/g, ' ').trim();
+                            if (re.test(semAcento(txt))) {
+                                const ys = rotulos.slice(i, i + k + 1).map(l => l.y);
+                                return { yMax: Math.max.apply(null, ys), yMin: Math.min.apply(null, ys) };
+                            }
+                        }
+                    }
+                    return null;
+                };
+                const rotPt = acharRotulo(/^titulo\s*\(em\s*portugues\)\s*:?$/);
+                const rotEn = acharRotulo(/^titulo\s*\(em\s*ingles\)\s*:?$/);
+                if (rotPt && rotEn) {
+                    const L = valores.slice().sort((a, b) => b.y - a.y);
+                    const corte = (yAcima, yAbaixo) => {
+                        let idx = -1, maiorGap = -1;
+                        for (let c = 0; c < L.length - 1; c++) {
+                            const fronteira = (L[c].y + L[c + 1].y) / 2;
+                            if (fronteira < yAcima && fronteira > yAbaixo) {
+                                const gap = L[c].y - L[c + 1].y;
+                                if (gap > maiorGap) { maiorGap = gap; idx = c; }
+                            }
+                        }
+                        return idx;
+                    };
+                    const ini = corte(yInicio, rotPt.yMax) + 1;   // separa do bloco INICIO/DURACAO
+                    const fim = corte(rotPt.yMin, rotEn.yMax);    // separa do titulo em ingles
+                    if (fim >= ini) {
+                        resultado.tituloProjeto = L.slice(ini, fim + 1).map(l => l.texto).join(' ').replace(/\s+/g, ' ').trim();
+                    }
+                }
+            }
+        }
+        if (!resultado.tituloProjeto) {
+            const m = String(fullText).match(/T[ÍI]TULO\s*\(em\s*portugu[êe]s\)\s*:?\s*([\s\S]*?)\s*T[ÍI]TULO\s*\(em\s*ingl[êe]s\)/i);
+            if (m) resultado.tituloProjeto = m[1].replace(/\s+/g, ' ').trim();
+        }
+
+        // Resumo: bloco de largura inteira entre o titulo RESUMO e ETAPAS / ATIVIDADES.
+        // O rodape de paginacao se intercala no meio quando o bloco vira a pagina.
+        const linhasTexto = String(fullText).split('\n').map(l => l.trim());
+        const iResumo = linhasTexto.findIndex(l => /^RESUMO$/i.test(l));
+        if (iResumo >= 0) {
+            const corpo = [];
+            for (let j = iResumo + 1; j < linhasTexto.length; j++) {
+                const l = linhasTexto[j];
+                if (/^ETAPAS\s*\/\s*ATIVIDADES/i.test(l)) break;
+                if (/^P[áa]gina\s+\d+\s*\/\s*\d+$/i.test(l)) continue;
+                if (l) corpo.push(l);
+            }
+            resultado.resumoProjeto = corpo.join(' ').replace(/\s+/g, ' ').trim();
+        }
+        return resultado;
+    },
+
+    // Monta os itens de texto de um PDF na mesma ordem que o piccTools usa:
+    // pagina crescente, Y decrescente, X crescente, agrupando em linhas por Y.
+    _itensDoPdf: async function (arrayBuffer) {
+        if (typeof pdfjsLib === 'undefined') return null;
+        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL &&
+            !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('scripts/pdf.worker.min.js');
+        }
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false }).promise;
+        const allPageItems = [];
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const content = await (await pdf.getPage(pageNum)).getTextContent();
+            content.items.forEach(item => {
+                if (item.str && item.str.trim()) {
+                    allPageItems.push({ page: pageNum, x: item.transform[4], y: item.transform[5], str: item.str.trim() });
+                }
+            });
+        }
+        allPageItems.sort((a, b) => {
+            if (a.page !== b.page) return a.page - b.page;
+            const yDiff = b.y - a.y;
+            if (Math.abs(yDiff) > 4) return yDiff;
+            return a.x - b.x;
+        });
+        const allLines = [];
+        let linha = [], yAtual = null, pagAtual = null;
+        allPageItems.forEach(item => {
+            if (pagAtual !== item.page || yAtual === null || Math.abs(yAtual - item.y) > 4) {
+                if (linha.length) allLines.push(linha);
+                linha = [item]; yAtual = item.y; pagAtual = item.page;
+            } else {
+                linha.push(item);
+            }
+        });
+        if (linha.length) allLines.push(linha);
+        const fullText = allLines.map(l => l.map(i => i.str).join(' ')).join('\n');
+        return { allPageItems, allLines, fullText };
+    },
+
     // Le "Resultado da avaliação" e a justificativa do HTML de uma pagina de parecer.
     //
     // So aceita parecer AD HOC: a pagina de pre-selecao usa exatamente os mesmos ids
@@ -3730,6 +3884,30 @@ window.JCRDBTools = {
                 </details>
             `;
 
+            // Titulo (em portugues) e Resumo do projeto, lidos do PDF da proposta.
+            // O titulo e o cabecalho clicavel e o resumo abre embaixo dele. Ao contrario
+            // dos outros blocos colapsaveis, este NAO leva data-collapse-key: o resumo e
+            // longo e deve comecar sempre recolhido, entao o estado nao fica guardado.
+            //
+            // Propostas importadas antes desta versao so ganham os campos quando ha um
+            // PDF a mao (ver completarTituloResumo). Quando nao ha, o bloco aparece
+            // mesmo assim com o aviso, para o revisor saber por que esta vazio em vez
+            // de achar que a proposta nao tem titulo.
+            const tituloProjetoTxt = String(proc.tituloProjeto || '').trim();
+            const resumoProjetoTxt = String(proc.resumoProjeto || '').trim();
+            const avisoReprocessar = (!tituloProjetoTxt || !resumoProjetoTxt)
+                ? `<div style="margin: 0 18px 14px 18px; padding: 8px 12px; background: #FFF8E1; border: 1px solid #FFE082; border-radius: 6px; color: #6D4C41; font-size: 0.85em;">⚠️ Para ${!tituloProjetoTxt && !resumoProjetoTxt ? 'título e resumo' : (!tituloProjetoTxt ? 'o título' : 'o resumo')}, reprocesse o PDF da proposta e atualize o relatório.</div>`
+                : '';
+            const cabecalhoProjeto = `<div style="padding: 14px 18px ${avisoReprocessar && !resumoProjetoTxt ? '10px' : '14px'} 18px; font-weight: bold; color: #0D47A1; font-size: 1.05em; line-height: 1.45;">📄 ${this._esc(tituloProjetoTxt || 'Resumo do projeto')}</div>`;
+            const molduraProjeto = 'background: #E3F2FD; border: 1px solid #90CAF9; border-radius: 8px; margin-bottom: 20px;';
+            const tituloProjetoHtml = resumoProjetoTxt
+                ? `<details style="${molduraProjeto}">
+                    <summary style="cursor: pointer; padding: 14px 18px; list-style: none; font-weight: bold; color: #0D47A1; font-size: 1.05em; line-height: 1.45;" title="Clique para ver o resumo do projeto">📄 ${this._esc(tituloProjetoTxt || 'Resumo do projeto')}</summary>
+                    ${avisoReprocessar}
+                    <div style="margin: 0 18px 16px 18px; padding: 14px 16px; background: #ffffff; border: 1px solid #BBDEFB; border-radius: 6px; color: #333; font-size: 0.95em; line-height: 1.55; text-align: justify;">${this._esc(resumoProjetoTxt)}</div>
+                </details>`
+                : `<div style="${molduraProjeto}">${cabecalhoProjeto}${avisoReprocessar}</div>`;
+
             projectHeaderHtml = `
                 <div style="background: #1565C0; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: nowrap; gap: 20px;">
                     <div style="flex: 1 1 auto; min-width: 0; overflow-wrap: break-word;">
@@ -3748,6 +3926,7 @@ window.JCRDBTools = {
                         ${prioridadeHTML}
                     </div>
                 </div>
+                ${tituloProjetoHtml}
                 ${filesHtml}
                 ${pareceresAdHocHtml}
                 ${reviewerNotesHtml}
@@ -5041,6 +5220,71 @@ window.JCRDBTools = {
             if (ganhouDados) this.renderProcessReport(parentGroupData, newTab, sortedDb);
         };
         completarPareceresSalvos();
+
+        // Propostas importadas antes de o titulo e o resumo existirem ficam sem os dois
+        // campos. Em vez de obrigar a reimportar a carteira inteira, le do PDF que ja
+        // esta a mao: a copia guardada no banco ou o arquivo proposta_<processo>.pdf na
+        // pasta piccData. A leitura da pasta NAO pede permissao — apenas aproveita a que
+        // ja foi concedida —, porque isto roda sozinho, sem clique do usuario. Sem PDF a
+        // mao nada e marcado, entao a proxima abertura tenta de novo.
+        const completarTituloResumo = async () => {
+            if (!parentGroupData || parentGroupData.tituloResumoLido) return;
+            if (parentGroupData.tituloProjeto && parentGroupData.resumoProjeto) return;
+
+            // Le o blob direto, sem passar por hydrateProcBlobs(): aquele guard e
+            // marcado antes de a hidratacao terminar, entao quem chega junto seguiria
+            // com pdfData ainda vazio. Aqui e so leitura, e so quando falta o campo.
+            let base64Pdf = parentGroupData.pdfData || '';
+            if (!base64Pdf && parentGroupData.processId) {
+                try {
+                    const blobs = await this.getProcBlobs(parentGroupData.processId);
+                    if (blobs && blobs.pdfData) base64Pdf = blobs.pdfData;
+                } catch (e) { /* sem copia no banco: tenta a pasta */ }
+            }
+
+            let arrayBuffer = null;
+            if (base64Pdf) {
+                try {
+                    arrayBuffer = await base64ToBlob(base64Pdf, 'application/pdf').arrayBuffer();
+                } catch (e) { /* base64 corrompido: tenta a pasta */ }
+            }
+            if (!arrayBuffer) {
+                try {
+                    const arq = await this.lerArquivoDaProposta(parentGroupData, `proposta_${safeProcId}.pdf`, false);
+                    if (arq) arrayBuffer = await arq.arrayBuffer();
+                } catch (e) { /* sem pasta ou sem permissao: fica para a reimportacao */ }
+            }
+            if (!arrayBuffer) return;
+
+            if (!(await this._garantirPdfJs())) return;
+
+            let lido = null;
+            try {
+                const itens = await this._itensDoPdf(arrayBuffer);
+                if (itens) lido = this._lerTituloResumoPdf(itens.allPageItems, itens.allLines, itens.fullText);
+            } catch (e) {
+                console.warn('[dbTools] Falha ao ler título/resumo do PDF da proposta:', e);
+                return;
+            }
+            if (!lido) return;
+
+            // ja tentamos com este PDF: nao relê a cada abertura do relatorio
+            parentGroupData.tituloResumoLido = true;
+            const ganhouDados = (lido.tituloProjeto && !parentGroupData.tituloProjeto) ||
+                                (lido.resumoProjeto && !parentGroupData.resumoProjeto);
+            if (lido.tituloProjeto && !parentGroupData.tituloProjeto) parentGroupData.tituloProjeto = lido.tituloProjeto;
+            if (lido.resumoProjeto && !parentGroupData.resumoProjeto) parentGroupData.resumoProjeto = lido.resumoProjeto;
+
+            try {
+                await this.saveCVs([parentGroupData]);
+            } catch (e) {
+                console.warn('[dbTools] Falha ao guardar o título/resumo da proposta:', e);
+            }
+            // remonta so quando ha o que mostrar; na volta o campo ja esta preenchido,
+            // entao nao ha como isto se repetir
+            if (ganhouDados) this.renderProcessReport(parentGroupData, newTab, sortedDb);
+        };
+        completarTituloResumo();
 
 
         const prioSelect = doc.getElementById('proc-priority-select');

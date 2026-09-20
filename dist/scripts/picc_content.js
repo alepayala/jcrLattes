@@ -695,6 +695,15 @@
             }
         }
 
+        // 5c. Titulo (em portugues) e Resumo do projeto. A leitura mora em db_tools.js
+        //     porque o relatorio da proposta tambem precisa dela, e ele roda em db.html,
+        //     onde este arquivo nao e carregado.
+        const tituloResumo = (window.JCRDBTools && typeof window.JCRDBTools._lerTituloResumoPdf === 'function')
+            ? window.JCRDBTools._lerTituloResumoPdf(allPageItems, allLines, fullText)
+            : { tituloProjeto: '', resumoProjeto: '' };
+        const tituloProjeto = tituloResumo.tituloProjeto;
+        const resumoProjeto = tituloResumo.resumoProjeto;
+
         // 6. Extract Team Members using strict column coordinates & subheader bounds
         const equipeIdx = allPageItems.findIndex(item => item.str === 'EQUIPE' || item.str === 'Pesquisador' || item.str.includes('MEMBROS DA EQUIPE'));
         let teamMembers = [];
@@ -1070,6 +1079,8 @@
             edital: edital,
             faixa: faixa,
             instituicaoExecutora: instituicaoExecutora,
+            tituloProjeto: tituloProjeto,
+            resumoProjeto: resumoProjeto,
             quadroGeral: quadroGeral,
             proponente: proponenteObj,
             pdfLink: pdfUrl || '',
@@ -1604,6 +1615,8 @@
                 existing.edital = processData.edital || existing.edital || '';
                 existing.faixa = processData.faixa || existing.faixa || '-';
                 existing.instituicaoExecutora = processData.instituicaoExecutora || existing.instituicaoExecutora || '';
+                existing.tituloProjeto = processData.tituloProjeto || existing.tituloProjeto || '';
+                existing.resumoProjeto = processData.resumoProjeto || existing.resumoProjeto || '';
                 if (Array.isArray(processData.quadroGeral) && processData.quadroGeral.length > 0) existing.quadroGeral = processData.quadroGeral;
                 existing.pdfLink = pdfUrl;
                 if (cvCongeladoUrl) existing.cvCongelado = cvCongeladoUrl;
@@ -1623,6 +1636,8 @@
                     edital: processData.edital || '',
                     faixa: processData.faixa || '-',
                     instituicaoExecutora: processData.instituicaoExecutora || '',
+                    tituloProjeto: processData.tituloProjeto || '',
+                    resumoProjeto: processData.resumoProjeto || '',
                     quadroGeral: processData.quadroGeral || [],
                     isProcesso: true,
                     prioridade: '-',
@@ -2581,6 +2596,8 @@
                 const faixa = (pdfResult.processData && pdfResult.processData.faixa) || pdfResult.faixa || '-';
                 item.faixa = faixa;
                 const instExecutora = (pdfResult.processData && pdfResult.processData.instituicaoExecutora) || '';
+                const tituloProjeto = (pdfResult.processData && pdfResult.processData.tituloProjeto) || '';
+                const resumoProjeto = (pdfResult.processData && pdfResult.processData.resumoProjeto) || '';
                 const quadroGeral = (pdfResult.processData && Array.isArray(pdfResult.processData.quadroGeral)) ? pdfResult.processData.quadroGeral : [];
 
                 // Se o link do CV da tabela não rendeu o ID Lattes, tenta o link do bloco
@@ -2639,6 +2656,8 @@
                     existing.parecerTecnico = item.parecerTecnico || existing.parecerTecnico || '';
                     existing.faixa = faixa || existing.faixa || '-';
                     existing.instituicaoExecutora = instExecutora || existing.instituicaoExecutora || '';
+                    existing.tituloProjeto = tituloProjeto || existing.tituloProjeto || '';
+                    existing.resumoProjeto = resumoProjeto || existing.resumoProjeto || '';
                     existing.quadroGeral = quadroGeral.length > 0 ? quadroGeral : (existing.quadroGeral || []);
                     existing.pdfLink = item.pdfLink || (pdfResult.processData && pdfResult.processData.pdfLink) || existing.pdfLink || '';
                     existing.lattesId = lattesId || existing.lattesId || '';
@@ -2669,6 +2688,8 @@
                         parecerTecnico: item.parecerTecnico || '',
                         faixa: faixa || '-',
                         instituicaoExecutora: instExecutora,
+                        tituloProjeto: tituloProjeto,
+                        resumoProjeto: resumoProjeto,
                         quadroGeral: quadroGeral,
                         isProcesso: true,
                         filesDownloaded: true,
