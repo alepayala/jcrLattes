@@ -27,6 +27,13 @@ window.JCRReportUtils = {
     posDoc: '#6A1B9A'
   },
 
+  // Linha vertical sutil que separa as colunas fora do eixo horizontal das que o
+  // seguem: Ult/GC no grafico de autoria (o eixo e o rank) e EA/IC/Out. no de
+  // orientacoes (o eixo e o ano). Sem ela essas barras parecem mais um rank ou
+  // mais um ano. Tracejada e de baixo contraste para separar sem competir com as
+  // barras; align-self: stretch a faz ir do topo ate a linha de base do grafico.
+  SEPARADOR_FORA_DO_EIXO: '<div aria-hidden="true" style="flex: 0 0 0; align-self: stretch; margin: 0 6px; border-left: 1px dashed rgba(0,0,0,0.25);"></div>',
+
   JOURNAL_STRIP_SUFFIXES: ['(print)', '(online)','(Cambridge. Online)','(Impresso)','(Internet)','(Philadelphia, PA)','(New York)','(São Paulo. Impresso)','(London. 1996. Print)'],
 
   formatNum: function(num) {
@@ -597,8 +604,12 @@ window.JCRReportUtils = {
       });
     }
 
+    // primeira coluna que nao pertence ao eixo de rank (Ult, ou GC se Ult sair)
+    const primeiraForaDoEixo = columns.findIndex(c => c.isSpecial);
+
     let barsHTML = '';
-    columns.forEach(col => {
+    columns.forEach((col, idx) => {
+      if (idx === primeiraForaDoEixo) barsHTML += this.SEPARADOR_FORA_DO_EIXO;
       const data = col.data;
       let hH = 0, mH = 0, lH = 0, nH = 0;
 
@@ -819,6 +830,9 @@ window.JCRReportUtils = {
         </div>
       `;
     });
+
+    // Daqui em diante as colunas nao pertencem ao eixo de anos: separa com a linha.
+    barsHTML += this.SEPARADOR_FORA_DO_EIXO;
 
     // Append Special Column: EA (Orientações em Andamento - Pós-Graduação)
     const inProgCapped = inProgressData.total > scaleMax;
