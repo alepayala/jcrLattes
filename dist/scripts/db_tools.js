@@ -171,21 +171,31 @@ window.JCRDBTools = {
     //            lista vazia (relatorio de grupo) = ninguem e filtrado
     //   anos     0 = toda a carreira; N = ultimos N anos
     // Devolve { gente: [{nome, artigos}], m: matriz NxN, maior, pares }.
+    // Quem conta como doutor da equipe. Tecnicos e alunos ficam de fora. Titulacao em
+    // branco NAO exclui: ela vem do PDF e nem sempre esta preenchida, e perder um
+    // pesquisador em silencio e pior do que listar um a mais — e por isso que o
+    // pesquisador visitante com ficha incompleta continua entrando.
+    //
+    // Usada pela matriz de coautoria e pela acao que abre os CVs que faltam no banco:
+    // as duas precisam do mesmo recorte de "doutor", e ele nao pode divergir entre elas.
+    _ehDoutorDaEquipe: function (ficha) {
+        if (!ficha) return true;
+        if (/^(t[ée]cnic|aluno|estudante)/i.test(String(ficha.role || '').trim())) return false;
+        const formacao = String(ficha.formacao || '').trim();
+        if (formacao && !/doutor/i.test(formacao)) return false;
+        return true;
+    },
+
     _matrizCoautoria: function (cvs, fichas, anos, anoAtual) {
         const lista = Array.isArray(cvs) ? cvs : [];
         const fichasArr = Array.isArray(fichas) ? fichas : [];
 
         // Entram os doutores com curriculo no banco; tecnicos e alunos ficam de fora.
-        // Titulacao em branco NAO exclui: ela vem do PDF e nem sempre esta preenchida,
-        // e perder um pesquisador em silencio e pior do que listar um a mais.
         const elegivel = (cv) => {
             if (fichasArr.length === 0) return true;
             const f = fichasArr.find(x => this.cvMatches(cv, x.name, x.lattesId));
             if (!f) return true;
-            if (/^(t[ée]cnic|aluno|estudante)/i.test(String(f.role || '').trim())) return false;
-            const formacao = String(f.formacao || '').trim();
-            if (formacao && !/doutor/i.test(formacao)) return false;
-            return true;
+            return this._ehDoutorDaEquipe(f);
         };
 
         // 0 significa sem corte. Difere da Lista de Publicacoes, onde 0 deixa so o ano
@@ -3573,8 +3583,18 @@ window.JCRDBTools = {
                         : `<button class="btn-del-member" ${memberDataAttrs} style="${btnAcaoStyle}" title="Remover este membro da equipe">🗑️</button>`}
                 `;
 
+                // Os data-* alimentam as acoes em lote do cabecalho da coluna DB/Usar.
+                // Ficam na linha, e nao nos checkboxes, porque membros sem CV completo
+                // no banco nao tem checkbox e ainda assim contam para as acoes.
+                const linhaDataAttrs = `data-member-key="${this._esc(memberKey)}"`
+                    + ` data-member-name="${this._esc(member.name)}"`
+                    + ` data-coordenador="${isProponente ? '1' : '0'}"`
+                    + ` data-tem-cv="${hasFullCvData ? '1' : '0'}"`
+                    + ` data-doutor="${this._ehDoutorDaEquipe(member) ? '1' : '0'}"`
+                    + ` data-lattes-url="${this._esc(memberLattes)}"`;
+
                 teamRows += `
-                    <tr style="border-bottom: 1px solid #eee;">
+                    <tr class="linha-membro" ${linhaDataAttrs} style="border-bottom: 1px solid #eee;">
                         <td style="padding: 8px; text-align: center;">${idx + 1}</td>
                         <td style="padding: 8px; text-align: left; font-weight: bold;">
                             ${this._esc(member.name)}
@@ -3591,6 +3611,10 @@ window.JCRDBTools = {
                     </tr>
                 `;
             });
+
+            // Acoes em lote no lugar do titulo da coluna DB/Usar. Herdam a cor do
+            // cabecalho para nao competir com os icones de cada linha.
+            const btnCabecalhoStyle = 'background: none; border: none; cursor: pointer; font-size: 1.1em; padding: 1px 3px; line-height: 1; filter: saturate(0.85);';
 
             const teamTableHtml = `
                 <details open data-collapse-key="equipe-da-proposta" style="margin-bottom: 25px; background: white; border: 1px solid #BBDEFB; border-radius: 8px; padding: 15px;">
@@ -3610,7 +3634,14 @@ window.JCRDBTools = {
                                 <th style="padding: 8px; text-align: left;">Nome / Categoria</th>
                                 <th style="padding: 8px; width: 100px; min-width: 90px; text-align: center; white-space: nowrap;">Bolsa</th>
                                 <th style="padding: 8px; text-align: left;">Instituição</th>
-                                <th style="padding: 8px; width: 110px; text-align: center;" title="DB / Usar: Marque para incluir o CV no relatório consolidado ou desmarque para desconsiderar">DB / Usar</th>
+                                <th style="padding: 8px; width: 120px; text-align: center;" title="DB / Usar: marque para incluir o CV no relatório consolidado ou desmarque para desconsiderar">
+                                    <div class="no-print" style="display: flex; gap: 2px; justify-content: center; align-items: center;">
+                                        <button id="btn-sel-equipe-cv" style="${btnCabecalhoStyle}" title="Incluir toda a equipe no relatório consolidado">👥</button>
+                                        <button id="btn-sel-coord-cv" style="${btnCabecalhoStyle}" title="Incluir apenas o coordenador no relatório consolidado">👤</button>
+                                        <button id="btn-abrir-cvs-pendentes" style="${btnCabecalhoStyle}" title="Abrir em janelas separadas os CVs dos doutores que ainda não estão no banco, para atualizá-los no Lattes (alunos e técnicos ficam de fora)">🌐</button>
+                                    </div>
+                                    <span class="somente-impressao" style="display: none;">DB / Usar</span>
+                                </th>
                                 <th class="no-print" style="padding: 8px; width: 80px; text-align: center;" title="Editar ou remover um membro extraído de forma incorreta do PDF">Ações</th>
                             </tr>
                         </thead>
@@ -4345,6 +4376,10 @@ window.JCRDBTools = {
 
                         /* Linha-resumo dos filtros: aparece somente na impressão */
                         #print-filters-summary { display: block !important; }
+
+                        /* Rótulos que substituem, no papel, controles só de tela
+                           (o título da coluna DB / Usar, que virou botões de ação) */
+                        .somente-impressao { display: inline !important; }
 
                         /* Libera contêineres com scroll: imprime o conteúdo completo */
                         .collapsible-content div { max-height: none !important; overflow: visible !important; }
@@ -5370,6 +5405,98 @@ window.JCRDBTools = {
                     this.renderProcessReport(parentGroupData, newTab, sortedDb);
                 });
             });
+        }
+
+
+        // ---- Acoes em lote do cabecalho da coluna DB/Usar --------------------------
+        // Marcar/desmarcar a equipe inteira uma linha de cada vez remontava o relatorio
+        // a cada clique. Estas tres acoes trabalham sobre as linhas da tabela, que
+        // carregam nos data-* tudo o que e preciso saber (chave, coordenador, se o CV
+        // ja esta no banco e o endereco no Lattes).
+        if (parentGroupData) {
+            const linhasMembro = () => Array.from(doc.querySelectorAll('tr.linha-membro'));
+
+            // manterNoConsolidado: recebe a linha e diz se o membro fica incluido.
+            const aplicarSelecaoCvs = async (manterNoConsolidado) => {
+                const excluidas = [];
+                linhasMembro().forEach(tr => {
+                    if (manterNoConsolidado(tr)) return;
+                    const chave = tr.getAttribute('data-member-key');
+                    const nome = tr.getAttribute('data-member-name');
+                    if (chave) excluidas.push(chave);
+                    if (nome && nome !== chave) excluidas.push(nome);
+                });
+                parentGroupData.excludedCvKeys = excluidas;
+                try {
+                    await this.saveCVs([parentGroupData]);
+                } catch (e) {
+                    console.warn('[dbTools] Falha ao guardar a seleção de CVs:', e);
+                }
+                this.renderProcessReport(parentGroupData, newTab, sortedDb);
+            };
+
+            const btnSelEquipe = doc.getElementById('btn-sel-equipe-cv');
+            if (btnSelEquipe) {
+                btnSelEquipe.addEventListener('click', () => aplicarSelecaoCvs(() => true));
+            }
+
+            const btnSelCoord = doc.getElementById('btn-sel-coord-cv');
+            if (btnSelCoord) {
+                btnSelCoord.addEventListener('click', () =>
+                    aplicarSelecaoCvs(tr => tr.getAttribute('data-coordenador') === '1'));
+            }
+
+            // Abre os CVs que faltam no banco para o usuario passar por eles no Lattes e
+            // depois usar "Atualizar Relatorio". So doutores: o consolidado nao usa CV de
+            // aluno nem de tecnico, entao abri-los seria trabalho jogado fora. Abrir
+            // varias janelas de uma vez so passa pelo bloqueador porque parte de um
+            // clique; ainda assim confirmamos quando sao muitas.
+            const btnAbrirCvs = doc.getElementById('btn-abrir-cvs-pendentes');
+            if (btnAbrirCvs) {
+                btnAbrirCvs.addEventListener('click', () => {
+                    const faltantes = linhasMembro().filter(tr =>
+                        tr.getAttribute('data-tem-cv') !== '1' && tr.getAttribute('data-doutor') === '1');
+                    const pendentes = faltantes
+                        .map(tr => ({
+                            nome: tr.getAttribute('data-member-name') || '',
+                            url: tr.getAttribute('data-lattes-url') || ''
+                        }))
+                        .filter(m => m.url && m.url !== '#');
+
+                    const avisar = (msg) => {
+                        if (newTab && typeof newTab.alert === 'function') newTab.alert(msg);
+                        else console.info('[dbTools]', msg);
+                    };
+
+                    // Doutor sem link do Lattes e comum entre visitantes: avisamos em vez
+                    // de simplesmente nao abrir nada.
+                    const semLink = faltantes.length - pendentes.length;
+
+                    if (pendentes.length === 0) {
+                        avisar(semLink > 0
+                            ? `Os ${semLink} doutor(es) fora do banco não têm link do Lattes cadastrado. Edite o membro (✏️) para informar o ID.`
+                            : 'Todos os CVs dos doutores da equipe já estão no banco de dados.');
+                        return;
+                    }
+
+                    if (pendentes.length > 5) {
+                        const confirmar = (newTab && typeof newTab.confirm === 'function') ? newTab.confirm : null;
+                        if (confirmar && !confirmar.call(newTab, `Abrir ${pendentes.length} currículos em janelas separadas?`)) return;
+                    }
+
+                    pendentes.forEach(m => {
+                        try {
+                            newTab.open(m.url, '_blank');
+                        } catch (e) {
+                            console.warn('[dbTools] Falha ao abrir o CV de', m.nome, e);
+                        }
+                    });
+
+                    if (semLink > 0) {
+                        avisar(`${pendentes.length} currículo(s) aberto(s). Outro(s) ${semLink} doutor(es) fora do banco não têm link do Lattes cadastrado.`);
+                    }
+                });
+            }
         }
 
         // ---- Edicao manual da equipe da proposta -----------------------------------

@@ -556,3 +556,33 @@ describe('_lerTituloResumoPdf', () => {
         assert.deepStrictEqual(B._lerTituloResumoPdf([], [], ''), { tituloProjeto: '', resumoProjeto: '' });
     });
 });
+
+// Recorte de "doutor da equipe", usado pela matriz de coautoria e pela acao que abre
+// os CVs que faltam no banco. O contrato importante e o ultimo teste: ficha incompleta
+// nao pode excluir ninguem, porque a titulacao vem do PDF e falha com frequencia.
+describe('_ehDoutorDaEquipe', () => {
+    test('tecnico e aluno ficam de fora', () => {
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Técnico', formacao: 'Doutorado' }), false);
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Aluno de Iniciação Científica', formacao: '' }), false);
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Estudante', formacao: 'Mestrado' }), false);
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Tecnico de laboratório', formacao: '' }), false);
+    });
+
+    test('titulacao abaixo de doutorado fica de fora', () => {
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Pesquisador', formacao: 'Mestrado' }), false);
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Pesquisador', formacao: 'Graduação' }), false);
+    });
+
+    test('doutor entra, inclusive o coordenador e o pos-doutorando', () => {
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Proponente / Coordenador', formacao: 'Doutorado' }), true);
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Pesquisador', formacao: 'Doutorado' }), true);
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Pós-Doutorando', formacao: 'Pós-Doutorado' }), true);
+    });
+
+    test('ficha incompleta nao exclui: o visitante sem titulacao continua entrando', () => {
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: 'Pesquisador Estrangeiro', formacao: '' }), true);
+        assert.strictEqual(B._ehDoutorDaEquipe({ role: '', formacao: '' }), true);
+        assert.strictEqual(B._ehDoutorDaEquipe({}), true);
+        assert.strictEqual(B._ehDoutorDaEquipe(null), true);
+    });
+});
