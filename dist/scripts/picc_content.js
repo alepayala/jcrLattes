@@ -1736,11 +1736,65 @@
         }
     }
 
+    // Relatorio rapido a partir da propria pagina "Producoes e Orientacoes"
+    // (planilha/publicacao.do), sem passar pelo banco de dados. A pagina traz, para UM
+    // pesquisador, os 10 ultimos anos de producao com JIF, Qualis, ISSN, numero de
+    // autores e ordem de autoria — material suficiente para as tabelas e graficos.
+    //
+    // Reaproveita o caminho que o relatorio da proposta ja usa quando a fonte escolhida
+    // sao as producoes: _cvDataDeProducoes converte a pagina para o formato de CV (com a
+    // deduplicacao das linhas repetidas) e renderCVReport monta o relatorio. As secoes
+    // sem dados — equipe, coautoria, patentes, eventos — se omitem sozinhas.
+    function gerarRelatorioDaPaginaDeProducoes(botao) {
+        const DB = (typeof window !== 'undefined') ? window.JCRDBTools : null;
+        if (!DB || typeof DB._cvDataDeProducoes !== 'function' || typeof DB.renderCVReport !== 'function') {
+            alert('As ferramentas do JCRLattes não foram carregadas nesta página.');
+            return;
+        }
+
+        const rotulo = botao ? botao.innerText : '';
+        if (botao) { botao.disabled = true; botao.innerText = '⏳ Lendo a página...'; }
+
+        // Deixa o navegador pintar o "lendo" antes da leitura, que trava a thread.
+        setTimeout(() => {
+            let dados = null;
+            try {
+                dados = DB._cvDataDeProducoes(null, document.documentElement.outerHTML);
+            } catch (e) {
+                console.warn('[piccTools] Falha ao ler as produções desta página:', e);
+            }
+
+            if (botao) { botao.disabled = false; botao.innerText = rotulo; }
+
+            if (!dados) {
+                alert('Não foi possível ler as tabelas de produção desta página.\n\n'
+                    + 'Confirme que a página terminou de carregar e que ela é a "Produções e Orientações" de um pesquisador.');
+                return;
+            }
+
+            const janela = window.open('', '_blank');
+            if (!janela) {
+                alert('Permita pop-ups neste site para abrir o relatório.');
+                return;
+            }
+            try {
+                DB.renderCVReport(dados, janela);
+            } catch (e) {
+                console.error('[piccTools] Falha ao montar o relatório das produções:', e);
+                alert('Falha ao montar o relatório: ' + (e && e.message ? e.message : e));
+            }
+        }, 0);
+    }
+
     async function injectUIInner() {
         if (document.getElementById('picc-tools-toolbar')) return;
 
         const currentUrl = (typeof window !== 'undefined' && window.location && window.location.href) ? window.location.href : '';
         const isPdfPage = currentUrl.includes('anexosform.cnpq.br/doc/') || currentUrl.endsWith('.pdf');
+        // "Producoes e Orientacoes" de um pesquisador. Cai em isJulgamento porque o
+        // endereco tem /planilha/, mas nao tem tabela de propostas: ali valem os
+        // indicadores rapidos, e nao os controles de extracao da carteira.
+        const isProducoes = currentUrl.toLowerCase().includes('publicacao.do');
         
         const lowerTitle = (document.title || '').toLowerCase();
         const lowerUrl = currentUrl.toLowerCase();
@@ -1891,7 +1945,7 @@
                 top: 0;
                 left: 0;
                 width: 100%;
-                background-color: ${isPdfPage ? '#2E7D32' : (isJulgamento ? '#1565C0' : '#7f8c8d')};
+                background-color: ${isPdfPage ? '#2E7D32' : (isProducoes ? '#00838F' : (isJulgamento ? '#1565C0' : '#7f8c8d'))};
                 color: white;
                 padding: 10px 20px;
                 z-index: 999999;
@@ -1903,7 +1957,7 @@
             if (document.body) document.body.style.paddingTop = '50px';
 
             const title = document.createElement('div');
-            title.innerHTML = `<strong>piccTools</strong> - ${isPdfPage ? 'Processo em PDF' : 'Plataforma Carlos Chagas'}`;
+            title.innerHTML = `<strong>piccTools</strong> - ${isPdfPage ? 'Processo em PDF' : (isProducoes ? 'Produções e Orientações' : 'Plataforma Carlos Chagas')}`;
             title.style.marginRight = '20px';
             title.style.fontSize = '16px';
             toolbar.appendChild(title);
@@ -1914,7 +1968,27 @@
             statusLabel.style.fontSize = '14px';
             statusLabel.style.color = '#E3F2FD';
 
-            if (isJulgamento) {
+            if (isProducoes) {
+                const indicadoresBtn = document.createElement('button');
+                indicadoresBtn.id = 'picc-indicadores-btn';
+                indicadoresBtn.innerText = '📊 Indicadores desta produção';
+                indicadoresBtn.title = 'Lê esta página como se fosse um currículo e abre as tabelas e gráficos estatísticos numa nova janela. Nada é salvo no banco de dados.';
+                indicadoresBtn.style.cssText = `
+                    background-color: #00566b;
+                    color: white;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-weight: bold;
+                    transition: background 0.2s;
+                    white-space: nowrap;
+                `;
+                indicadoresBtn.onmouseover = () => indicadoresBtn.style.backgroundColor = '#003d4d';
+                indicadoresBtn.onmouseout = () => indicadoresBtn.style.backgroundColor = '#00566b';
+                indicadoresBtn.addEventListener('click', () => gerarRelatorioDaPaginaDeProducoes(indicadoresBtn));
+                toolbar.appendChild(indicadoresBtn);
+            } else if (isJulgamento) {
                 const filterInput = document.createElement('input');
                 filterInput.type = 'text';
                 filterInput.id = 'picc-process-filter-input';

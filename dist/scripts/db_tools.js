@@ -4317,6 +4317,30 @@ window.JCRDBTools = {
                         </div>
                     </div>`;
 
+        // Procedencia quando o relatorio vem direto da pagina "Producoes e Orientacoes",
+        // sem proposta associada. O relatorio da proposta ja diz isso no seu proprio
+        // cabecalho; aqui nao havia onde dizer, e o revisor precisa saber de onde saiu o
+        // numero, que periodo a pagina cobre, o que essa fonte nao traz e — em vermelho —
+        // quantas linhas repetidas foram unificadas.
+        let fonteProducoesHtml = '';
+        if (!projectHeaderHtml && cvData._fonte === 'producoes') {
+            const anosF = cvData._fonteAnos || {};
+            const faixaF = (anosF.min && anosF.max) ? `${anosF.min}–${anosF.max}` : '';
+            const dupF = cvData._fonteDuplicatas || 0;
+            fonteProducoesHtml = `
+                <div style="background: #E0F7FA; border: 1px solid #80DEEA; border-radius: 8px; padding: 15px 20px; margin: 0 0 20px 0;">
+                    <h2 style="margin: 0; color: #006064; font-size: 1.2em;">📚 Relatório de Produção</h2>
+                    <div style="margin-top: 5px; color: #00838F; font-size: 0.95em;">
+                        Gerado a partir da página <strong>Produções e Orientações</strong> de
+                        <strong>${this._esc(cvData._fonteNome || cvData.name || '')}</strong>${faixaF ? ` — produção de <strong>${faixaF}</strong>` : ''}.
+                        Nada foi salvo no banco de dados.
+                    </div>
+                    <div style="margin-top: 4px; color: #00838F; font-size: 0.82em; opacity: 0.9;">
+                        Esta fonte não traz citações por artigo, Scopus, orientações em andamento nem trabalhos em eventos.${dupF > 0 ? ` <span style="color: #c62828; font-weight: 700;">${dupF} linha(s) repetida(s) da página (mesmo artigo com o nome do periódico por extenso e abreviado) foram unificadas.</span>` : ''}
+                    </div>
+                </div>`;
+        }
+
         const fullHTML = `
             <!DOCTYPE html>
             <html lang="pt-BR">
@@ -4397,6 +4421,7 @@ window.JCRDBTools = {
             <body>
                 <div class="container">
                     ${projectHeaderHtml ? projectHeaderHtml : headerHTML}
+                    ${fonteProducoesHtml}
                     ${(!projectHeaderHtml || hasGroupCvs) ? reportFiltersHTML : ''}
                     
                     ${filteredPublications.length > 0 ? `
