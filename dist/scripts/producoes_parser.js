@@ -52,6 +52,11 @@
     // ---------------------------------------------------------------------
     // Leitura das tabelas
     // ---------------------------------------------------------------------
+    // A partir de quantos autores um artigo conta como grande colaboração. O currículo
+    // Lattes lista até 20 nomes antes de recorrer a "et al", então 21 é o ponto em que as
+    // duas fontes passam a concordar.
+    const AUTORES_GRANDE_COLABORACAO = 21;
+
     const semAcento = (t) => String(t || '')
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
@@ -206,6 +211,8 @@
             const doi = (iTitulo < linha.length && linha[iTitulo].doi) ? linha[iTitulo].doi : '';
             const ano = inteiro(pega(linha, iAno));
 
+            const grandeColaboracao = nAutores >= AUTORES_GRANDE_COLABORACAO;
+
             const partes = [titulo, rev.nome, ano ? String(ano) : ''].filter(Boolean);
             if (volume) partes.push('v. ' + volume);
             if (paginaIni) partes.push('p. ' + paginaIni + (paginaFim ? '-' + paginaFim : ''));
@@ -219,11 +226,17 @@
                 jcrYear: fi.ano,
                 authorCount: nAutores,
                 authorRank: ordem > 0 ? ordem : -1,
-                // A página não marca "et al"; em troca dá a contagem exata de autores,
-                // que já define primeiro/último autor com precisão.
-                hasEtAl: false,
+                // A página não marca "et al" — dá a contagem exata de autores. O
+                // currículo Lattes lista até 20 nomes e só então escreve "et al", de modo
+                // que "et al" ali equivale a AUTORES_GRANDE_COLABORACAO ou mais autores
+                // (content.js: authorCount = hasEtAl ? Math.max(authorCount, 21)).
+                // Aplicamos o mesmo limite aqui para que a mesma produção caia na mesma
+                // faixa, venha ela do CV ou desta página.
+                hasEtAl: grandeColaboracao,
                 isFirstAuthor: ordem === 1,
-                isLastAuthor: nAutores > 0 && ordem === nAutores,
+                // Primeiro autor conta mesmo em grande colaboração; último, não — é a
+                // regra do CV Lattes, onde "et al" esconde quem fecha a lista.
+                isLastAuthor: !grandeColaboracao && nAutores > 0 && ordem === nAutores,
                 wosCitations: 0,
                 scopusCitations: 0,
                 doi: doi,
