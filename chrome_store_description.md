@@ -1,4 +1,4 @@
-JCRLattes - Versão 1.7.16
+JCRLattes - Versão 1.7.17
 
 Resumo:
 Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes, autoria e orientações em segundos.
