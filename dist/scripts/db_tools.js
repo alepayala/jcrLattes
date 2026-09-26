@@ -656,10 +656,6 @@ window.JCRDBTools = {
         }
     },
 
-    esquecerPastaLocal: async function () {
-        await this._idbHandle(null);
-    },
-
     // Devolve o handle guardado se a permissao ainda valer. Com pedir=true tenta
     // reobter a permissao (so funciona dentro de um clique).
     pastaLocalHandle: async function (pedir = false) {
@@ -1178,10 +1174,6 @@ window.JCRDBTools = {
     },
 
     // Compatibilidade (usado pelo piccTools): upsert de todos os CVs do array.
-    saveDB: function (dbArray) {
-        return this.saveCVs(dbArray);
-    },
-
     // Helper que verifica se um pesquisador (nome ou lattesId) pertence a alguma proposta do piccTools
     isPiccProposalMember: async function (name, lattesId = '') {
         const proposals = await this.getDB(true);
@@ -1505,15 +1497,6 @@ window.JCRDBTools = {
             });
             btnOk.focus();
         });
-    },
-
-    showPrompt: function (msg, defaultVal = '', targetTab = null) {
-        if (targetTab && !targetTab.closed && typeof targetTab.prompt === 'function') {
-            return targetTab.prompt(msg, defaultVal);
-        } else if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
-            return window.prompt(msg, defaultVal);
-        }
-        return null;
     },
 
     // Abre o relatório individual do CV atualmente exibido na página do Lattes

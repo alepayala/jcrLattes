@@ -528,14 +528,6 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
   return pubInfoList;
 }
 
-function decodeHtmlEntities(text) {
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'");
-}
 
 function injectJournalAnnotation(
   elem,
@@ -1276,14 +1268,6 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       }
     });
   });
-
-  // Add event listeners for toggles with Save Logic
-  const addListenerWithSave = (id, event = 'change') => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener(event, () => {
-      saveSettings();
-    });
-  };
 
   // Listeners for Global Toggles
   const disableReportCb = document.getElementById('toggle-disable-report');
