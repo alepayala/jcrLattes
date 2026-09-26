@@ -315,3 +315,74 @@ describe('_tipoDeParticipacao', () => {
         assert.strictEqual(L._tipoDeParticipacao(''), 'Desconhecido');
     });
 });
+
+// --- Identificação do pesquisador --------------------------------------------
+
+describe('_bolsaDoTexto', () => {
+    test('Produtividade em Pesquisa vira PQ', () => {
+        assert.strictEqual(L._bolsaDoTexto('Bolsista de Produtividade em Pesquisa do CNPq - Nível 1B'), 'PQ 1B');
+    });
+
+    test('Desenvolvimento Tecnológico vira DT, nas duas grafias', () => {
+        assert.strictEqual(L._bolsaDoTexto('Bolsista de Produtividade em Desenvolvimento Tecnológico - Nível 2'), 'DT 2');
+        assert.strictEqual(L._bolsaDoTexto('Bolsista de Produtividade Desen. Tec. - Nível A'), 'DT A');
+    });
+
+    test('cobre os niveis 1A a 1D', () => {
+        ['1A', '1B', '1C', '1D'].forEach(n => {
+            assert.strictEqual(L._bolsaDoTexto(`Produtividade em Pesquisa - Nível ${n}`), 'PQ ' + n);
+        });
+    });
+
+    test('cobre os niveis de letra e o senior', () => {
+        ['A', 'B', 'C', 'SR'].forEach(n => {
+            assert.strictEqual(L._bolsaDoTexto(`Produtividade em Pesquisa - Nível ${n}`), 'PQ ' + n);
+        });
+    });
+
+    // Sem esta prioridade, o "2" de "2 do CNPq" ou qualquer numero da frase poderia
+    // ser lido como nivel antes do valor certo.
+    test('o nivel explicito vence um codigo solto que apareca antes', () => {
+        assert.strictEqual(L._bolsaDoTexto('Produtividade em Pesquisa 2 do CNPq - Nível 1A'), 'PQ 1A');
+    });
+
+    test('sem "Nível", aceita o codigo solto', () => {
+        assert.strictEqual(L._bolsaDoTexto('Produtividade em Pesquisa - 1C - CNPq'), 'PQ 1C');
+    });
+
+    test('sem nivel nenhum, devolve so a sigla', () => {
+        assert.strictEqual(L._bolsaDoTexto('Bolsista de Produtividade em Pesquisa do CNPq'), 'PQ');
+    });
+
+    test('o nivel e normalizado para maiuscula', () => {
+        assert.strictEqual(L._bolsaDoTexto('Produtividade em Pesquisa - Nível 1a'), 'PQ 1A');
+    });
+
+    test('texto que nao e bolsa de produtividade devolve vazio', () => {
+        assert.strictEqual(L._bolsaDoTexto('Professor Titular da Universidade'), '');
+        assert.strictEqual(L._bolsaDoTexto('Bolsista de Doutorado - Nível 1A'), '');
+        assert.strictEqual(L._bolsaDoTexto(''), '');
+        assert.strictEqual(L._bolsaDoTexto(null), '');
+    });
+});
+
+describe('_apelidosDoTexto', () => {
+    test('separa por ponto e virgula e tira os espacos', () => {
+        assert.deepStrictEqual(
+            L._apelidosDoTexto('AYALA, A. P.;  AYALA, ALEJANDRO ; Ayala, A.'),
+            ['AYALA, A. P.', 'AYALA, ALEJANDRO', 'Ayala, A.']);
+    });
+
+    test('descarta separadores vazios', () => {
+        assert.deepStrictEqual(L._apelidosDoTexto('SILVA, J.;;  ; LIMA, P.'), ['SILVA, J.', 'LIMA, P.']);
+    });
+
+    test('um nome so continua valendo', () => {
+        assert.deepStrictEqual(L._apelidosDoTexto('SILVA, J.'), ['SILVA, J.']);
+    });
+
+    test('texto vazio devolve lista vazia', () => {
+        assert.deepStrictEqual(L._apelidosDoTexto(''), []);
+        assert.deepStrictEqual(L._apelidosDoTexto(null), []);
+    });
+});

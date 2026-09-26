@@ -88,7 +88,7 @@ async function loadSettings() {
 
 async function main() {
   // attempt to get CV name and link from Lattes page
-  const nameLink = getLattesNameAndLink();
+  const nameLink = window.JCRLattesParser.lerIdentificacao(document);
 
   // check whether name and link were not found (if not this is not a CV Lattes!)
   if (!nameLink['name']) return;
@@ -207,85 +207,6 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-function getLattesNameAndLink() {
-  // find name element
-  let nameElem = document.querySelector("h2[class='nome']");
-  if (!nameElem) {
-    // try printed version
-    nameElem = document.querySelector("div[class='nome']");
-  }
-  if (!nameElem) {
-    // try fallback for printed version
-    const h2s = document.querySelectorAll('h2');
-    if (h2s.length > 0) nameElem = h2s[0];
-  }
-
-  if (!nameElem) return { name: '', link: '' };
-
-  let link = '';
-  // Use textContent for name
-  let name = nameElem.textContent.trim();
-
-  // Extract Fellowship (Bolsa) Information from top header badge
-  let fellowshipText = '';
-  let fellowshipString = '';
-  
-  // Look exclusively at the second h2.nome or div.nome at the top header of the CV
-  const allNames = document.querySelectorAll("h2[class='nome'], div[class='nome']");
-  if (allNames.length > 1) {
-    const secondElem = allNames[1];
-    fellowshipText = secondElem.textContent.trim();
-  }
-
-  if (fellowshipText) {
-    let acronim = "";
-    if (fellowshipText.includes("Produtividade em Pesquisa")) {
-      acronim = "PQ";
-    } else if (fellowshipText.includes("Produtividade em Desenvolvimento Tecnológico") || fellowshipText.includes("Desen. Tec.")) {
-      acronim = "DT";
-    }
-
-    if (acronim) {
-      // Level matching: 1A, 1B, 1C, 1D, 2, A, B, C, SR
-      let level = "";
-      const nivelExplicitMatch = fellowshipText.match(/N[íi]vel\s*[:-]?\s*(1A|1B|1C|1D|1|2|3|A|B|C|SR)\b/i);
-      if (nivelExplicitMatch) {
-        level = nivelExplicitMatch[1].toUpperCase();
-      } else {
-        const levelMatch = fellowshipText.match(/\b(1A|1B|1C|1D|1|2|3|A|B|C|SR)\b/i);
-        level = levelMatch ? levelMatch[1].toUpperCase() : "";
-      }
-      fellowshipString = level ? `${acronim} ${level}` : acronim;
-    }
-  }
-
-  // find link element
-  let linkElem = document.querySelector("ul[class='informacoes-autor']");
-  if (!linkElem) {
-    // try printed version - look for the text "Endereço para acessar este CV"
-    const allSpans = document.querySelectorAll('span, td, div');
-    for (const el of allSpans) {
-      if (el.innerText && el.innerText.includes('Endereço para acessar este CV')) {
-        linkElem = el;
-        link = linkElem.innerText.match(/\bhttps?:\/\/\S+/gi)?.[0] || '';
-        break;
-      }
-    }
-  } else {
-    // extract URL from link element text
-    const match = linkElem.innerText.match(/\bhttps?:\/\/\S+/gi);
-    if (match) link = match[0];
-  }
-
-  let researcherIdLink = '';
-  const ridAnchor = document.querySelector('a[href*="researcherid.com/rid/"]');
-  if (ridAnchor) {
-      researcherIdLink = ridAnchor.href;
-  }
-
-  return { name, link, researcherIdLink, fellowshipText, fellowshipString };
-}
-
 async function processLattesPage(nameLink) {
   showLoading();
   // Load saved settings if any
@@ -347,7 +268,7 @@ async function processLattesPage(nameLink) {
   await updateSafe(async () => {
     try {
       // Annotate Lattes page and return annotated Lattes info
-      const authorNames = getAuthorNames();
+      const authorNames = window.JCRLattesParser.lerApelidos(document);
       const lattesInfo = annotateLattesPage(highJcr, lowJcr, authorNames);
       // A leitura destas secoes mora em lattes_parser.js, junto com a das publicacoes.
       const supervisions = window.JCRLattesParser.lerOrientacoes(document);
@@ -2277,47 +2198,6 @@ function setAttributes(elem, attrs) {
   for (const key of Object.keys(attrs)) {
     elem.setAttribute(key, attrs[key]);
   }
-}
-
-function getAuthorNames() {
-  const candidates = [];
-
-  // Method 1: Tables (Legacy)
-  const tds = document.querySelectorAll('td.campos');
-  for (const td of tds) {
-    // Check for "Nome em citações bibliográficas" or "Nome em cita" to be safe
-    if (td.innerText.includes('Nome em cita')) {
-      const nextTd = td.nextElementSibling;
-      if (nextTd && nextTd.classList.contains('texto')) {
-        candidates.push(nextTd.innerText);
-      }
-    }
-  }
-
-  // Method 2: Div Layout (New)
-  if (candidates.length === 0) {
-    const labels = document.querySelectorAll('.layout-cell-pad-5');
-    for (const labelDiv of labels) {
-      if (labelDiv.innerText.includes('Nome em cita')) {
-        const parent = labelDiv.parentElement;
-        if (parent && parent.classList.contains('layout-cell-3')) {
-          const nextSibling = parent.nextElementSibling;
-          if (nextSibling && (nextSibling.classList.contains('layout-cell-9') || nextSibling.classList.contains('layout-cell-8'))) { // sometimes 8? sticking to 9 as per snippet, but being safe
-            candidates.push(nextSibling.innerText);
-          }
-        }
-      }
-    }
-  }
-
-  if (candidates.length > 0) {
-    const rawText = candidates[0];
-    const names = rawText.split(';').map(n => n.trim()).filter(n => n.length > 0);
-    return names;
-  }
-
-  console.log('No author names found.');
-  return [];
 }
 
 var loadingTimeout = null;

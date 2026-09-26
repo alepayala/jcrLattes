@@ -462,9 +462,123 @@
         return eventos;
     }
 
+    // ------------------------------------------------------------------
+    // Identificação do pesquisador
+    // ------------------------------------------------------------------
+
+    // Bolsa a partir da tarja do topo do currículo. Devolve "PQ 1A", "DT 2", só a
+    // sigla quando o nível não aparece, ou '' quando não é bolsa de produtividade.
+    // O nível explícito ("Nível: 1A") tem prioridade sobre o primeiro código solto do
+    // texto, que pode ser qualquer número da frase.
+    function _bolsaDoTexto(texto) {
+        const t = String(texto || '');
+        if (!t) return '';
+
+        let sigla = '';
+        if (t.includes('Produtividade em Pesquisa')) {
+            sigla = 'PQ';
+        } else if (t.includes('Produtividade em Desenvolvimento Tecnológico') || t.includes('Desen. Tec.')) {
+            sigla = 'DT';
+        }
+        if (!sigla) return '';
+
+        const NIVEIS = /(1A|1B|1C|1D|1|2|3|A|B|C|SR)/;
+        const explicito = t.match(new RegExp('N[íi]vel\\s*[:-]?\\s*' + NIVEIS.source + '\\b', 'i'));
+        let nivel = '';
+        if (explicito) {
+            nivel = explicito[1].toUpperCase();
+        } else {
+            const solto = t.match(new RegExp('\\b' + NIVEIS.source + '\\b', 'i'));
+            nivel = solto ? solto[1].toUpperCase() : '';
+        }
+        return nivel ? `${sigla} ${nivel}` : sigla;
+    }
+
+    // "AYALA, A. P.; AYALA, ALEJANDRO" → lista de apelidos
+    function _apelidosDoTexto(texto) {
+        return String(texto || '').split(';').map(n => n.trim()).filter(n => n.length > 0);
+    }
+
+    // Nome, endereço do CV, ResearcherID e bolsa. Tolera as três formas em que o
+    // Lattes apresenta o cabeçalho: h2.nome, div.nome (versão de impressão) e, em
+    // último caso, o primeiro h2 da página.
+    function lerIdentificacao(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        if (!d) return { name: '', link: '' };
+
+        let elemNome = d.querySelector("h2[class='nome']") || d.querySelector("div[class='nome']");
+        if (!elemNome) {
+            const h2s = d.querySelectorAll('h2');
+            if (h2s.length > 0) elemNome = h2s[0];
+        }
+        if (!elemNome) return { name: '', link: '' };
+
+        const name = elemNome.textContent.trim();
+
+        // A tarja da bolsa é o SEGUNDO elemento de nome do cabeçalho.
+        let fellowshipText = '';
+        const todosNomes = d.querySelectorAll("h2[class='nome'], div[class='nome']");
+        if (todosNomes.length > 1) fellowshipText = todosNomes[1].textContent.trim();
+        const fellowshipString = _bolsaDoTexto(fellowshipText);
+
+        let link = '';
+        const elemLink = d.querySelector("ul[class='informacoes-autor']");
+        if (elemLink) {
+            const m = elemLink.innerText.match(/\bhttps?:\/\/\S+/gi);
+            if (m) link = m[0];
+        } else {
+            // versão de impressão: o endereço vem solto, depois de um rótulo
+            const candidatos = d.querySelectorAll('span, td, div');
+            for (const el of candidatos) {
+                if (el.innerText && el.innerText.includes('Endereço para acessar este CV')) {
+                    link = el.innerText.match(/\bhttps?:\/\/\S+/gi)?.[0] || '';
+                    break;
+                }
+            }
+        }
+
+        let researcherIdLink = '';
+        const ancoraRid = d.querySelector('a[href*="researcherid.com/rid/"]');
+        if (ancoraRid) researcherIdLink = ancoraRid.href;
+
+        return { name, link, researcherIdLink, fellowshipText, fellowshipString };
+    }
+
+    // Nomes pelos quais o pesquisador assina, usados para achar sua posição na lista
+    // de autores. O currículo traz isso em "Nome em citações bibliográficas", que
+    // aparece em dois layouts: tabela (antigo) e divs (atual).
+    function lerApelidos(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        if (!d) return [];
+        const candidatos = [];
+
+        d.querySelectorAll('td.campos').forEach(td => {
+            if (td.innerText.includes('Nome em cita')) {
+                const proximo = td.nextElementSibling;
+                if (proximo && proximo.classList.contains('texto')) candidatos.push(proximo.innerText);
+            }
+        });
+
+        if (candidatos.length === 0) {
+            d.querySelectorAll('.layout-cell-pad-5').forEach(rotulo => {
+                if (!rotulo.innerText.includes('Nome em cita')) return;
+                const pai = rotulo.parentElement;
+                if (!pai || !pai.classList.contains('layout-cell-3')) return;
+                const proximo = pai.nextElementSibling;
+                if (proximo && (proximo.classList.contains('layout-cell-9') || proximo.classList.contains('layout-cell-8'))) {
+                    candidatos.push(proximo.innerText);
+                }
+            });
+        }
+
+        return candidatos.length > 0 ? _apelidosDoTexto(candidatos[0]) : [];
+    }
+
     raiz.JCRLattesParser = {
         AUTORES_GRANDE_COLABORACAO: AUTORES_GRANDE_COLABORACAO,
         lerPublicacao: lerPublicacao,
+        lerIdentificacao: lerIdentificacao,
+        lerApelidos: lerApelidos,
         lerOrientacoes: lerOrientacoes,
         lerPatentes: lerPatentes,
         lerEventos: lerEventos,
@@ -484,6 +598,8 @@
         _etapasDaPatente: _etapasDaPatente,
         _numeroDoRegistro: _numeroDoRegistro,
         _anoDoEvento: _anoDoEvento,
-        _tipoDeParticipacao: _tipoDeParticipacao
+        _tipoDeParticipacao: _tipoDeParticipacao,
+        _bolsaDoTexto: _bolsaDoTexto,
+        _apelidosDoTexto: _apelidosDoTexto
     };
 })(typeof window !== 'undefined' ? window : globalThis);
