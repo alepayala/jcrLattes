@@ -245,9 +245,229 @@
         return dados;
     }
 
+    // ------------------------------------------------------------------
+    // Orientações, patentes e trabalhos em eventos
+    // ------------------------------------------------------------------
+    // Cada seção é um <a name="..."> seguido de irmãos até a próxima âncora. Recebem o
+    // documento por parâmetro em vez de usar o global, para poderem ser apontadas a um
+    // currículo salvo.
+
+    // O ano da orientação é o ÚLTIMO do texto: o primeiro costuma ser o do início do
+    // vínculo, e o que interessa é a conclusão.
+    function _ultimoAno(texto) {
+        const anos = String(texto || '').match(/\b(?:19|20)\d{2}\b/g);
+        if (!anos || anos.length === 0) return NaN;
+        return parseInt(anos[anos.length - 1], 10);
+    }
+
+    // Área e instituição saem do trecho que vem DEPOIS do último ano, em três
+    // tentativas, da mais específica para a mais frouxa: "(Área) - Instituição",
+    // depois "natureza - Instituição", e por fim o texto que segue "ano. ".
+    function _areaEInstituicao(textoLimpo) {
+        const limpo = String(textoLimpo || '');
+        const fora = { area: '', institution: '' };
+
+        let trecho = limpo;
+        const anos = limpo.match(/\b(?:19|20)\d{2}\b/g);
+        if (anos && anos.length > 0) {
+            const ultimo = anos[anos.length - 1];
+            trecho = limpo.substring(limpo.lastIndexOf(ultimo) + 4);
+        }
+
+        const comArea = trecho.match(/\(([^)]+)\)\s*-\s*([^,.]+)/);
+        if (comArea) {
+            fora.area = comArea[1].trim();
+            fora.institution = comArea[2].trim();
+            return fora;
+        }
+
+        const porNatureza = limpo.match(/(?:natureza|natureza\.)\s*-\s*([^,.]+)/);
+        if (porNatureza) {
+            fora.institution = porNatureza[1].trim();
+            return fora;
+        }
+
+        let ultimoTrecho = null;
+        const re = /\b(?:19|20)\d{2}\.\s+([^,.]+)/g;
+        let m;
+        while ((m = re.exec(limpo)) !== null) ultimoTrecho = m[1];
+        if (ultimoTrecho) fora.institution = ultimoTrecho.trim();
+        return fora;
+    }
+
+    function _ehCoorientacao(texto) {
+        const t = String(texto || '');
+        return t.includes('Coorientador') || t.includes('Co-orientador');
+    }
+
+    function lerOrientacoes(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        const orientacoes = { inCourse: {}, concluded: {}, raw: [] };
+        if (!d) return orientacoes;
+
+        const PARAR = ['orientacoesconcluidas', 'producaobibliografica', 'producaotecnica',
+                       'outraproducao', 'dadoscomplementares'];
+
+        const secao = (nomeAncora, destino, comAno) => {
+            const ancora = Array.from(d.querySelectorAll('a[name]')).find(
+                a => a.getAttribute('name').toLowerCase() === nomeAncora.toLowerCase());
+            if (!ancora) return;
+
+            let irmao = ancora.nextElementSibling;
+            let categoria = '';
+
+            while (irmao) {
+                if (irmao.classList && irmao.classList.contains('cita-artigos')) {
+                    categoria = irmao.textContent.trim();
+                } else if (irmao.classList && irmao.classList.contains('layout-cell-11')) {
+                    if (categoria) {
+                        const texto = irmao.innerText;
+                        const limpo = texto.replace(/\s+/g, ' ').trim();
+                        const chave = _ehCoorientacao(texto) ? `${categoria} (Coorientador)` : categoria;
+
+                        if (!destino[chave]) destino[chave] = comAno ? [] : 0;
+
+                        let ano = NaN;
+                        if (comAno) {
+                            ano = _ultimoAno(texto);
+                            destino[chave].push(ano);
+                        } else {
+                            destino[chave]++;
+                        }
+
+                        const onde = _areaEInstituicao(limpo);
+                        orientacoes.raw.push({
+                            category: chave,
+                            status: comAno ? 'Concluída' : 'Em andamento',
+                            year: ano,
+                            area: onde.area,
+                            institution: onde.institution,
+                            reference: limpo
+                        });
+                    }
+                } else if (irmao.tagName === 'A' && irmao.hasAttribute('name')) {
+                    const nome = (irmao.getAttribute('name') || '').toLowerCase();
+                    if (nome && PARAR.indexOf(nome) !== -1) break;
+                } else if (irmao.querySelector && irmao.querySelector('div.title-wrapper')) {
+                    break;
+                }
+                irmao = irmao.nextElementSibling;
+            }
+        };
+
+        secao('Orientacaoemandamento', orientacoes.inCourse, false);
+        secao('Orientacoesconcluidas', orientacoes.concluded, true);
+        return orientacoes;
+    }
+
+    // Uma patente lista várias etapas no formato "Status: dd/mm/yyyy". A data de
+    // registro é descartada porque não é etapa de tramitação.
+    function _etapasDaPatente(texto) {
+        const etapas = [];
+        const re = /([A-Za-z\u00C0-\u00FF\s]+):\s*(\d{2}\/\d{2}\/\d{4})/g;
+        let m;
+        while ((m = re.exec(String(texto || ''))) !== null) {
+            const status = m[1].trim();
+            if (status.toLowerCase() === 'data de registro') continue;
+            const p = m[2].split('/');
+            etapas.push({
+                status: status,
+                date: new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10)),
+                year: parseInt(p[2], 10)
+            });
+        }
+        return etapas;
+    }
+
+    function _numeroDoRegistro(texto) {
+        const m = String(texto || '').match(/N[úu]mero do registro:\s*([^,]+)/i);
+        return m ? m[1].trim() : '';
+    }
+
+    function lerPatentes(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        const patentes = [];
+        if (!d) return patentes;
+
+        const ancora = d.querySelector('a[name="PatentesRegistros"]');
+        if (!ancora) return patentes;
+
+        let irmao = ancora.nextElementSibling;
+        while (irmao) {
+            if (irmao.classList && irmao.classList.contains('layout-cell-12') && irmao.classList.contains('data-cell')) {
+                irmao.querySelectorAll('.layout-cell-11').forEach(item => {
+                    const texto = item.innerText;
+                    const etapas = _etapasDaPatente(texto);
+                    if (etapas.length === 0) return;
+                    // a etapa mais recente define a situação atual
+                    etapas.sort((a, b) => b.date - a.date);
+                    patentes.push({
+                        currentStatus: etapas[0].status,
+                        year: etapas[0].year,
+                        allStages: etapas,
+                        registro: _numeroDoRegistro(texto),
+                        reference: texto.replace(/\s+/g, ' ').trim()
+                    });
+                });
+            }
+            irmao = irmao.nextElementSibling;
+        }
+        return patentes;
+    }
+
+    // Nos eventos o ano aparece antes do parêntese que abre o tipo do trabalho.
+    function _anoDoEvento(texto) {
+        const m = String(texto || '').match(/\b(19|20)\d{2}\b\.\s*\(/);
+        return m ? parseInt(m[0], 10) : NaN;
+    }
+
+    // "Tipo de participação: Apresentação Oral. Forma de participação..." — corta no
+    // que vem depois e limpa a pontuação final.
+    function _tipoDeParticipacao(texto) {
+        const m = String(texto || '').match(/Tipo de participação:\s*([^\n]+)/);
+        if (!m) return 'Desconhecido';
+        let t = m[1].replace(/<[^>]*>/g, '').trim();
+        t = t.split(/(?:forma de particip|homepage)/i)[0];
+        return t.replace(/[.;\s]+$/, '').trim();
+    }
+
+    function lerEventos(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        const eventos = [];
+        if (!d) return eventos;
+
+        const ancora = d.querySelector('a[name="Eventos"]');
+        if (!ancora) return eventos;
+
+        const PARAR = ['Producaobibliografica', 'Producaotecnica', 'Outraproducao', 'Dadoscomplementares'];
+        let irmao = ancora.nextElementSibling;
+        while (irmao) {
+            if (irmao.classList && irmao.classList.contains('layout-cell-12') && irmao.classList.contains('data-cell')) {
+                irmao.querySelectorAll('.layout-cell-11').forEach(item => {
+                    const texto = item.innerText;
+                    const ano = _anoDoEvento(texto);
+                    const tipo = _tipoDeParticipacao(texto);
+                    if (!isNaN(ano) && tipo !== 'Desconhecido') {
+                        eventos.push({ year: ano, type: tipo, reference: texto.replace(/\s+/g, ' ').trim() });
+                    }
+                });
+            }
+            if (irmao.tagName === 'A' && irmao.hasAttribute('name')) {
+                if (PARAR.indexOf(irmao.getAttribute('name')) !== -1) break;
+            } else if (irmao.querySelector && irmao.querySelector('div.title-wrapper')) {
+                break;
+            }
+            irmao = irmao.nextElementSibling;
+        }
+        return eventos;
+    }
+
     raiz.JCRLattesParser = {
         AUTORES_GRANDE_COLABORACAO: AUTORES_GRANDE_COLABORACAO,
         lerPublicacao: lerPublicacao,
+        lerOrientacoes: lerOrientacoes,
+        lerPatentes: lerPatentes,
+        lerEventos: lerEventos,
         faixaJcr: _faixaJcr,
         decodificarEntidades: decodificarEntidades,
         // expostas para teste
@@ -257,6 +477,13 @@
         _ordemDoAutor: _ordemDoAutor,
         _dadosDoCvuri: _dadosDoCvuri,
         _jcrDoTitulo: _jcrDoTitulo,
-        _faixaJcr: _faixaJcr
+        _faixaJcr: _faixaJcr,
+        _ultimoAno: _ultimoAno,
+        _areaEInstituicao: _areaEInstituicao,
+        _ehCoorientacao: _ehCoorientacao,
+        _etapasDaPatente: _etapasDaPatente,
+        _numeroDoRegistro: _numeroDoRegistro,
+        _anoDoEvento: _anoDoEvento,
+        _tipoDeParticipacao: _tipoDeParticipacao
     };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -171,3 +171,147 @@ describe('limite de grande colaboracao', () => {
         assert.strictEqual(L.AUTORES_GRANDE_COLABORACAO, 21);
     });
 });
+
+// --- Orientações -------------------------------------------------------------
+
+describe('_ultimoAno', () => {
+    // O primeiro ano do texto costuma ser o do inicio do vinculo; o que interessa na
+    // orientacao concluida e o ultimo.
+    test('pega o ultimo ano, nao o primeiro', () => {
+        assert.strictEqual(L._ultimoAno('Iniciou em 2018. Conclusao: 2022. Universidade X'), 2022);
+    });
+
+    test('um unico ano serve', () => {
+        assert.strictEqual(L._ultimoAno('Defesa em 2021.'), 2021);
+    });
+
+    test('sem ano devolve NaN', () => {
+        assert.ok(isNaN(L._ultimoAno('sem ano')));
+        assert.ok(isNaN(L._ultimoAno('')));
+        assert.ok(isNaN(L._ultimoAno(null)));
+    });
+});
+
+describe('_areaEInstituicao', () => {
+    test('formato "(Area) - Instituicao" e o caso direto', () => {
+        const r = L._areaEInstituicao('Tese de doutorado. 2022. (Física) - Universidade Federal do Ceará, CNPq');
+        assert.strictEqual(r.area, 'Física');
+        assert.strictEqual(r.institution, 'Universidade Federal do Ceará');
+    });
+
+    // So conta o que vem DEPOIS do ultimo ano: um parentese no titulo do trabalho
+    // nao pode ser confundido com a area.
+    test('parentese antes do ultimo ano nao vira area', () => {
+        const r = L._areaEInstituicao('Estudo de (alta pressao) em cristais. 2020. (Química) - UFC');
+        assert.strictEqual(r.area, 'Química');
+        assert.strictEqual(r.institution, 'UFC');
+    });
+
+    test('sem area, cai em "natureza - Instituicao"', () => {
+        const r = L._areaEInstituicao('Orientação de outra natureza - Universidade Estadual X, 2019');
+        assert.strictEqual(r.area, '');
+        assert.strictEqual(r.institution, 'Universidade Estadual X');
+    });
+
+    test('ultimo recurso: o texto logo apos "ano. "', () => {
+        const r = L._areaEInstituicao('Monografia. 2018. Instituto Federal do Piauí, bolsa');
+        assert.strictEqual(r.institution, 'Instituto Federal do Piauí');
+    });
+
+    test('texto sem nada reconhecivel devolve os dois vazios', () => {
+        assert.deepStrictEqual(L._areaEInstituicao('texto solto'), { area: '', institution: '' });
+        assert.deepStrictEqual(L._areaEInstituicao(''), { area: '', institution: '' });
+    });
+});
+
+describe('_ehCoorientacao', () => {
+    test('reconhece as duas grafias do Lattes', () => {
+        assert.strictEqual(L._ehCoorientacao('Coorientador: Fulano'), true);
+        assert.strictEqual(L._ehCoorientacao('Co-orientador: Fulano'), true);
+    });
+
+    test('orientacao comum nao e coorientacao', () => {
+        assert.strictEqual(L._ehCoorientacao('Orientador: Fulano'), false);
+        assert.strictEqual(L._ehCoorientacao(''), false);
+    });
+});
+
+// --- Patentes ----------------------------------------------------------------
+
+describe('_etapasDaPatente', () => {
+    test('le cada etapa no formato "Status: dd/mm/aaaa"', () => {
+        const r = L._etapasDaPatente('Depósito: 10/03/2019, Concessão: 25/11/2021');
+        assert.deepStrictEqual(r.map(e => e.status), ['Depósito', 'Concessão']);
+        assert.deepStrictEqual(r.map(e => e.year), [2019, 2021]);
+    });
+
+    // "Data de registro" e um dado do documento, nao uma etapa de tramitacao.
+    test('descarta a data de registro', () => {
+        const r = L._etapasDaPatente('Data de registro: 01/01/2020, Depósito: 10/03/2019');
+        assert.deepStrictEqual(r.map(e => e.status), ['Depósito']);
+    });
+
+    test('a data vira Date de verdade, para poder ordenar', () => {
+        const r = L._etapasDaPatente('Depósito: 10/03/2019');
+        assert.ok(r[0].date instanceof Date);
+        assert.strictEqual(r[0].date.getFullYear(), 2019);
+        assert.strictEqual(r[0].date.getMonth(), 2);    // marco = 2
+        assert.strictEqual(r[0].date.getDate(), 10);
+    });
+
+    test('texto sem etapa devolve lista vazia', () => {
+        assert.deepStrictEqual(L._etapasDaPatente('patente sem datas'), []);
+        assert.deepStrictEqual(L._etapasDaPatente(''), []);
+    });
+});
+
+describe('_numeroDoRegistro', () => {
+    test('le o numero, com ou sem acento no rotulo', () => {
+        assert.strictEqual(L._numeroDoRegistro('Número do registro: BR102019001, outro'), 'BR102019001');
+        assert.strictEqual(L._numeroDoRegistro('Numero do registro: BR999'), 'BR999');
+    });
+
+    test('sem registro devolve vazio', () => {
+        assert.strictEqual(L._numeroDoRegistro('patente qualquer'), '');
+        assert.strictEqual(L._numeroDoRegistro(''), '');
+    });
+});
+
+// --- Trabalhos em eventos ----------------------------------------------------
+// Nenhum dos curriculos salvos em test_pages tem eventos, entao a comparacao
+// antes/depois nao exercitou esta parte: e aqui que ela fica coberta.
+
+describe('_anoDoEvento', () => {
+    test('le o ano que antecede o parentese do tipo de trabalho', () => {
+        assert.strictEqual(L._anoDoEvento('XX Encontro de Física. 2019. (Congresso)'), 2019);
+    });
+
+    test('ano solto, sem o parentese, nao conta', () => {
+        assert.ok(isNaN(L._anoDoEvento('Trabalho de 2019 apresentado')));
+        assert.ok(isNaN(L._anoDoEvento('')));
+    });
+});
+
+describe('_tipoDeParticipacao', () => {
+    test('le o tipo e remove a pontuacao final', () => {
+        assert.strictEqual(L._tipoDeParticipacao('Tipo de participação: Apresentação Oral.'), 'Apresentação Oral');
+    });
+
+    test('corta no que vem depois do tipo', () => {
+        assert.strictEqual(
+            L._tipoDeParticipacao('Tipo de participação: Painel. Forma de participação: presencial'),
+            'Painel');
+        assert.strictEqual(
+            L._tipoDeParticipacao('Tipo de participação: Conferência Homepage: http://x'),
+            'Conferência');
+    });
+
+    test('remove marcacao HTML que sobre no texto', () => {
+        assert.strictEqual(L._tipoDeParticipacao('Tipo de participação: <b>Simpósio</b>.'), 'Simpósio');
+    });
+
+    test('sem o rotulo, devolve Desconhecido — e o evento e descartado', () => {
+        assert.strictEqual(L._tipoDeParticipacao('evento sem tipo'), 'Desconhecido');
+        assert.strictEqual(L._tipoDeParticipacao(''), 'Desconhecido');
+    });
+});
