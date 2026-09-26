@@ -659,3 +659,78 @@ describe('_quadroDaEquipe', () => {
         assert.deepStrictEqual(B._quadroDaEquipe(null, null, null).colunas, []);
     });
 });
+
+// Este filtro define TODOS os numeros do relatorio: um erro aqui nao da erro, da
+// um relatorio com o total errado. Saiu de dentro de renderCVReport.
+describe('_filtrarPublicacoes', () => {
+    const tudoLigado = {
+        highJcr: 7, lowJcr: 1.5,
+        showHighJcr: true, showMidJcr: true, showLowJcr: true, showNoJcr: true,
+        showAuthorFirst: true, showAuthorLast: true, showAuthorOthers: true, showAuthorGc: true,
+        targetAuthorRank: 1,
+    };
+    const est = (extra) => Object.assign({}, tudoLigado, extra || {});
+    // publicacao do banco (jif) com 3 autores
+    const pub = (jif, rank, extra) => Object.assign({ jif, authorRank: rank, authorCount: 3, hasEtAl: false }, extra || {});
+
+    test('com todos os filtros ligados, nada e descartado', () => {
+        const lista = [pub(9, 1), pub(3, 2), pub(0.5, 3), pub(0, 2)];
+        assert.strictEqual(B._filtrarPublicacoes(lista, est()).length, 4);
+    });
+
+    test('cada faixa de JCR pode ser desligada sozinha', () => {
+        const lista = [pub(9, 2), pub(3, 2), pub(0.5, 2), pub(0, 2)];
+        assert.strictEqual(B._filtrarPublicacoes(lista, est({ showHighJcr: false })).length, 3);
+        assert.strictEqual(B._filtrarPublicacoes(lista, est({ showMidJcr: false })).length, 3);
+        assert.strictEqual(B._filtrarPublicacoes(lista, est({ showLowJcr: false })).length, 3);
+        assert.strictEqual(B._filtrarPublicacoes(lista, est({ showNoJcr: false })).length, 3);
+    });
+
+    test('primeiro autor sai pela marca do leitor quando ela existe', () => {
+        const lista = [pub(3, 2, { isFirstAuthor: true }), pub(3, 1, { isFirstAuthor: false })];
+        const r = B._filtrarPublicacoes(lista, est({ showAuthorFirst: false }));
+        // fica so a que a marca diz NAO ser primeiro autor, mesmo com rank 1
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].authorRank, 1);
+    });
+
+    // Com rank alvo diferente de 1, a posicao e comparada direto: e assim que o
+    // relatorio mostra "artigos em que fulano e o 2o autor".
+    test('rank alvo diferente de 1 compara a posicao, ignorando a marca', () => {
+        const lista = [pub(3, 2, { isFirstAuthor: false }), pub(3, 3)];
+        const r = B._filtrarPublicacoes(lista, est({ targetAuthorRank: 2, showAuthorFirst: false }));
+        assert.deepStrictEqual(r.map(p => p.authorRank), [3]);
+    });
+
+    test('ultimo autor exige mais de um autor', () => {
+        const solo = { jif: 3, authorRank: 1, authorCount: 1, hasEtAl: false };
+        // com um autor so nao e "ultimo": some pelo filtro de primeiro, nao pelo de ultimo
+        assert.strictEqual(B._filtrarPublicacoes([solo], est({ showAuthorLast: false })).length, 1);
+    });
+
+    // Em grande colaboracao o "et al" esconde quem fecha a lista, entao ninguem
+    // conta como ultimo autor.
+    test('grande colaboracao nao conta como ultimo autor', () => {
+        const gc = { jif: 9, authorRank: 3, authorCount: 3, hasEtAl: true };
+        assert.strictEqual(B._filtrarPublicacoes([gc], est({ showAuthorLast: false })).length, 1);
+        assert.strictEqual(B._filtrarPublicacoes([gc], est({ showAuthorGc: false })).length, 0);
+    });
+
+    test('"outros" e o complemento: nem primeiro, nem ultimo, nem GC', () => {
+        const meio = pub(3, 2);                      // 2o de 3 autores
+        assert.strictEqual(B._filtrarPublicacoes([meio], est({ showAuthorOthers: false })).length, 0);
+        assert.strictEqual(B._filtrarPublicacoes([meio], est()).length, 1);
+    });
+
+    test('le tambem o formato em memoria (impactFactor) quando nao ha jif', () => {
+        const emMemoria = { impactFactor: '9.0', authorRank: 1, authorCount: 2, hasEtAl: false };
+        assert.strictEqual(B._filtrarPublicacoes([emMemoria], est({ showHighJcr: false })).length, 0);
+        assert.strictEqual(B._filtrarPublicacoes([emMemoria], est()).length, 1);
+    });
+
+    test('entrada invalida nao quebra', () => {
+        assert.deepStrictEqual(B._filtrarPublicacoes(null, est()), []);
+        assert.deepStrictEqual(B._filtrarPublicacoes([], est()), []);
+        assert.deepStrictEqual(B._filtrarPublicacoes([null], est()), []);
+    });
+});

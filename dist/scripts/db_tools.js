@@ -186,6 +186,57 @@ window.JCRDBTools = {
         return true;
     },
 
+    // Aplica os filtros de "Limiares e Filtros" do relatorio a uma lista de
+    // publicacoes. So decide quem entra — nao desenha nada. Estava dentro de
+    // renderCVReport e e o que define TODOS os numeros que aparecem depois: um erro
+    // aqui nao da erro, da um relatorio com o total errado.
+    //
+    // estado espera: highJcr, lowJcr, showHighJcr, showMidJcr, showLowJcr, showNoJcr,
+    // showAuthorFirst, showAuthorLast, showAuthorOthers, showAuthorGc e
+    // targetAuthorRank.
+    _filtrarPublicacoes: function (publications, estado) {
+        const lista = Array.isArray(publications) ? publications : [];
+        const st = estado || {};
+        const rankAlvo = parseInt(st.targetAuthorRank, 10) || 1;
+
+        return lista.filter(pub => {
+            if (!pub) return false;
+
+            // jif PRIMEIRO, ao contrario de JCRReportUtils.valorJcr: aqui as publicacoes
+            // vem do banco, onde extractData grava o fator como jif. impactFactor so
+            // aparece em registro salvo por versao antiga, e serve de reserva.
+            const bruto = pub.jif !== undefined ? pub.jif : (pub.impactFactor !== undefined ? pub.impactFactor : 0);
+            const ifVal = parseFloat(bruto) || 0;
+
+            const faixa = window.JCRReportUtils.faixaDeJcr(ifVal, st.highJcr, st.lowJcr);
+            if (faixa === 'high' && !st.showHighJcr) return false;
+            if (faixa === 'mid' && !st.showMidJcr) return false;
+            if (faixa === 'low' && !st.showLowJcr) return false;
+            if (faixa === 'noJcr' && !st.showNoJcr) return false;
+
+            // Com rank alvo 1 vale a marca isFirstAuthor que o leitor ja calculou;
+            // para os demais a posicao e comparada direto.
+            const ehPrimeiro = rankAlvo === 1
+                ? (pub.isFirstAuthor !== undefined ? pub.isFirstAuthor : pub.authorRank === 1)
+                : pub.authorRank === rankAlvo;
+            // Ultimo autor exige mais de um autor e NAO vale em grande colaboracao,
+            // onde o "et al" esconde quem fecha a lista.
+            const ehUltimo = pub.isLastAuthor !== undefined
+                ? pub.isLastAuthor
+                : (pub.authorRank === pub.authorCount && !pub.hasEtAl && pub.authorCount > 1);
+            const ehGc = !!pub.hasEtAl;
+            // "Outros" e o complemento: quem nao e primeiro, nem ultimo, nem GC.
+            const ehOutro = !ehPrimeiro && !ehUltimo && !ehGc;
+
+            if (ehPrimeiro && !st.showAuthorFirst) return false;
+            if (ehUltimo && !st.showAuthorLast) return false;
+            if (ehOutro && !st.showAuthorOthers) return false;
+            if (ehGc && !st.showAuthorGc) return false;
+
+            return true;
+        });
+    },
+
     // Quadro Geral da equipe: colunas por categoria e distribuicao por instituicao.
     // So calcula — quem desenha e renderCVReport. Estava dentro dele, misturado ao
     // HTML, e e a conta que ja produziu dois erros silenciosos: o coordenador de fora
@@ -3887,38 +3938,7 @@ window.JCRDBTools = {
         const startYearLast10 = currentYear - 10;
         const startYearCustom = currentYear - state.customYears;
 
-        // Filter publications based on UI state
-        const filteredPublications = publications.filter(pub => {
-            // jif PRIMEIRO, ao contrario de JCRReportUtils.valorJcr: aqui as publicacoes
-            // vem do banco, onde extractData grava o fator como jif. impactFactor so
-            // aparece em registro salvo por versao antiga, e serve de reserva.
-            let ifVal = pub.jif !== undefined ? pub.jif : (pub.impactFactor !== undefined ? pub.impactFactor : 0);
-            ifVal = parseFloat(ifVal) || 0;
-            
-            const category = window.JCRReportUtils.faixaDeJcr(ifVal, state.highJcr, state.lowJcr);
-            
-            if (category === 'high' && !state.showHighJcr) return false;
-            if (category === 'mid' && !state.showMidJcr) return false;
-            if (category === 'low' && !state.showLowJcr) return false;
-            if (category === 'noJcr' && !state.showNoJcr) return false;
-            
-            let isFirst = false;
-            if (targetRank === 1) {
-                isFirst = pub.isFirstAuthor !== undefined ? pub.isFirstAuthor : pub.authorRank === 1;
-            } else {
-                isFirst = pub.authorRank === targetRank;
-            }
-            let isLast = pub.isLastAuthor !== undefined ? pub.isLastAuthor : (pub.authorRank === pub.authorCount && !pub.hasEtAl && pub.authorCount > 1);
-            let isGc = pub.hasEtAl;
-            let isOther = !isFirst && !isLast && !isGc;
-            
-            if (isFirst && !state.showAuthorFirst) return false;
-            if (isLast && !state.showAuthorLast) return false;
-            if (isOther && !state.showAuthorOthers) return false;
-            if (isGc && !state.showAuthorGc) return false;
-            
-            return true;
-        });
+        const filteredPublications = this._filtrarPublicacoes(publications, state);
 
         // Recalculate stats for the report
         const stats = window.JCRReportUtils.calculateReportStats(

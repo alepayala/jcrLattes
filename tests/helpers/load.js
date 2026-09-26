@@ -19,7 +19,9 @@ function carregar(arquivo) {
 module.exports = {
     producoes: () => carregar('producoes_parser.js').JCRProducoes,
     relatorio: () => carregar('report_utils.js').JCRReportUtils,
-    banco: () => carregar('db_tools.js').JCRDBTools,
+    // db_tools depende de report_utils em tempo de execucao (faixaDeJcr, valorJcr,
+    // calculateReportStats). No manifest ele vem antes; aqui tambem.
+    banco: () => { carregar('report_utils.js'); return carregar('db_tools.js').JCRDBTools; },
     lattes: () => carregar('lattes_parser.js').JCRLattesParser,
     picc: () => carregar('picc_parser.js').JCRPiccParser
 };
