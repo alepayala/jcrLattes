@@ -19,5 +19,6 @@ function carregar(arquivo) {
 module.exports = {
     producoes: () => carregar('producoes_parser.js').JCRProducoes,
     relatorio: () => carregar('report_utils.js').JCRReportUtils,
-    banco: () => carregar('db_tools.js').JCRDBTools
+    banco: () => carregar('db_tools.js').JCRDBTools,
+    lattes: () => carregar('lattes_parser.js').JCRLattesParser
 };

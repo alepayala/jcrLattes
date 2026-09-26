@@ -45,6 +45,7 @@
       "js": [
         "scripts/report_utils.js",
         "scripts/db_tools.js",
+        "scripts/lattes_parser.js",
         "scripts/content.js"
       ]
     },

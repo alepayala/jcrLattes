@@ -546,41 +546,14 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
     // Reset visibility to match default checked state of toggles
     pubElem.style.display = '';
 
-    const pubInfo = {
-      year: NaN,
-      issn: '',
-      journalName: '',
-      paperTitle: '',
-      impactFactor: null,
-      jcrYear: null,
-      wosCitations: 0,
-      scopusCitations: 0,
-      hasEtAl: false,
-      isFirstAuthor: false,
-      isLastAuthor: false,
-      authorCount: 0,
-      authorCountStr: '',
-      authorRank: -1,
-      doi: '',
-      reference: ''
-    };
-
-    // Store the clean text before any annotations are injected
-    pubInfo.reference = pubElem.innerText.replace(/\s+/g, ' ').trim();
-
-    // get year of publication
-    const yearElem = pubElem.querySelector(
-      "span[class='informacao-artigo'][data-tipo-ordenacao='ano']"
-    );
-
-    if (yearElem) {
-      pubInfo.year = parseInt(yearElem.textContent);
-    } else {
-      // Try to find year in the text content if specific span is missing
-      const yearMatch = pubElem.innerText.match(/\b(19|20)\d{2}\b/);
-      if (yearMatch) {
-        pubInfo.year = parseInt(yearMatch[0]);
-      }
+    // A LEITURA mora em lattes_parser.js; aqui fica só o que desenha a página.
+    // Quando o Lattes mudar de formato, e a mudanca esta anunciada, o ajuste e la.
+    const pubInfo = window.JCRLattesParser
+      ? window.JCRLattesParser.lerPublicacao(pubElem, { apelidos: authorNames })
+      : null;
+    if (!pubInfo) {
+      console.warn('[JCRLattes] Leitor de publicações indisponível (lattes_parser.js).');
+      continue;
     }
 
     // Insert year separator if year changed and extra info is not hidden
@@ -591,222 +564,37 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
       }
     }
 
-    // Check for et al or COLLABORATION in authors
-    // VERY IMPORTANT: do not look for variations of "et.al". It must be a strict search.
-    // COLLABORATION is checked case-insensitively as requested.
-    if (pubElem.innerText.includes('et.al') || pubElem.innerText.toUpperCase().includes('COLLABORATION')) {
-      pubInfo.hasEtAl = true;
-    }
-
-    // Pre-extract paper title and journal name from cvuri for reliable author-boundary detection
-    const pubElemLastItem = pubElem.querySelector('[cvuri]');
-    let titleFromCvuri = '';
-    if (pubElemLastItem) {
-      const cvuriStr = decodeHtmlEntities(pubElemLastItem.getAttribute('cvuri'));
-      const tituloMatch = cvuriStr.match(/[?&]titulo=([^&]+)/);
-      if (tituloMatch) titleFromCvuri = tituloMatch[1].trim();
-      const periMatch = cvuriStr.match(/[?&]nomePeriodico=([^&]+)/);
-      if (periMatch) pubInfo.journalName = periMatch[1].trim();
-    }
-    pubInfo.paperTitle = titleFromCvuri;
-
-    // Calculate author count: truncate at paper title to exclude title/journal text from the split
-    const rawText = pubElem.innerText.replace(/\s+/g, ' ').trim();
-    let authorText = rawText;
-    if (titleFromCvuri) {
-      const titleIdx = rawText.indexOf(titleFromCvuri);
-      if (titleIdx !== -1) {
-        authorText = rawText.substring(0, titleIdx).replace(/\s*\.\s*$/, '').trim();
-      }
-    }
-
-    const parts = authorText.split(';');
-    const pubAuthors = [];
-    let authorCount = 0;
-
-    for (const part of parts) {
-      let p = part.replace(/^\d+\s*\.\s*/, '').trim();
-      if (!p) continue;
-      if (p.startsWith('et.al') || p.toUpperCase().includes('COLLABORATION')) continue;
-      if (p.includes(',')) {
-        authorCount++;
-        pubAuthors.push(p);
-      }
-    }
-
-    // Determine Main Author Rank
-    let mainAuthorRank = -1;
-    let highlightedAuthorCandidate = null;
-
-    // 1. Try to find the bolded author in the content cell
-    const contentCell = pubElem.querySelector('.layout-cell-11');
-    if (contentCell) {
-      const boldTags = contentCell.querySelectorAll('b');
-      for (const b of boldTags) {
-        const text = b.innerText.trim();
-        // Filter out known non-author bold tags
-        // Ignroe "53." (numbering), "Citações:", "Fator de Impacto", numeric values
-        if (/^\d+\.$/.test(text)) continue;
-        if (text.includes('Citações') || text.includes('Fator de Impacto')) continue;
-        if (/^[\d\.]+$/.test(text)) continue;
-
-        // Assume this is the author
-        highlightedAuthorCandidate = text.replace(/;$/, '').trim();
-        break;
-      }
-    }
-
-    // 2. Priority check: Match against highlighted author
-    if (highlightedAuthorCandidate) {
-      for (let i = 0; i < pubAuthors.length; i++) {
-        // Use loose check (includes) to handle slight differences
-        if (pubAuthors[i].toUpperCase().includes(highlightedAuthorCandidate.toUpperCase())) {
-          mainAuthorRank = i + 1;
-          break;
-        }
-      }
-    }
-
-    // 3. Fallback: Use provided authorNames list
-    if (mainAuthorRank === -1 && authorNames && authorNames.length > 0) {
-      for (let i = 0; i < pubAuthors.length; i++) {
-        const authorStr = pubAuthors[i];
-        const match = authorNames.some(alias => authorStr.toUpperCase().includes(alias.toUpperCase()));
-        if (match) {
-          mainAuthorRank = i + 1;
-          break;
-        }
-      }
-    }
-
-    // Apply Author Logic
-    pubInfo.authorRank = mainAuthorRank;
-    
-    // 1o (First): Includes First Author papers (even if et al).
-    if (mainAuthorRank === 1) {
-      pubInfo.isFirstAuthor = true;
-    }
-
-    // If hasEtAl is true (due to "et.al" or "COLLABORATION"), author count is at least 21.
-    pubInfo.authorCount = pubInfo.hasEtAl ? Math.max(authorCount, 21) : authorCount;
+    // authorCountStr e apresentacao, nao dado: leva HTML dentro. Fica aqui, fora do
+    // leitor, ate a proxima etapa decidir o que fazer com ele (hoje vai parar no banco).
     pubInfo.authorCountStr = `${pubInfo.authorCount} autor${pubInfo.authorCount !== 1 ? 'es' : ''}`;
     if (pubInfo.hasEtAl) {
       pubInfo.authorCountStr += ' + et al.';
     }
-
-    if (mainAuthorRank !== -1) {
-      // Últ (Last): Includes Last Author papers (strictly NO "et.al").
-      if (mainAuthorRank === authorCount && !pubInfo.hasEtAl && authorCount > 1) {
-        pubInfo.isLastAuthor = true;
-      }
-
-      const isFirst = pubInfo.isFirstAuthor;
-      const isLast = pubInfo.isLastAuthor;
-
-      let rankLabel = `, ordem: ${mainAuthorRank}`;
-      if (isFirst) {
+    if (pubInfo.authorRank !== -1) {
+      let rankLabel = `, ordem: ${pubInfo.authorRank}`;
+      if (pubInfo.isFirstAuthor) {
         rankLabel = `, <span style="color: ${COLORS.midJcr}; font-weight: bold;">Primeiro</span>`;
-      } else if (isLast) {
+      } else if (pubInfo.isLastAuthor) {
         rankLabel = `, <span style="color: ${COLORS.highJcr}; font-weight: bold;">Último</span>`;
       }
       pubInfo.authorCountStr += rankLabel;
     }
 
-    // Extract citations using DOM traversal
-    const isiImg = pubElem.querySelector('img[src*="isi.gif"]');
-    if (isiImg) {
-      const countSpan = isiImg.nextElementSibling;
-      if (countSpan && countSpan.classList.contains('numero-citacao')) {
-        pubInfo.wosCitations = parseInt(countSpan.textContent);
-      }
-    }
-
-    const scopusImg = pubElem.querySelector('img[src*="scopus.png"]');
-    if (scopusImg) {
-      const countSpan = scopusImg.nextElementSibling;
-      if (countSpan && countSpan.classList.contains('numero-citacao')) {
-        pubInfo.scopusCitations = parseInt(countSpan.textContent);
-      }
-    }
-
     if (isNaN(pubInfo.year)) continue;
 
-    const jcrElem = pubElem.querySelector(".ajaxJCR");
-    if (jcrElem) {
-      const jcrTitle = jcrElem.getAttribute('original-title') || '';
-      if (jcrTitle) {
-        // Fallback journal name from original-title when cvuri nomePeriodico is absent.
-        // Format: "Journal Name (ISSN)<br />Fator de impacto..." or "Journal Name - Fator de Impacto..."
-        if (!pubInfo.journalName) {
-          const journalPart = jcrTitle.split(/<br/i)[0]
-            .split(/ - Fator de [Ii]mpacto/)[0]
-            .replace(/\s*\([0-9X\-]{4,}\)\s*$/, '')
-            .trim();
-          if (journalPart) pubInfo.journalName = journalPart;
-        }
-
-        const match = jcrTitle.match(/Fator de impacto \(JCR (\d{4})\): ([\d\.]+)/);
-        if (match && match[2]) {
-          pubInfo.jcrYear = match[1];
-          pubInfo.impactFactor = match[2];
-        }
-      }
-    }
-
-    let jcrLevel = 'none';
-    if (pubInfo.impactFactor) {
-      const ifVal = parseFloat(pubInfo.impactFactor);
-      if (ifVal > 0) {
-        if (ifVal >= highJcr) jcrLevel = 'high';
-        else if (ifVal >= lowJcr) jcrLevel = 'mid';
-        else jcrLevel = 'low';
-      }
-    }
-    pubElem.setAttribute('data-jcr-level', jcrLevel);
-
-    if (!isNaN(pubInfo.year)) {
-      pubElem.setAttribute('data-year', pubInfo.year);
-    }
+    pubElem.setAttribute('data-jcr-level', window.JCRLattesParser.faixaJcr(pubInfo.impactFactor, highJcr, lowJcr));
+    pubElem.setAttribute('data-year', pubInfo.year);
     pubElem.setAttribute('data-is-first', pubInfo.isFirstAuthor);
     pubElem.setAttribute('data-is-last', pubInfo.isLastAuthor);
     pubElem.setAttribute('data-is-gc', pubInfo.hasEtAl);
     pubElem.setAttribute('data-author-rank', pubInfo.authorRank);
 
+    const pubElemLastItem = pubElem.querySelector('[cvuri]');
     if (pubElemLastItem) {
-      const pubInfoString = decodeHtmlEntities(pubElemLastItem.getAttribute('cvuri'));
-      const pubInfoItems = pubInfoString.split(/\?(?!&)|&(?=\w+)/);
-
-      for (const pubInfoItem of pubInfoItems) {
-        if (pubInfoItem.includes('issn=')) {
-          const issnStr = pubInfoItem.split('issn=')[1];
-          if (issnStr && issnStr.length >= 8)
-            pubInfo.issn = issnStr.substring(0, 4) + '-' + issnStr.substring(4, 8);
-        }
-        if (pubInfoItem.includes('doi=')) {
-          pubInfo.doi = pubInfoItem.split('doi=')[1];
-        }
-      }
-
-      // Fallback to extract doi from icone-doi if missing
-      if (!pubInfo.doi) {
-        const doiElem = pubElem.querySelector('a.icone-doi');
-        if (doiElem && doiElem.href) {
-          const urlMatch = doiElem.href.match(/doi\.org\/(.+)$/);
-          if (urlMatch) {
-            pubInfo.doi = urlMatch[1];
-          }
-        }
-      }
-
-      const journalInfo = {
-        impactFactor: pubInfo.impactFactor,
-        jcrYear: pubInfo.jcrYear
-      };
-
       injectJournalAnnotation(
         pubElemLastItem,
         pubInfo.issn,
-        journalInfo,
+        { impactFactor: pubInfo.impactFactor, jcrYear: pubInfo.jcrYear },
         highJcr,
         lowJcr,
         pubInfo.authorCountStr
