@@ -452,9 +452,9 @@ window.JCRDBTools = {
     // natureza; o titulo da pagina e o que separa as duas. Paginas que nao sao parecer
     // nao tem os blocos e voltam vazias.
     //
-    // Mora aqui, e nao em picc_content.js, porque tem dois chamadores: a importacao
-    // pela planilha e o proprio relatorio da proposta, que roda em db.html — onde
-    // picc_content.js nao e carregado.
+    // Usada pela importacao das propostas (picc_content.js). O relatorio nao le mais
+    // parecer salvo: o resultado vem da importacao, e parecer sem resultado pede
+    // reprocessamento da proposta.
     _lerAvaliacaoParecer: function (htmlText) {
         const vazio = { resultado: '', justificativa: '' };
         if (!htmlText || typeof DOMParser === 'undefined') return vazio;
@@ -5217,53 +5217,6 @@ window.JCRDBTools = {
             });
         });
 
-        // Pareceres importados antes desta leitura existir ficam sem resultado. Em vez
-        // de obrigar a reimportar a carteira inteira, completa na abertura do relatorio
-        // a partir do que ja esta a mao: a copia guardada no banco ou o arquivo na pasta
-        // piccData. A leitura da pasta NAO pede permissao — apenas aproveita a que ja
-        // foi concedida —, porque isso roda sozinho, sem clique do usuario.
-        const completarPareceresSalvos = async () => {
-            const lista = (parentGroupData && Array.isArray(parentGroupData.reviews)) ? parentGroupData.reviews : [];
-            const pendente = (r) => r && typeof r === 'object' && !r.resultado && !r.avaliacaoLida;
-            if (!lista.some(pendente)) return;
-
-            await hydrateProcBlobs();
-
-            let ganhouDados = false, mudouAlgo = false;
-            for (let i = 0; i < lista.length; i++) {
-                const rev = lista[i];
-                if (!pendente(rev)) continue;
-
-                let html = rev.html || rev.htmlContent || '';
-                if (!html) {
-                    try {
-                        const arq = await this.lerArquivoDaProposta(parentGroupData, `parecer_${i + 1}.html`, false);
-                        if (arq) html = await arq.text();
-                    } catch (e) { /* sem pasta ou sem permissao: fica para a reimportacao */ }
-                }
-                if (!html) continue;
-
-                const av = this._lerAvaliacaoParecer(html);
-                rev.avaliacaoLida = true;   // ja tentamos: nao reler o arquivo a cada abertura
-                mudouAlgo = true;
-                if (av.resultado || av.justificativa) {
-                    rev.resultado = av.resultado;
-                    rev.justificativa = av.justificativa;
-                    ganhouDados = true;
-                }
-            }
-
-            if (!mudouAlgo) return;
-            try {
-                await this.saveCVs([parentGroupData]);
-            } catch (e) {
-                console.warn('[dbTools] Falha ao guardar a avaliação dos pareceres:', e);
-            }
-            // remonta so quando ha o que mostrar; na volta nenhum parecer fica pendente,
-            // entao nao ha como isto se repetir
-            if (ganhouDados) this.renderProcessReport(parentGroupData, newTab, sortedDb);
-        };
-        completarPareceresSalvos();
 
 
 
