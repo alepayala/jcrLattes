@@ -3892,12 +3892,7 @@ window.JCRDBTools = {
             let ifVal = pub.jif !== undefined ? pub.jif : (pub.impactFactor !== undefined ? pub.impactFactor : 0);
             ifVal = parseFloat(ifVal) || 0;
             
-            let category = 'noJcr';
-            if (ifVal > 0) {
-                if (ifVal >= state.highJcr) category = 'high';
-                else if (ifVal >= state.lowJcr) category = 'mid';
-                else category = 'low';
-            }
+            const category = window.JCRReportUtils.faixaDeJcr(ifVal, state.highJcr, state.lowJcr);
             
             if (category === 'high' && !state.showHighJcr) return false;
             if (category === 'mid' && !state.showMidJcr) return false;

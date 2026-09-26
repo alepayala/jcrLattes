@@ -118,3 +118,43 @@ describe('calculateReportStats', () => {
         assert.strictEqual(vazio.all.noJcr, 0);
     });
 });
+
+// A faixa de JCR estava repetida em cinco lugares (tres em report_utils, uma em
+// db_tools e uma em content.js). Um limiar interpretado de forma diferente em
+// qualquer uma faria os mesmos artigos cairem em faixas distintas conforme a tela.
+describe('faixaDeJcr', () => {
+    const faixa = (v) => R.faixaDeJcr(v, 7.0, 1.5);
+
+    test('os limiares sao inclusivos', () => {
+        assert.strictEqual(faixa(7.0), 'high');
+        assert.strictEqual(faixa(1.5), 'mid');
+    });
+
+    test('logo abaixo do limiar cai na faixa de baixo', () => {
+        assert.strictEqual(faixa(6.999), 'mid');
+        assert.strictEqual(faixa(1.4999), 'low');
+    });
+
+    test('aceita o valor como texto, que e como vem do PDF e do CV', () => {
+        assert.strictEqual(faixa('12.5'), 'high');
+        assert.strictEqual(faixa('3'), 'mid');
+        assert.strictEqual(faixa('0.8'), 'low');
+    });
+
+    // "Sem JCR" nao e o mesmo que "JCR baixo": o artigo existe, so nao tem fator
+    // de impacto conhecido, e e contado numa coluna propria.
+    test('ausente, vazio, zero e negativo sao noJcr, nao low', () => {
+        [null, undefined, '', 0, '0', -2].forEach(v => {
+            assert.strictEqual(faixa(v), 'noJcr', JSON.stringify(v));
+        });
+    });
+
+    test('texto nao numerico tambem e noJcr', () => {
+        assert.strictEqual(faixa('abc'), 'noJcr');
+    });
+
+    test('respeita limiares diferentes dos padroes', () => {
+        assert.strictEqual(R.faixaDeJcr(6, 10, 5), 'mid');
+        assert.strictEqual(R.faixaDeJcr(6, 1, 0.1), 'high');
+    });
+});

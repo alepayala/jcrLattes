@@ -120,6 +120,11 @@
     }
 
     // Faixa de JCR do artigo. Recebe os limiares porque eles são configuráveis.
+    //
+    // Mesma conta de JCRReportUtils.faixaDeJcr, com um vocabulário diferente: aqui o
+    // valor vai para o atributo data-jcr-level do DOM da página do Lattes, onde o CSS
+    // e os filtros já esperam 'none'; lá o vocabulário é o das estatísticas ('noJcr').
+    // Se a regra de limiar mudar, tem de mudar nos dois.
     function _faixaJcr(impactFactor, alto, baixo) {
         const v = parseFloat(impactFactor);
         if (!impactFactor || isNaN(v) || v <= 0) return 'none';

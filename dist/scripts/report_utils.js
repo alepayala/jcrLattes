@@ -36,6 +36,27 @@ window.JCRReportUtils = {
 
   JOURNAL_STRIP_SUFFIXES: ['(print)', '(online)','(Cambridge. Online)','(Impresso)','(Internet)','(Philadelphia, PA)','(New York)','(São Paulo. Impresso)','(London. 1996. Print)'],
 
+  // Faixa de JCR de um valor de fator de impacto. Uma implementacao so: a regra
+  // estava repetida em cinco lugares (tres aqui, uma em db_tools e uma em
+  // content.js) e um limiar interpretado de forma diferente em qualquer uma delas
+  // faria os mesmos artigos cairem em faixas distintas conforme a tela.
+  //
+  // Os limiares sao INCLUSIVOS: um artigo com JCR exatamente igual ao limiar alto
+  // conta como alto. Valor ausente, zero, negativo ou nao numerico e 'noJcr' — o
+  // artigo existe, so nao tem fator de impacto conhecido.
+  //
+  // O vocabulario aqui e o das estatisticas ('noJcr'). lattes_parser.faixaJcr usa
+  // 'none' na mesma conta porque aquele valor vai para o atributo data-jcr-level do
+  // DOM da pagina do Lattes, onde o CSS ja espera esse nome.
+  faixaDeJcr: function (valor, alto, baixo) {
+    if (valor === null || valor === undefined || valor === '' || valor === 0) return 'noJcr';
+    const v = parseFloat(valor);
+    if (isNaN(v) || v <= 0) return 'noJcr';
+    if (v >= alto) return 'high';
+    if (v >= baixo) return 'mid';
+    return 'low';
+  },
+
   formatNum: function(num) {
     return num.toFixed(2);
   },
@@ -114,20 +135,9 @@ window.JCRReportUtils = {
             isLastAuthor = (pub.authorRank === pub.authorCount && !pub.hasEtAl && pub.authorCount > 1);
         }
         
-        let category = 'noJcr';
-        let ifVal = 0;
-
-        if (impactFactorStr !== null && impactFactorStr !== undefined && impactFactorStr !== 0 && impactFactorStr !== '') {
-          ifVal = parseFloat(impactFactorStr);
-          if (ifVal > 0) {
-            if (ifVal >= highJcr) category = 'high';
-            else if (ifVal >= lowJcr) category = 'mid';
-            else category = 'low';
-          } else {
-            ifVal = 0;
-            category = 'noJcr';
-          }
-        }
+        // ifVal so e usado para somar impacto, entao vale 0 sempre que a faixa e noJcr
+        const category = this.faixaDeJcr(impactFactorStr, highJcr, lowJcr);
+        const ifVal = category === 'noJcr' ? 0 : parseFloat(impactFactorStr);
 
         const updateStats = (periodStats) => {
           if (category === 'noJcr') {
@@ -440,14 +450,7 @@ window.JCRReportUtils = {
       let category = 'none';
       const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
       
-      if (impactFactorStr !== null && impactFactorStr !== undefined && impactFactorStr !== '' && impactFactorStr !== 0) {
-        const ifVal = parseFloat(impactFactorStr);
-        if (ifVal > 0) {
-          if (ifVal >= highVal) category = 'high';
-          else if (ifVal >= lowVal) category = 'mid';
-          else category = 'low';
-        }
-      }
+      category = this.faixaDeJcr(impactFactorStr, highVal, lowVal);
       papersByYear[pub.year][category]++;
       papersByYear[pub.year].total++;
     });
@@ -522,14 +525,7 @@ window.JCRReportUtils = {
       let category = 'none';
       const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
       
-      if (impactFactorStr !== null && impactFactorStr !== undefined && impactFactorStr !== '' && impactFactorStr !== 0) {
-        const ifVal = parseFloat(impactFactorStr);
-        if (ifVal > 0) {
-          if (ifVal >= highVal) category = 'high';
-          else if (ifVal >= lowVal) category = 'mid';
-          else category = 'low';
-        }
-      }
+      category = this.faixaDeJcr(impactFactorStr, highVal, lowVal);
 
       if (pub.hasEtAl) {
         gcData[category]++;

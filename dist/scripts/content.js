@@ -1467,17 +1467,9 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       if (isTableFiltered) {
         const targetRank = parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1;
         const filteredForStats = lattesInfo.filter(pub => {
-          let category = 'noJcr';
-          let ifVal = 0;
           const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
-          if (impactFactorStr !== null && impactFactorStr !== undefined && impactFactorStr !== '' && impactFactorStr !== 0) {
-            ifVal = parseFloat(impactFactorStr);
-            if (ifVal > 0) {
-              if (ifVal >= highJcr) category = 'high';
-              else if (ifVal >= lowJcr) category = 'mid';
-              else category = 'low';
-            }
-          }
+          const category = window.JCRReportUtils.faixaDeJcr(impactFactorStr, highJcr, lowJcr);
+          const ifVal = category === 'noJcr' ? 0 : parseFloat(impactFactorStr);
 
           let passesRole = false;
           if (pub.hasEtAl) {
