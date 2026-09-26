@@ -253,6 +253,84 @@
             || /^(PQ|DT)\s*[-–\s]\s*[A-C]$/i.test(limpo);
     }
 
+    // ------------------------------------------------------------------
+    // Instituições e anexos
+    // ------------------------------------------------------------------
+
+    // Linha que tem cara de nome de instituição: "Nome da Instituição - SIGLA, UF,
+    // País". A checagem pelo formato existe porque a ordenação por coordenada
+    // intercala rodapés de paginação e restos de tabela entre o rótulo e o valor,
+    // então não dá para confiar na posição.
+    function _pareceInstituicao(linha) {
+        const l = String(linha || '');
+        return !!l && l.length > 5 && l.length < 200 &&
+            /\s[-–]\s/.test(l) &&
+            /,\s*[A-Za-zÀ-ÿ.]+\.?$/.test(l) &&
+            !/(DETALHAMENTO|JUSTIFICATIVA|VALOR|ITEM|QTD|TOTAL|DURA[ÇC][ÃA]O|BENEF[ÍI]CIO|R\$)/i.test(l);
+    }
+
+    // Instituição Executora/Sede, do bloco "INSTITUIÇÕES ENVOLVIDAS". O valor pode vir
+    // na mesma linha do rótulo ou abaixo dele; a busca para em "Colaboradora" e nos
+    // blocos de orçamento, para não pegar a instituição errada.
+    function _instituicaoExecutora(fullText) {
+        const linhas = String(fullText || '').split('\n').map(l => l.trim());
+        const i = linhas.findIndex(l => /^Executora\s*\/\s*Sede\b/i.test(l));
+        if (i < 0) return '';
+
+        const mesmaLinha = linhas[i].replace(/^Executora\s*\/\s*Sede\s*:?\s*/i, '').trim();
+        if (_pareceInstituicao(mesmaLinha)) return mesmaLinha;
+
+        for (let j = i + 1; j < Math.min(linhas.length, i + 25); j++) {
+            const l = linhas[j];
+            if (!l) continue;
+            if (/^(Colaboradora|RECURSOS|CUSTEIO|CAPITAL|BOLSAS|[ÁA]REAS\s+DO)/i.test(l)) break;
+            if (_pareceInstituicao(l)) return l;
+        }
+        return '';
+    }
+
+    // Anexos da proposta: pares "Tipo - URL" dentro do bloco DOCUMENTOS ANEXOS. Os
+    // currículos vão para o fim da lista, porque o que o revisor abre primeiro é o
+    // projeto de pesquisa.
+    function _anexos(fullText) {
+        const texto = String(fullText || '');
+        const lista = [];
+
+        // ".pd" no fim acontece quando o PDF corta a extensão ao quebrar a linha
+        const arrumarUrl = (u) => {
+            const s = String(u || '').trim();
+            return /\.pd$/i.test(s) ? s.replace(/\.pd$/i, '.pdf') : s;
+        };
+
+        const bloco = texto.match(/DOCUMENTOS\s+ANEXOS[\s\S]*?(?=DECLARAÇÃO|$)/i);
+        if (bloco) {
+            const re = /([A-Za-zÀ-ÖØ-öø-ÿ\s]+)\s+-\s+(https?:\/\/anexosform\.cnpq\.br\/doc\/[^\s\n\r"';\)]+)/gi;
+            let m;
+            while ((m = re.exec(bloco[0])) !== null) {
+                const tipo = m[1].replace(/DOCUMENTOS\s+ANEXOS|ARQUIVO|TAMANHO|URL/gi, '').replace(/\s+/g, ' ').trim();
+                lista.push({ type: tipo || 'Anexo', url: arrumarUrl(m[2]) });
+            }
+        }
+
+        // Quando o bloco não casa, ainda vale pegar um endereço solto.
+        if (lista.length === 0) {
+            const solto = texto.match(/(https?:\/\/anexosform\.cnpq\.br\/doc\/[^\s\n\r"';\)]+)/i);
+            if (solto) lista.push({ type: 'Anexo', url: arrumarUrl(solto[1]) });
+        }
+
+        const ehCurriculo = (a) => {
+            const t = (a.type || '').toLowerCase();
+            return t.includes('currículo') || t.includes('curriculo');
+        };
+        lista.sort((a, b) => {
+            const ca = ehCurriculo(a), cb = ehCurriculo(b);
+            if (ca && !cb) return 1;
+            if (!ca && cb) return -1;
+            return 0;
+        });
+        return lista;
+    }
+
     raiz.JCRPiccParser = {
         itensDoPdf: itensDoPdf,
         lerTituloResumo: lerTituloResumo,
@@ -265,6 +343,9 @@
         _uf: _uf,
         _ehUrlLattes: _ehUrlLattes,
         _formacao: _formacao,
-        _ehBolsaValida: _ehBolsaValida
+        _ehBolsaValida: _ehBolsaValida,
+        _pareceInstituicao: _pareceInstituicao,
+        _instituicaoExecutora: _instituicaoExecutora,
+        _anexos: _anexos
     };
 })(typeof window !== 'undefined' ? window : globalThis);

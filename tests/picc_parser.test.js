@@ -262,3 +262,96 @@ describe('_ehBolsaValida', () => {
         assert.strictEqual(P._ehBolsaValida(123), false);
     });
 });
+
+// --- Instituições e anexos ---------------------------------------------------
+
+describe('_pareceInstituicao', () => {
+    test('aceita o formato "Nome - SIGLA, UF, Pais"', () => {
+        assert.strictEqual(P._pareceInstituicao('Universidade Federal do Rio Grande do Norte - UFRN, RN, Brasil'), true);
+    });
+
+    test('aceita travessao no lugar do hifen', () => {
+        assert.strictEqual(P._pareceInstituicao('Instituto Federal – IFPA, PA, Brasil'), true);
+    });
+
+    // O bloco de orcamento fica logo abaixo e tem linhas com hifen e virgula que
+    // passariam pelo formato; por isso as palavras de orcamento sao barradas.
+    test('recusa linhas do bloco de orcamento', () => {
+        assert.strictEqual(P._pareceInstituicao('DETALHAMENTO - Equipamento, 2, un'), false);
+        assert.strictEqual(P._pareceInstituicao('VALOR TOTAL - R$ 50.000, Custeio, Brasil'), false);
+    });
+
+    test('recusa linha sem separador ou sem o final esperado', () => {
+        assert.strictEqual(P._pareceInstituicao('Universidade Federal do Ceara'), false);
+        assert.strictEqual(P._pareceInstituicao('UFC - 12345'), false);
+        assert.strictEqual(P._pareceInstituicao('a - b'), false);   // curta demais
+        assert.strictEqual(P._pareceInstituicao(''), false);
+    });
+});
+
+describe('_instituicaoExecutora', () => {
+    test('le o valor que vem na linha seguinte ao rotulo', () => {
+        const t = ['INSTITUIÇÕES ENVOLVIDAS', 'Executora/Sede',
+                   'Universidade Federal do Pará - UFPA, PA, Brasil',
+                   'Colaboradora', 'Instituto X - IX, SP, Brasil'].join('\n');
+        assert.strictEqual(P._instituicaoExecutora(t), 'Universidade Federal do Pará - UFPA, PA, Brasil');
+    });
+
+    test('le o valor quando vem na mesma linha do rotulo', () => {
+        const t = 'Executora/Sede: Universidade Estadual de Campinas - UNICAMP, SP, Brasil';
+        assert.strictEqual(P._instituicaoExecutora(t), 'Universidade Estadual de Campinas - UNICAMP, SP, Brasil');
+    });
+
+    // A ordenacao por coordenada intercala rodape de pagina entre o rotulo e o valor.
+    test('pula o rodape de paginacao que cai no meio', () => {
+        const t = ['Executora/Sede', 'Página 2 / 12',
+                   'Universidade de São Paulo - USP, SP, Brasil'].join('\n');
+        assert.strictEqual(P._instituicaoExecutora(t), 'Universidade de São Paulo - USP, SP, Brasil');
+    });
+
+    test('para em Colaboradora: nao pega a instituicao errada', () => {
+        const t = ['Executora/Sede', 'Colaboradora', 'Instituto Y - IY, RJ, Brasil'].join('\n');
+        assert.strictEqual(P._instituicaoExecutora(t), '');
+    });
+
+    test('sem o rotulo devolve vazio', () => {
+        assert.strictEqual(P._instituicaoExecutora('texto sem o bloco'), '');
+        assert.strictEqual(P._instituicaoExecutora(''), '');
+    });
+});
+
+describe('_anexos', () => {
+    const bloco = (corpo) => 'DOCUMENTOS ANEXOS ARQUIVO TAMANHO URL ' + corpo + ' DECLARAÇÃO';
+
+    test('le os pares tipo/URL do bloco', () => {
+        const r = P._anexos(bloco('Projeto de Pesquisa - http://anexosform.cnpq.br/doc/X/1/a_01.pdf'));
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].type, 'Projeto de Pesquisa');
+        assert.strictEqual(r[0].url, 'http://anexosform.cnpq.br/doc/X/1/a_01.pdf');
+    });
+
+    // O curriculo e o que o revisor abre por ultimo; o projeto vem primeiro.
+    test('curriculos vao para o fim da lista', () => {
+        const r = P._anexos(bloco(
+            'Currículo - http://anexosform.cnpq.br/doc/X/1/cv_01.pdf ' +
+            'Projeto de Pesquisa - http://anexosform.cnpq.br/doc/X/1/proj_02.pdf'));
+        assert.deepStrictEqual(r.map(a => a.type), ['Projeto de Pesquisa', 'Currículo']);
+    });
+
+    // O PDF as vezes corta a extensao ao quebrar a linha.
+    test('conserta a URL terminada em .pd', () => {
+        const r = P._anexos(bloco('Anexo - http://anexosform.cnpq.br/doc/X/1/a_01.pd'));
+        assert.strictEqual(r[0].url, 'http://anexosform.cnpq.br/doc/X/1/a_01.pdf');
+    });
+
+    test('sem o bloco, ainda aproveita um endereco solto', () => {
+        const r = P._anexos('texto qualquer http://anexosform.cnpq.br/doc/X/1/solto_01.pdf fim');
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].type, 'Anexo');
+    });
+
+    test('sem nenhum endereco devolve lista vazia', () => {
+        assert.deepStrictEqual(P._anexos('proposta sem anexos'), []);
+        assert.deepStrictEqual(P._anexos(''), []);
+    });
+});

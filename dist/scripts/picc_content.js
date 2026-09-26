@@ -573,39 +573,8 @@
 
         const propInst = propInstLines.join(' ').replace(/\s+/g, ' ').trim();
 
-        // 5b. Instituição Executora/Sede — bloco "INSTITUIÇÕES ENVOLVIDAS":
-        //     INSTITUIÇÕES ENVOLVIDAS
-        //     Executora/Sede
-        //     Universidade Federal do Rio Grande do Norte - UFRN, RN, Brasil
-        //     Colaboradora
-        //     ...
-        let instituicaoExecutora = '';
-        {
-            const textLines = fullText.split('\n').map(l => l.trim());
-            const idx = textLines.findIndex(l => /^Executora\s*\/\s*Sede\b/i.test(l));
-            // A ordenação por coordenada intercala rodapés de paginação e restos de tabela
-            // entre o rótulo e o valor, então identificamos a linha pelo formato do nome
-            // ("Nome da Instituição - SIGLA, UF, País") em vez de pela posição.
-            const looksLikeInstitution = (l) =>
-                !!l && l.length > 5 && l.length < 200 &&
-                /\s[-–]\s/.test(l) &&
-                /,\s*[A-Za-zÀ-ÿ.]+\.?$/.test(l) &&
-                !/(DETALHAMENTO|JUSTIFICATIVA|VALOR|ITEM|QTD|TOTAL|DURA[ÇC][ÃA]O|BENEF[ÍI]CIO|R\$)/i.test(l);
-
-            if (idx >= 0) {
-                const sameLine = textLines[idx].replace(/^Executora\s*\/\s*Sede\s*:?\s*/i, '').trim();
-                if (looksLikeInstitution(sameLine)) {
-                    instituicaoExecutora = sameLine;
-                } else {
-                    for (let j = idx + 1; j < Math.min(textLines.length, idx + 25); j++) {
-                        const l = textLines[j];
-                        if (!l) continue;
-                        if (/^(Colaboradora|RECURSOS|CUSTEIO|CAPITAL|BOLSAS|[ÁA]REAS\s+DO)/i.test(l)) break;
-                        if (looksLikeInstitution(l)) { instituicaoExecutora = l; break; }
-                    }
-                }
-            }
-        }
+        // 5b. Instituicao Executora/Sede, do bloco INSTITUICOES ENVOLVIDAS.
+        const instituicaoExecutora = P._instituicaoExecutora(fullText);
 
         // 5c. Titulo (em portugues) e Resumo do projeto.
         const tituloResumo = P.lerTituloResumo(allPageItems, allLines, fullText);
@@ -850,44 +819,8 @@
             isVisible: true
         };
 
-        // 6. Extract all attachments (DOCUMENTOS ANEXOS) with their file types and URLs from PDF text
-        let attachments = [];
-        const docAnexoSection = fullText.match(/DOCUMENTOS\s+ANEXOS[\s\S]*?(?=DECLARAÇÃO|$)/i);
-        if (docAnexoSection) {
-            const textBlock = docAnexoSection[0];
-            const itemRegex = /([A-Za-zÀ-ÖØ-öø-ÿ\s]+)\s+-\s+(https?:\/\/anexosform\.cnpq\.br\/doc\/[^\s\n\r"';\)]+)/gi;
-            let m;
-            while ((m = itemRegex.exec(textBlock)) !== null) {
-                let typeName = m[1].replace(/DOCUMENTOS\s+ANEXOS|ARQUIVO|TAMANHO|URL/gi, '').replace(/\s+/g, ' ').trim();
-                let url = m[2].trim();
-                if (/\.pd$/i.test(url)) url = url.replace(/\.pd$/i, '.pdf');
-                attachments.push({
-                    type: typeName || 'Anexo',
-                    url: url
-                });
-            }
-        }
-
-        // Fallback for single anexosform URL if docAnexoSection regex missed it
-        if (attachments.length === 0) {
-            const fallbackMatch = fullText.match(/(https?:\/\/anexosform\.cnpq\.br\/doc\/[^\s\n\r"';\)]+)/i);
-            if (fallbackMatch) {
-                let url = fallbackMatch[1].trim();
-                if (/\.pd$/i.test(url)) url = url.replace(/\.pd$/i, '.pdf');
-                attachments.push({ type: 'Anexo', url: url });
-            }
-        }
-
-        // Sort attachments: Non-CV attachments ("Anexo", "Projeto de Pesquisa") first, CV attachments ("Currículo") after
-        attachments.sort((a, b) => {
-            const aType = (a.type || '').toLowerCase();
-            const bType = (b.type || '').toLowerCase();
-            const aIsCv = aType.includes('currículo') || aType.includes('curriculo');
-            const bIsCv = bType.includes('currículo') || bType.includes('curriculo');
-            if (aIsCv && !bIsCv) return 1;
-            if (!aIsCv && bIsCv) return -1;
-            return 0;
-        });
+        // 6. Anexos da proposta (bloco DOCUMENTOS ANEXOS), curriculos por ultimo.
+        const attachments = P._anexos(fullText);
 
         // ---- Quadro Geral: totais por categoria informados no proprio PDF ----
         //   Quadro Geral
