@@ -508,36 +508,13 @@
         const isValidLattesUrl = P._ehUrlLattes;
         const cleanFormacao = P._formacao;
 
-        // 1. Extract Edital (from URL path like /doc/Universal_2026/ or PDF text SIGLA:)
-        let edital = '';
-        if (pdfUrl) {
-            const urlEditalMatch = pdfUrl.match(/\/doc\/([^\/]+)\//i);
-            if (urlEditalMatch) edital = urlEditalMatch[1];
-        }
-        if (!edital) {
-            const siglaMatch = fullText.match(/SIGLA:\s*([^\n\r]+)/i);
-            if (siglaMatch) edital = siglaMatch[1].trim();
-        }
-
-        // 1b. Extract Faixa from CHAMADA section (matches "Faixa A -", "Faixa C:", etc.)
-        let faixa = '-';
-        const faixaMatch = fullText.match(/\bFaixa\s+([A-Za-z0-9])/i);
-        if (faixaMatch) {
-            faixa = faixaMatch[1].toUpperCase();
-        }
-
-        // 2. Extract Processo number
-        const procMatch = fullText.match(/Processo:\s*([\d\/\-]+)/i);
-        let processId = procMatch ? procMatch[1].trim() : '';
-
-        // 3. Extract Numero Protocolo (16 digits)
-        const protMatch = fullText.match(/PROPOSTA\s+(\d{16})/i) || fullText.match(/\b00\d{14}\b/);
-        let numeroProtocolo = protMatch ? (protMatch[1] || protMatch[0]) : '';
-        if (!processId) processId = numeroProtocolo;
-
-        // 4. Extract Proponente Name
-        const propNameMatch = fullText.match(/PROPONENTE[\s\S]*?NOME:\s*([^\n\r]+)/i) || fullText.match(/NOME:\s*([^\n\r]+)/i);
-        const propName = propNameMatch ? propNameMatch[1].trim() : '';
+        // Campos do cabecalho: as regras de cada um vivem no leitor.
+        const edital = P._edital(pdfUrl, fullText);
+        const faixa = P._faixa(fullText);
+        // o protocolo serve de identificador quando a proposta ainda nao tem processo
+        const numeroProtocolo = P._protocolo(fullText);
+        const processId = P._processo(fullText) || numeroProtocolo;
+        const propName = P._nomeProponente(fullText);
 
         // 5. Extract Proponente Instituicao across multiple lines (strictly on Page 1)
         let propInstLines = [];
