@@ -331,9 +331,233 @@
         return lista;
     }
 
+    // ------------------------------------------------------------------
+    // Equipe
+    // ------------------------------------------------------------------
+
+    // Le os membros da equipe a partir dos itens de texto do PDF. Esta e a extracao
+    // mais fragil do projeto: nao ha marcacao nenhuma, os campos sao reconhecidos
+    // pela coordenada X e os blocos de membro sao delimitados pelo "URL DO CURRICULO"
+    // que fecha cada um. Um erro aqui nao aparece como falha — aparece como um membro
+    // com a bolsa ou a instituicao do vizinho.
+    function lerEquipe(allPageItems) {
+        const itens = Array.isArray(allPageItems) ? allPageItems : [];
+        if (itens.length === 0) return [];
+        const allPageItemsLocal = itens;
+    // 6. Extract Team Members using strict column coordinates & subheader bounds
+    const equipeIdx = allPageItemsLocal.findIndex(item => item.str === 'EQUIPE' || item.str === 'Pesquisador' || item.str.includes('MEMBROS DA EQUIPE'));
+    let teamMembers = [];
+    let memberBlockEndIndices = [];
+
+    allPageItemsLocal.forEach((item, idx) => {
+        if (idx > equipeIdx) {
+            if (item.str === 'URL') {
+                const next1 = allPageItemsLocal[idx + 1]?.str || '';
+                const next2 = allPageItemsLocal[idx + 2]?.str || '';
+                if (next1 === 'DO' || next2 === 'CURRÍCULO' || next1 === 'CURRÍCULO') {
+                    const lastIdx = memberBlockEndIndices[memberBlockEndIndices.length - 1];
+                    if (lastIdx === undefined || idx - lastIdx > 5) {
+                        memberBlockEndIndices.push(idx);
+                    }
+                }
+            } else if (item.str.includes('lattes.cnpq.br/') || item.str.includes('visualizacv.do')) {
+                const lastIdx = memberBlockEndIndices[memberBlockEndIndices.length - 1];
+                if (lastIdx === undefined || idx - lastIdx > 5) {
+                    memberBlockEndIndices.push(idx);
+                }
+            }
+        }
+    });
+
+    // Limites das colunas derivados do cabecalho que se repete em cada bloco de membro
+    // (NOME | FORMACAO/TITULACAO | BOLSA | INSTITUICAO/DEPARTAMENTO | AREAS DE ATUACAO).
+    // Antes eram fixos (45/160/225/258/400) e quebravam em PDFs com outra margem: num
+    // deles o nome comeca em x=34 e seus primeiros pedacos caiam fora da faixa do nome,
+    // produzindo nomes truncados ("Lucas Anhezini de Araujo" -> "Anhezini de").
+    const colunas = (() => {
+        const padrao = { nome: 45, formacao: 160, bolsa: 225, inst: 258, areas: 400 };
+        if (equipeIdx < 0) return padrao;
+
+        const acharX = (re) => {
+            for (let j = equipeIdx; j < allPageItemsLocal.length; j++) {
+                if (re.test(allPageItemsLocal[j].str.trim())) return allPageItemsLocal[j].x;
+            }
+            return null;
+        };
+
+        const xNome = acharX(/^NOME$/i);
+        const xForm = acharX(/^(FORMA|TITULA)/i);
+        let xInst = acharX(/^(INSTITUI|DEPARTAMENTO)/i);
+        let xBolsa = acharX(/^BOLSA/i);
+        let xAreas = acharX(/^([ÁA]REAS|ATUA)/i);
+
+        // Sem os dois marcos da esquerda nao ha como derivar: mantem o comportamento anterior
+        if (xNome === null || xForm === null || !(xNome < xForm)) return padrao;
+
+        // INSTITUICAO costuma ficar a ~42% do caminho entre FORMACAO e AREAS
+        if ((xInst === null || xInst <= xForm) && xAreas !== null && xAreas > xForm) {
+            xInst = xForm + (xAreas - xForm) * 0.42;
+        }
+        if (xInst === null || xInst <= xForm) return padrao;
+
+        // BOLSA fica entre formacao e instituicao; se o rotulo nao aparecer, estima
+        if (xBolsa === null || xBolsa <= xForm || xBolsa >= xInst) xBolsa = xForm + (xInst - xForm) * 0.55;
+        if (xAreas === null || xAreas <= xInst) xAreas = xInst + 140;
+
+        const folga = 6;   // itens podem comecar poucos pontos a esquerda do rotulo
+
+        // LIMITACAO CONHECIDA: o cabecalho se repete a cada bloco de membro e NAO fica
+        // sempre no mesmo x — numa mesma proposta houve blocos com INSTITUICAO em 412 e
+        // outros em 398, e nas 12 propostas de amostra o desvio dentro do mesmo PDF vai
+        // de 0 a 17 pontos. Como as colunas sao derivadas uma unica vez, do primeiro
+        // cabecalho, um bloco deslocado mais que a folga perde os pedacos que comecam na
+        // margem e pode engolir o traco da coluna vizinha: "European Organization for /
+        // Nuclear Research-CERN--Suica-" virou "Organization for - Research-CERN--Suica".
+        //
+        // Alargar a faixa (fronteiras no meio do vao) corrige esse caso, mas mudou a
+        // instituicao extraida de 46 dos 155 membros da amostra, e nao ha como validar
+        // isso fora do navegador: o pdf.js quebra os itens de texto de forma diferente
+        // do que se consegue simular. Como o estrago potencial e maior que o ganho — o
+        // nome sai truncado, e corrigi-lo a mao pelo lapis da tabela de equipe leva
+        // segundos — a faixa continua conservadora. O caminho certo, quando houver
+        // tempo, e derivar as colunas POR BLOCO de membro em vez de uma vez so.
+        return {
+            nome: xNome - folga,
+            formacao: xForm - folga,
+            bolsa: xBolsa - folga,
+            inst: xInst - folga,
+            areas: xAreas - folga
+        };
+    })();
+
+    let currentCategory = 'Pesquisador';
+
+    memberBlockEndIndices.forEach((endIdx, i) => {
+        const prevBound = i > 0 ? memberBlockEndIndices[i-1] + 1 : (equipeIdx >= 0 ? equipeIdx + 1 : 0);
+
+        let cvLink = '';
+        let lattesId = '';
+
+        // Find Lattes URL if available in this block
+        const endItemStr = allPageItemsLocal[endIdx]?.str || '';
+        const endNextStr = allPageItemsLocal[endIdx + 3]?.str || allPageItemsLocal[endIdx + 1]?.str || '';
+        const combinedUrlStr = endItemStr + ' ' + endNextStr;
+        const linkMatch = combinedUrlStr.match(/https?:\/\/[^\s"'<>\)]+/i) || endItemStr.match(/https?:\/\/[^\s"'<>\)]+/i);
+        if (linkMatch) {
+            const urlCandidate = linkMatch[0].trim();
+            const lattesIdMatch = urlCandidate.match(/lattes\.cnpq\.br\/(\d{16})/i);
+            if (lattesIdMatch) {
+                lattesId = lattesIdMatch[1];
+                cvLink = `http://lattes.cnpq.br/${lattesId}`;
+            }
+        }
+
+        if (!_ehUrlLattes(cvLink)) {
+            cvLink = '';
+            lattesId = '';
+        }
+
+        // Find subheader TEMPO DEDIC / RESPONSABILIDADE for this member
+        let subHeaderIdx = -1;
+        for (let j = prevBound; j < endIdx; j++) {
+            const item = allPageItemsLocal[j];
+            if (item.str.startsWith('TEMPO') || item.str.startsWith('RESPONSABILIDADE')) {
+                subHeaderIdx = j;
+                break;
+            }
+        }
+
+        const sectionABound = subHeaderIdx >= 0 ? subHeaderIdx : endIdx;
+
+        // Check if there is a Category header before sectionABound
+        for (let j = prevBound; j < sectionABound; j++) {
+            const item = allPageItemsLocal[j];
+            if (item.x < 100) {
+                // O composto e testado ANTES do simples. O PDF quebra "Pesquisador
+                // Estrangeiro" em dois itens de texto, e testando o simples primeiro
+                // o "Pesquisador" casava sozinho, o ramo de combinacao nunca era
+                // alcancado e o estrangeiro entrava como pesquisador comum — o que
+                // fazia a coluna Pesquisador da distribuicao somar os dois grupos.
+                const COMPOSTA = /^(Pesquisador\s+Estrangeiro|Pesquisador\s+Colaborador|Aluno\s+de\s+Inicia[çc][ãa]o\s+Cient[íi]fica)$/i;
+                const SIMPLES = /^(Pesquisador\s+Estrangeiro|Pesquisador|Aluno|Colaborador|P[óo]s-Doutorando|T[ée]cnico|Especialista)$/i;
+                const proximo = allPageItemsLocal[j + 1]?.str || '';
+                const combinado = (item.str + ' ' + proximo).replace(/\s+/g, ' ').trim();
+                if (COMPOSTA.test(combinado)) {
+                    currentCategory = combinado;
+                } else if (SIMPLES.test(item.str.trim())) {
+                    // cobre tambem o caso em que a categoria composta vem num item so
+                    currentCategory = item.str.trim();
+                }
+            }
+        }
+
+        let nameParts = [];
+        let formacaoParts = [];
+        let bolsaParts = [];
+        let instParts = [];
+
+        for (let j = prevBound; j < sectionABound; j++) {
+            const item = allPageItemsLocal[j];
+            const upperStr = item.str.toUpperCase();
+            if (upperStr.startsWith('NOME') || upperStr.startsWith('FORMAÇÃO') || upperStr.startsWith('TITULAÇÃO') ||
+                upperStr.startsWith('BOLSA') || upperStr.startsWith('INSTITUIÇÃO') || upperStr.startsWith('DEPARTAMENTO') ||
+                upperStr.startsWith('ÁREAS') || upperStr.startsWith('ATUAÇÃO') || upperStr.startsWith('EQUIPE') ||
+                upperStr.startsWith('PESQUISADOR') || upperStr.startsWith('ALUNO') || upperStr.startsWith('COLABORADOR') ||
+                upperStr.startsWith('PÁGINA') || upperStr.startsWith('URL') || upperStr === 'DO' || upperStr === 'CURRÍCULO' || item.str === 'DE') {
+                continue;
+            }
+
+            // A URL do curriculo pode vir como item proprio na mesma coluna do nome
+            // (formato em que "URL DO CURRICULO" e o link ficam na mesma linha).
+            // Sem este filtro o link era concatenado ao nome do membro.
+            const txtItem = item.str.trim().toLowerCase();
+            if (txtItem.startsWith('http://') || txtItem.startsWith('https://') || txtItem.includes('lattes.cnpq.br')) {
+                continue;
+            }
+
+            // Colunas delimitadas pelos X do cabecalho (ver "colunas" acima)
+            if (item.x >= colunas.nome && item.x < colunas.formacao) nameParts.push(item.str);
+            else if (item.x >= colunas.formacao && item.x < colunas.bolsa) formacaoParts.push(item.str);
+            else if (item.x >= colunas.bolsa && item.x < colunas.inst) bolsaParts.push(item.str);
+            else if (item.x >= colunas.inst && item.x < colunas.areas) instParts.push(item.str);
+        }
+
+        const name = nameParts.join(' ').replace(/\s+/g, ' ').trim();
+        const rawFormacao = formacaoParts.join(' ').replace(/\s+/g, ' ').trim();
+        const formacao = _formacao(rawFormacao);
+        const rawBolsa = bolsaParts.join(' ').replace(/\s+/g, ' ').trim();
+        const bolsa = _ehBolsaValida(rawBolsa) ? rawBolsa : '-';
+        let instituicao = instParts.join(' ').replace(/\s+/g, ' ').trim();
+        instituicao = instituicao.replace(/-\s*$/, '').trim();
+
+        // Ignore garbage blocks or section headers like "Quadro Geral", "Resumo", etc.
+        const isInvalidName = !name || 
+            /^(Quadro|Quadro\s+Geral|Resumo|Categoria|Propomos|Projeto|Palavras|Objetivos|Metodologia|Cronograma|Orçamento|Referência|Declaração|Comitê|CNPq)/i.test(name) ||
+            name.toUpperCase().includes('QUADRO GERAL') ||
+            name.toUpperCase().includes('CATEGORIA RESUMO') ||
+            name.length > 80;
+
+        if (!isInvalidName && (name || cvLink)) {
+            teamMembers.push({
+                name: name,
+                formacao: formacao,
+                cvLink: cvLink,
+                lattesId: lattesId,
+                bolsa: bolsa,
+                categoria: currentCategory,
+                instituicao: instituicao,
+                isVisible: true
+            });
+        }
+    });
+
+        return teamMembers;
+    }
+
     raiz.JCRPiccParser = {
         itensDoPdf: itensDoPdf,
         lerTituloResumo: lerTituloResumo,
+        lerEquipe: lerEquipe,
         // puras, expostas para uso e para teste
         _edital: _edital,
         _faixa: _faixa,

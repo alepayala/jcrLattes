@@ -355,3 +355,91 @@ describe('_anexos', () => {
         assert.deepStrictEqual(P._anexos(''), []);
     });
 });
+
+// --- Equipe ------------------------------------------------------------------
+// A leitura por coordenadas nao tem como ser validada so com teste sintetico — a
+// prova esta na comparacao sobre os 34 PDFs reais. O que se fixa aqui sao as regras
+// de decisao que um teste consegue isolar.
+
+describe('lerEquipe', () => {
+    const it = (x, y, str) => ({ page: 1, x, y, str });
+    // cabecalho nas posicoes padrao (45/160/225/258/400)
+    const cabecalho = [
+        it(50, 700, 'EQUIPE'),
+        it(45, 680, 'NOME'), it(160, 680, 'FORMAÇÃO/'), it(225, 680, 'BOLSA'),
+        it(258, 680, 'INSTITUIÇÃO/'), it(400, 680, 'ÁREAS'),
+    ];
+    const fimDeBloco = (y, url) => [
+        it(45, y, 'TEMPO'),
+        it(45, y - 10, 'URL'), it(70, y - 10, 'DO'), it(100, y - 10, 'CURRÍCULO'),
+        it(200, y - 10, url || 'http://lattes.cnpq.br/1234567890123456'),
+    ];
+    const membro = (y, nome, form, bolsa, inst) => [
+        it(45, y, nome), it(160, y, form), it(225, y, bolsa), it(258, y, inst),
+    ];
+
+    test('le nome, titulacao, bolsa e instituicao de cada coluna', () => {
+        const r = P.lerEquipe([].concat(cabecalho, membro(670, 'Ana Souza', 'Doutorado', 'PQ 1A', 'UFC'), fimDeBloco(660)));
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].name, 'Ana Souza');
+        assert.strictEqual(r[0].formacao, 'Doutorado');
+        assert.strictEqual(r[0].bolsa, 'PQ 1A');
+        assert.strictEqual(r[0].instituicao, 'UFC');
+        assert.strictEqual(r[0].lattesId, '1234567890123456');
+    });
+
+    // O PDF quebra "Pesquisador Estrangeiro" em dois itens de texto. Testando a
+    // categoria simples primeiro, "Pesquisador" casava sozinho e o estrangeiro
+    // entrava como pesquisador comum, somando os dois grupos na distribuicao.
+    test('categoria composta vence a simples quando o PDF quebra o rotulo', () => {
+        const r = P.lerEquipe([].concat(
+            cabecalho,
+            [it(50, 675, 'Pesquisador'), it(95, 675, 'Estrangeiro')],
+            membro(670, 'Hans Vogel', 'Doutorado', '-', 'Max Planck'),
+            fimDeBloco(660)));
+        assert.strictEqual(r[0].categoria, 'Pesquisador Estrangeiro');
+    });
+
+    test('categoria composta tambem e reconhecida quando vem num item so', () => {
+        const r = P.lerEquipe([].concat(
+            cabecalho,
+            [it(50, 675, 'Pesquisador Estrangeiro')],
+            membro(670, 'Hans Vogel', 'Doutorado', '-', 'Max Planck'),
+            fimDeBloco(660)));
+        assert.strictEqual(r[0].categoria, 'Pesquisador Estrangeiro');
+    });
+
+    test('a categoria vale para os membros seguintes ate mudar', () => {
+        const r = P.lerEquipe([].concat(
+            cabecalho,
+            [it(50, 675, 'Aluno')],
+            membro(670, 'Paula Nunes', '-', '-', 'UFC'), fimDeBloco(660),
+            membro(640, 'Rafael Dias', '-', '-', 'UFC'), fimDeBloco(630, 'http://lattes.cnpq.br/9999999999999999')));
+        assert.deepStrictEqual(r.map(m => m.categoria), ['Aluno', 'Aluno']);
+    });
+
+    // Sem isso, um cabecalho de secao entraria na equipe como se fosse pessoa.
+    test('descarta blocos cujo nome e cabecalho de secao', () => {
+        const r = P.lerEquipe([].concat(cabecalho, membro(670, 'Quadro Geral', '', '', ''), fimDeBloco(660)));
+        assert.strictEqual(r.length, 0);
+    });
+
+    test('bolsa que nao e de produtividade vira traco', () => {
+        const r = P.lerEquipe([].concat(cabecalho, membro(670, 'Ana Souza', 'Doutorado', 'DTA', 'UFC'), fimDeBloco(660)));
+        assert.strictEqual(r[0].bolsa, '-');
+    });
+
+    test('URL que nao e do Lattes nao vira cvLink', () => {
+        const r = P.lerEquipe([].concat(cabecalho,
+            membro(670, 'Ana Souza', 'Doutorado', '-', 'UFC'),
+            fimDeBloco(660, 'http://exemplo.com/perfil')));
+        assert.strictEqual(r[0].cvLink, '');
+        assert.strictEqual(r[0].lattesId, '');
+    });
+
+    test('entrada vazia ou invalida devolve lista vazia, sem lancar', () => {
+        assert.deepStrictEqual(P.lerEquipe([]), []);
+        assert.deepStrictEqual(P.lerEquipe(null), []);
+        assert.deepStrictEqual(P.lerEquipe(undefined), []);
+    });
+});
