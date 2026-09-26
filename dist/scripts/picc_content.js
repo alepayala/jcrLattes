@@ -503,11 +503,6 @@
         const allLines = itensPdf.allLines;
         const fullText = itensPdf.fullText;
 
-        // Os helpers de texto (UF, URL do Lattes, titulacao) vivem no leitor.
-        const extractUf = P._uf;
-        const isValidLattesUrl = P._ehUrlLattes;
-        const cleanFormacao = P._formacao;
-
         // Campos do cabecalho: as regras de cada um vivem no leitor.
         const edital = P._edital(pdfUrl, fullText);
         const faixa = P._faixa(fullText);
@@ -516,39 +511,10 @@
         const processId = P._processo(fullText) || numeroProtocolo;
         const propName = P._nomeProponente(fullText);
 
-        // 5. Extract Proponente Instituicao across multiple lines (strictly on Page 1)
-        let propInstLines = [];
-        let page1PropFormacao = '';
-        const page1Lines = allLines.filter(lineItems => lineItems.length > 0 && lineItems[0].page === 1);
-
-        let isInstSection = false;
-        page1Lines.forEach(lineItems => {
-            const col1Str = lineItems.filter(i => i.x < 140).map(i => i.str).join(' ').trim().toUpperCase();
-            const col2Str = lineItems.filter(i => i.x >= 140).map(i => i.str).join(' ').trim();
-
-            if (col1Str.includes('FORMAÇÃO') || col1Str.includes('TITULAÇÃO')) {
-                if (col2Str) page1PropFormacao = cleanFormacao(col2Str);
-            }
-
-            const isInstLabel = col1Str === 'INSTITUIÇÃO' || col1Str === 'VÍNCULO:' || col1Str === 'INSTITUIÇÃO VÍNCULO:' || col1Str === 'VÍNCULO';
-
-            if (isInstLabel) {
-                isInstSection = true;
-                if (col2Str) propInstLines.push(col2Str);
-            } else if (isInstSection) {
-                if (col1Str.includes('CHAMADA') || col1Str.includes('NOME') || col1Str.includes('COMITÊ') ||
-                    col1Str.includes('PROJETO') || col1Str.includes('SIGLA') || col1Str.includes('EQUIPE') ||
-                    col1Str.includes('PALAVRAS') || col1Str.includes('RESUMO') || col1Str.includes('CPF')) {
-                    isInstSection = false;
-                } else if (col2Str) {
-                    propInstLines.push(col2Str);
-                } else {
-                    isInstSection = false;
-                }
-            }
-        });
-
-        const propInst = propInstLines.join(' ').replace(/\s+/g, ' ').trim();
+        // 5. Instituicao de vinculo e titulacao do proponente (cabecalho da pagina 1).
+        const dadosProponente = P.lerProponente(allLines);
+        const propInst = dadosProponente.instituicao;
+        const page1PropFormacao = dadosProponente.formacao;
 
         // 5b. Instituicao Executora/Sede, do bloco INSTITUICOES ENVOLVIDAS.
         const instituicaoExecutora = P._instituicaoExecutora(fullText);

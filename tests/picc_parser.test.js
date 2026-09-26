@@ -162,26 +162,6 @@ describe('_nomeProponente', () => {
 
 // --- Campos de um membro da equipe -------------------------------------------
 
-describe('_uf', () => {
-    test('le a sigla no formato "- CE -" da instituicao', () => {
-        assert.strictEqual(P._uf('Universidade Federal do Ceara-UFC-CE-Brasil-'), 'CE');
-    });
-
-    test('aceita a sigla solta apos virgula', () => {
-        assert.strictEqual(P._uf('Universidade Federal do Rio Grande do Norte - UFRN, RN, Brasil'), 'RN');
-    });
-
-    test('normaliza para maiuscula', () => {
-        assert.strictEqual(P._uf('Instituto X -sp- Brasil'), 'SP');
-    });
-
-    test('instituicao sem UF devolve vazio', () => {
-        assert.strictEqual(P._uf('Universidade Federal'), '');
-        assert.strictEqual(P._uf(''), '');
-        assert.strictEqual(P._uf(null), '');
-    });
-});
-
 describe('_ehUrlLattes', () => {
     test('aceita o endereco canonico com os 16 digitos', () => {
         assert.strictEqual(P._ehUrlLattes('http://lattes.cnpq.br/4274598374126989'), true);
@@ -508,5 +488,68 @@ describe('lerQuadroGeral', () => {
         assert.deepStrictEqual(P.lerQuadroGeral([it(50, 500, 'Outra coisa')]), []);
         assert.deepStrictEqual(P.lerQuadroGeral([]), []);
         assert.deepStrictEqual(P.lerQuadroGeral(null), []);
+    });
+});
+
+// --- Proponente (cabeçalho da página 1) --------------------------------------
+
+describe('lerProponente', () => {
+    // allLines e uma lista de linhas, cada uma com seus itens de texto. A coluna do
+    // rotulo fica a esquerda de x=140; o valor, a direita.
+    const linha = (...itens) => itens.map(([x, str]) => ({ page: 1, x, y: 700, str }));
+
+    test('le instituicao e titulacao dos rotulos da pagina 1', () => {
+        const r = P.lerProponente([
+            linha([40, 'FORMAÇÃO/TITULAÇÃO:'], [160, 'Doutorado em Física, UFC, 2010']),
+            linha([40, 'INSTITUIÇÃO'], [160, 'Universidade Federal do Pará - UFPA, Brasil']),
+            linha([40, 'CHAMADA'], [160, 'Chamada Publica 6/2026']),
+        ]);
+        assert.strictEqual(r.instituicao, 'Universidade Federal do Pará - UFPA, Brasil');
+        assert.strictEqual(r.formacao, 'Doutorado');
+    });
+
+    // A instituicao costuma ocupar varias linhas, com o rotulo so na primeira.
+    test('acumula a instituicao que continua nas linhas seguintes', () => {
+        const r = P.lerProponente([
+            linha([40, 'INSTITUIÇÃO'], [160, 'Instituto de Pesquisas']),
+            linha([160, 'Energéticas e Nucleares']),
+            linha([160, 'IPEN/CNEN - SP']),
+            linha([40, 'CHAMADA'], [160, 'Outra coisa']),
+        ]);
+        assert.strictEqual(r.instituicao, 'Instituto de Pesquisas Energéticas e Nucleares IPEN/CNEN - SP');
+    });
+
+    test('o rotulo pode vir quebrado como VÍNCULO', () => {
+        const r = P.lerProponente([
+            linha([40, 'INSTITUIÇÃO'], [160, 'Universidade X']),
+            linha([40, 'VÍNCULO:']),
+        ]);
+        assert.strictEqual(r.instituicao, 'Universidade X');
+    });
+
+    // Sem a parada, a leitura engoliria o bloco seguinte inteiro.
+    test('para nos rotulos das secoes seguintes', () => {
+        ['CHAMADA', 'COMITÊ', 'PROJETO', 'SIGLA', 'EQUIPE', 'PALAVRAS', 'RESUMO', 'CPF'].forEach(rotulo => {
+            const r = P.lerProponente([
+                linha([40, 'INSTITUIÇÃO'], [160, 'Universidade X']),
+                linha([40, rotulo], [160, 'nao deve entrar']),
+            ]);
+            assert.strictEqual(r.instituicao, 'Universidade X', 'parou em ' + rotulo);
+        });
+    });
+
+    test('linha vazia tambem encerra o bloco', () => {
+        const r = P.lerProponente([
+            linha([40, 'INSTITUIÇÃO'], [160, 'Universidade X']),
+            linha([40, 'QUALQUER COISA']),
+            linha([160, 'nao deve entrar']),
+        ]);
+        assert.strictEqual(r.instituicao, 'Universidade X');
+    });
+
+    test('sem os rotulos devolve os dois vazios, sem lancar', () => {
+        assert.deepStrictEqual(P.lerProponente([linha([40, 'OUTRA'], [160, 'coisa'])]), { instituicao: '', formacao: '' });
+        assert.deepStrictEqual(P.lerProponente([]), { instituicao: '', formacao: '' });
+        assert.deepStrictEqual(P.lerProponente(null), { instituicao: '', formacao: '' });
     });
 });

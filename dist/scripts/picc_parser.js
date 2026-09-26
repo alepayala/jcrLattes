@@ -198,17 +198,6 @@
     // Campos de um membro da equipe
     // ------------------------------------------------------------------
 
-    // UF a partir da instituição. Primeiro o formato "- CE -", depois a sigla solta
-    // entre as 27 unidades da federação — nessa ordem, senão um "PARÁ" no meio do
-    // nome poderia casar antes do campo certo.
-    function _uf(instituicao) {
-        const s = String(instituicao || '');
-        if (!s) return '';
-        const m = s.match(/-([A-Z]{2})-/i) ||
-                  s.match(/,?\s*\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/i);
-        return m ? m[1].toUpperCase() : '';
-    }
-
     function _ehUrlLattes(url) {
         if (!url) return false;
         return /^https?:\/\/lattes\.cnpq\.br\/\d{16}$/i.test(String(url).trim());
@@ -630,18 +619,60 @@
         return quadroGeral;
     }
 
+    // Instituicao de vinculo e titulacao do proponente, do cabecalho da pagina 1. O
+    // bloco e uma tabela de duas colunas — rotulo a esquerda, valor a direita — e a
+    // instituicao costuma ocupar varias linhas, entao a leitura acumula ate encontrar
+    // o rotulo da secao seguinte. Devolve { instituicao, formacao }.
+    function lerProponente(allLines) {
+        const linhas = Array.isArray(allLines) ? allLines : [];
+    let propInstLines = [];
+    let page1PropFormacao = '';
+    const page1Lines = linhas.filter(lineItems => lineItems.length > 0 && lineItems[0].page === 1);
+
+    let isInstSection = false;
+    page1Lines.forEach(lineItems => {
+        const col1Str = lineItems.filter(i => i.x < 140).map(i => i.str).join(' ').trim().toUpperCase();
+        const col2Str = lineItems.filter(i => i.x >= 140).map(i => i.str).join(' ').trim();
+
+        if (col1Str.includes('FORMAÇÃO') || col1Str.includes('TITULAÇÃO')) {
+            if (col2Str) page1PropFormacao = _formacao(col2Str);
+        }
+
+        const isInstLabel = col1Str === 'INSTITUIÇÃO' || col1Str === 'VÍNCULO:' || col1Str === 'INSTITUIÇÃO VÍNCULO:' || col1Str === 'VÍNCULO';
+
+        if (isInstLabel) {
+            isInstSection = true;
+            if (col2Str) propInstLines.push(col2Str);
+        } else if (isInstSection) {
+            if (col1Str.includes('CHAMADA') || col1Str.includes('NOME') || col1Str.includes('COMITÊ') ||
+                col1Str.includes('PROJETO') || col1Str.includes('SIGLA') || col1Str.includes('EQUIPE') ||
+                col1Str.includes('PALAVRAS') || col1Str.includes('RESUMO') || col1Str.includes('CPF')) {
+                isInstSection = false;
+            } else if (col2Str) {
+                propInstLines.push(col2Str);
+            } else {
+                isInstSection = false;
+            }
+        }
+    });
+
+    const propInst = propInstLines.join(' ').replace(/\s+/g, ' ').trim();
+
+        return { instituicao: propInst, formacao: page1PropFormacao };
+    }
+
     raiz.JCRPiccParser = {
         itensDoPdf: itensDoPdf,
         lerTituloResumo: lerTituloResumo,
         lerEquipe: lerEquipe,
         lerQuadroGeral: lerQuadroGeral,
+        lerProponente: lerProponente,
         // puras, expostas para uso e para teste
         _edital: _edital,
         _faixa: _faixa,
         _processo: _processo,
         _protocolo: _protocolo,
         _nomeProponente: _nomeProponente,
-        _uf: _uf,
         _ehUrlLattes: _ehUrlLattes,
         _formacao: _formacao,
         _ehBolsaValida: _ehBolsaValida,
