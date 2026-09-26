@@ -182,3 +182,74 @@ describe('valorJcr', () => {
         assert.strictEqual(R.valorJcr(null), undefined);
     });
 });
+
+// O agrupamento por periodico e mais complicado do que parece: o mesmo periodico
+// chega com grafias diferentes, as vezes com ISSN e as vezes sem, e o fator de
+// impacto nem sempre vem. Saiu de dentro de generateJournalTableHTML.
+describe('agruparPorPeriodico', () => {
+    const P = (nome, issn, jif, ano) => ({ journalName: nome, issn, jif, year: ano, wosCitations: 0, scopusCitations: 0 });
+    const nomes = (r) => r.map(j => j.name).sort();
+
+    test('o ISSN une grafias diferentes do mesmo periodico', () => {
+        const r = R.agruparPorPeriodico([
+            P('Physical Review B', '1098-0121', 3.9, 2022),
+            P('PHYS REV B', '1098-0121', 3.9, 2021),
+        ], 0, 2026);
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].count, 2);
+    });
+
+    test('sem ISSN, une pelo nome quando o JIF bate', () => {
+        const r = R.agruparPorPeriodico([
+            P('Nature Physics', '', 19.6, 2022),
+            P('NATURE PHYSICS', '', 19.6, 2021),
+        ], 0, 2026);
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].count, 2);
+    });
+
+    // Mesmo nome com JIF diferente sao periodicos distintos, nao um erro de grafia.
+    test('mesmo nome com JIF diferente fica separado', () => {
+        const r = R.agruparPorPeriodico([
+            P('Acta Cientifica', '', 1.2, 2022),
+            P('Acta Cientifica', '', 4.8, 2021),
+        ], 0, 2026);
+        assert.strictEqual(r.length, 2);
+    });
+
+    test('artigo sem JIF entra no grupo mais populoso daquele nome', () => {
+        const r = R.agruparPorPeriodico([
+            P('Revista X', '', 2.0, 2022), P('Revista X', '', 2.0, 2021),
+            P('Revista X', '', 0, 2020), P('Revista X', '', 0, 2019),
+        ], 0, 2026);
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].count, 4);
+        assert.strictEqual(r[0].jif, 2);
+    });
+
+    // O nome vem do Lattes com sufixos entre parenteses, as vezes mais de um.
+    test('descarta sufixos entre parenteses, inclusive repetidos', () => {
+        const r = R.agruparPorPeriodico([
+            P('Journal of Physics (Print) (Online)', '', 2.2, 2022),
+            P('Journal of Physics', '', 2.2, 2021),
+        ], 0, 2026);
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].name, 'Journal of Physics');
+    });
+
+    test('o corte de anos descarta o que e mais antigo', () => {
+        const pubs = [P('Rev W', '', 1, 1990), P('Rev W', '', 1, 2022)];
+        assert.strictEqual(R.agruparPorPeriodico(pubs, 0, 2026)[0].count, 2);   // 0 = sem corte
+        assert.strictEqual(R.agruparPorPeriodico(pubs, 5, 2026)[0].count, 1);
+    });
+
+    test('publicacao sem nome de periodico e ignorada', () => {
+        const r = R.agruparPorPeriodico([P('', '1234-5678', 3, 2022)], 0, 2026);
+        assert.deepStrictEqual(r, []);
+    });
+
+    test('entrada invalida devolve lista vazia', () => {
+        assert.deepStrictEqual(R.agruparPorPeriodico([], 0, 2026), []);
+        assert.deepStrictEqual(R.agruparPorPeriodico(null, 0, 2026), []);
+    });
+});

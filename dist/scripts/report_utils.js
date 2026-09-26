@@ -1649,8 +1649,18 @@ ${htmlText}`;
     return /^https?:\/\//i.test(s) ? this._esc(s) : '';
   },
 
-  generateJournalTableHTML: function(publications, yearsCutoff, minPapers, currentYear, highJcr, lowJcr) {
-    const COLORS = this.COLORS;
+  // Agrupa as publicacoes por periodico. So agrega — quem desenha e
+  // generateJournalTableHTML. Devolve [{ name, issn, jif, count, wos, scopus }].
+  //
+  // O agrupamento e mais complicado do que parece porque o mesmo periodico chega
+  // com grafias diferentes, as vezes com ISSN e as vezes sem, e o fator de impacto
+  // nem sempre vem preenchido. Sao tres baldes (com ISSN, sem ISSN mas com JIF, sem
+  // nenhum dos dois) e depois fusoes por union-find: dois grupos so viram um se
+  // compartilham nome e tem JIF compativel (diferenca ate 0,001). Artigos sem JIF
+  // entram no grupo mais populoso daquele nome; se houver varios grupos com JIF
+  // diferente para o mesmo nome, sao periodicos distintos e ficam separados.
+  agruparPorPeriodico: function (publications, yearsCutoff, currentYear) {
+    const lista = Array.isArray(publications) ? publications : [];
     const startYear = yearsCutoff > 0 ? currentYear - yearsCutoff : 0;
 
     const stripName = (raw) => {
@@ -1669,7 +1679,7 @@ ${htmlText}`;
     const noIssnByJif = {}; // { [lk]: { [jifStr]: { nameCounts, issn, count, wos, scopus } } }
     const noIssnZero  = {}; // { [lk]: { nameCounts, issn, count, wos, scopus } }
 
-    for (const pub of publications) {
+    for (const pub of lista) {
       if (!pub.journalName) continue;
       const y = parseInt(pub.year, 10);
       if (isNaN(y) || (yearsCutoff > 0 && y < startYear)) continue;
@@ -1815,6 +1825,15 @@ ${htmlText}`;
       ...Object.values(mergedIssnGroups).map(m => ({ name: m.displayName, issn: m.bestIssn, jif: m.jif, count: m.count, wos: m.wos, scopus: m.scopus })),
       ...noIssnRows
     ];
+
+    return allJournals;
+  },
+
+  generateJournalTableHTML: function(publications, yearsCutoff, minPapers, currentYear, highJcr, lowJcr) {
+    const COLORS = this.COLORS;
+    const startYear = yearsCutoff > 0 ? currentYear - yearsCutoff : 0;
+
+    const allJournals = this.agruparPorPeriodico(publications, yearsCutoff, currentYear);
 
     const rows = allJournals.filter(j => j.count >= minPapers).sort((a, b) => b.count - a.count || b.jif - a.jif);
     const totalOmitted = allJournals.length - rows.length;
