@@ -586,3 +586,33 @@ describe('_ehDoutorDaEquipe', () => {
         assert.strictEqual(B._ehDoutorDaEquipe(null), true);
     });
 });
+
+// normalizeName e a base de todo casamento de nomes entre a proposta e o banco de
+// CVs. Passou a ter um segundo chamador (picc_content, que antes mantinha uma copia
+// literal), entao a regra precisa ficar fixada aqui.
+describe('normalizeName', () => {
+    test('remove acentos, pontuacao e caixa', () => {
+        assert.strictEqual(B.normalizeName('José da Silva-Júnior'), 'jose da silva junior');
+    });
+
+    test('colapsa espacos e apara as pontas', () => {
+        assert.strictEqual(B.normalizeName('  ANA   MARIA  '), 'ana maria');
+    });
+
+    test('a pontuacao vira espaco, nao some', () => {
+        // "SILVA,J." nao pode virar "silvaj": juntaria sobrenome e inicial
+        assert.strictEqual(B.normalizeName('SILVA,J.'), 'silva j');
+    });
+
+    test('formas Unicode diferentes do mesmo nome dao o mesmo resultado', () => {
+        const composto = 'Ayala';                                   // NFC
+        const decomposto = 'Ayala'.normalize('NFD');                // NFD
+        assert.strictEqual(B.normalizeName(composto), B.normalizeName(decomposto));
+    });
+
+    test('entrada vazia devolve string vazia', () => {
+        assert.strictEqual(B.normalizeName(''), '');
+        assert.strictEqual(B.normalizeName(null), '');
+        assert.strictEqual(B.normalizeName(undefined), '');
+    });
+});

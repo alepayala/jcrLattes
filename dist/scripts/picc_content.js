@@ -300,15 +300,13 @@
         return { lattesId, htmlText };
     }
 
+    // Mesma normalizacao que db_tools usa para casar nomes (sem acento, sem
+    // pontuacao, minusculas). Delegamos em vez de manter copia: se as duas versoes
+    // divergirem, o mesmo pesquisador deixa de ser reconhecido entre a proposta e o
+    // banco de CVs.
     function normalizeName(str) {
-        if (!str) return '';
-        return String(str)
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
+        const DBm = (typeof window !== 'undefined') ? window.JCRDBTools : null;
+        return (DBm && typeof DBm.normalizeName === 'function') ? DBm.normalizeName(str) : '';
     }
 
     function isValidBolsa(b) {
@@ -509,53 +507,19 @@
 
     // Helper to fetch and parse process details directly from PDF arrayBuffer
     async function parseProcessFromPDF(arrayBuffer, pdfUrl) {
-        if (typeof pdfjsLib === 'undefined') throw new Error("pdfjsLib não disponível");
-
-        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer, isEvalSupported: false });
-        const pdf = await loadingTask.promise;
-        
-        let allPageItems = [];
-        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-            const page = await pdf.getPage(pageNum);
-            const content = await page.getTextContent();
-            content.items.forEach(item => {
-                if (item.str.trim()) {
-                    allPageItems.push({
-                        page: pageNum,
-                        x: item.transform[4],
-                        y: item.transform[5],
-                        str: item.str.trim()
-                    });
-                }
-            });
-        }
-
-        // Sort items by Page (asc), Y (desc), X (asc)
-        allPageItems.sort((a, b) => {
-            if (a.page !== b.page) return a.page - b.page;
-            const yDiff = b.y - a.y;
-            if (Math.abs(yDiff) > 4) return yDiff;
-            return a.x - b.x;
-        });
-
-        let allLines = [];
-        let currentLine = [];
-        let currentY = null;
-        let currentPage = null;
-
-        allPageItems.forEach(item => {
-            if (currentPage !== item.page || currentY === null || Math.abs(currentY - item.y) > 4) {
-                if (currentLine.length > 0) allLines.push(currentLine);
-                currentLine = [item];
-                currentY = item.y;
-                currentPage = item.page;
-            } else {
-                        currentLine.push(item);
-            }
-        });
-        if (currentLine.length > 0) allLines.push(currentLine);
-
-        const fullText = allLines.map(l => l.map(i => i.str).join(' ')).join('\n');
+        // A montagem dos itens do PDF (ordenar por pagina/Y/X e agrupar em linhas com
+        // tolerancia de 4pt) mora em db_tools._itensDoPdf: o relatorio da proposta faz a
+        // mesma leitura quando precisa completar titulo e resumo de uma proposta antiga.
+        // Eram duas copias da mesma regra; se a tolerancia mudasse numa so, as duas
+        // leituras passariam a discordar sobre o que e uma linha.
+        const DBm = (typeof window !== 'undefined') ? window.JCRDBTools : null;
+        const itensPdf = (DBm && typeof DBm._itensDoPdf === 'function')
+            ? await DBm._itensDoPdf(arrayBuffer)
+            : null;
+        if (!itensPdf) throw new Error("pdfjsLib não disponível");
+        const allPageItems = itensPdf.allPageItems;
+        const allLines = itensPdf.allLines;
+        const fullText = itensPdf.fullText;
 
         // Helper to extract UF from institution string
         function extractUf(instStr) {
@@ -1703,22 +1667,12 @@
     }
 
     // Verify if CA member authorization key is valid and not expired
+    // A verificacao da autorizacao de membro do CA mora em db_tools, que tambem
+    // precisa dela no relatorio. A chave e a mesma (CA_AUTH_KEY).
     async function isCaMemberAuthValid() {
-        return new Promise((resolve) => {
-            if (typeof chrome === 'undefined' || !chrome.storage?.local) { resolve(false); return; }
-            chrome.storage.local.get([CA_AUTH_KEY], (result) => {
-                if (chrome.runtime?.lastError || !result || !result[CA_AUTH_KEY]) {
-                    resolve(false);
-                    return;
-                }
-                const auth = result[CA_AUTH_KEY];
-                if (auth && auth.isCaMember === true && auth.validUntil && Date.now() < auth.validUntil) {
-                    resolve(true);
-                } else {
-                    resolve(false);
-                }
-            });
-        });
+        const DBm = (typeof window !== 'undefined') ? window.JCRDBTools : null;
+        if (!DBm || typeof DBm.isCaMemberAuthValid !== 'function') return false;
+        return DBm.isCaMemberAuthValid();
     }
 
     // Inject the piccTools UI at the top of the page.

@@ -312,28 +312,6 @@ window.JCRDBTools = {
         return { gente: genteOrd, m: mOrd, maior: maior, pares: pares, grupos: g };
     },
 
-    // Carrega o pdf.js sob demanda. A pagina do banco nao o inclui de partida: sao
-    // 320 KB que so fazem falta quando ha uma proposta sem titulo/resumo para ler do
-    // PDF. Em db.html o script e da propria extensao, entao e mesma origem.
-    _pdfJsCarregando: null,
-    _garantirPdfJs: function () {
-        if (typeof pdfjsLib !== 'undefined') return Promise.resolve(true);
-        if (typeof document === 'undefined' || typeof chrome === 'undefined' ||
-            !chrome.runtime || typeof chrome.runtime.getURL !== 'function') {
-            return Promise.resolve(false);
-        }
-        if (!this._pdfJsCarregando) {
-            this._pdfJsCarregando = new Promise((resolve) => {
-                const tag = document.createElement('script');
-                tag.src = chrome.runtime.getURL('scripts/pdf.min.js');
-                tag.onload = () => resolve(typeof pdfjsLib !== 'undefined');
-                tag.onerror = () => resolve(false);
-                (document.head || document.documentElement).appendChild(tag);
-            });
-        }
-        return this._pdfJsCarregando;
-    },
-
     // Titulo (em portugues) e Resumo do projeto, a partir dos itens de texto do PDF da
     // proposta ja ordenados por pagina/linha (o mesmo material que o piccTools monta).
     //
@@ -345,9 +323,9 @@ window.JCRDBTools = {
     // com as duas colunas e cortamos os blocos no maior espaco vertical da faixa que
     // separa um rotulo do seguinte.
     //
-    // Mora aqui, e nao em picc_content.js, porque tem dois chamadores: a importacao das
-    // propostas e o proprio relatorio, que roda em db.html — onde picc_content.js nao e
-    // carregado.
+    // Usada pela importacao das propostas (picc_content.js). Mora aqui por enquanto,
+    // junto de _itensDoPdf; as duas pertencem a leitura do PDF da proposta e devem ir
+    // para um leitor proprio do piccTools.
     _lerTituloResumoPdf: function (allPageItems, allLines, fullText) {
         const resultado = { tituloProjeto: '', resumoProjeto: '' };
         if (!Array.isArray(allPageItems) || !Array.isArray(allLines) || !fullText) return resultado;
@@ -427,8 +405,9 @@ window.JCRDBTools = {
         return resultado;
     },
 
-    // Monta os itens de texto de um PDF na mesma ordem que o piccTools usa:
-    // pagina crescente, Y decrescente, X crescente, agrupando em linhas por Y.
+    // Monta os itens de texto de um PDF: pagina crescente, Y decrescente, X crescente,
+    // agrupando em linhas por Y com tolerancia de 4pt. Implementacao unica, usada pela
+    // importacao das propostas.
     _itensDoPdf: async function (arrayBuffer) {
         if (typeof pdfjsLib === 'undefined') return null;
         if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL &&
@@ -3925,10 +3904,10 @@ window.JCRDBTools = {
             // dos outros blocos colapsaveis, este NAO leva data-collapse-key: o resumo e
             // longo e deve comecar sempre recolhido, entao o estado nao fica guardado.
             //
-            // Propostas importadas antes desta versao so ganham os campos quando ha um
-            // PDF a mao (ver completarTituloResumo). Quando nao ha, o bloco aparece
-            // mesmo assim com o aviso, para o revisor saber por que esta vazio em vez
-            // de achar que a proposta nao tem titulo.
+            // Propostas importadas antes desta versao nao tem os campos: o caminho e
+            // reprocessar a proposta, que le o PDF on-line. O bloco aparece mesmo vazio,
+            // com o aviso, para o revisor saber por que esta assim em vez de achar que a
+            // proposta nao tem titulo.
             const tituloProjetoTxt = String(proc.tituloProjeto || '').trim();
             const resumoProjetoTxt = String(proc.resumoProjeto || '').trim();
             const avisoReprocessar = (!tituloProjetoTxt || !resumoProjetoTxt)
@@ -5286,70 +5265,6 @@ window.JCRDBTools = {
         };
         completarPareceresSalvos();
 
-        // Propostas importadas antes de o titulo e o resumo existirem ficam sem os dois
-        // campos. Em vez de obrigar a reimportar a carteira inteira, le do PDF que ja
-        // esta a mao: a copia guardada no banco ou o arquivo proposta_<processo>.pdf na
-        // pasta piccData. A leitura da pasta NAO pede permissao — apenas aproveita a que
-        // ja foi concedida —, porque isto roda sozinho, sem clique do usuario. Sem PDF a
-        // mao nada e marcado, entao a proxima abertura tenta de novo.
-        const completarTituloResumo = async () => {
-            if (!parentGroupData || parentGroupData.tituloResumoLido) return;
-            if (parentGroupData.tituloProjeto && parentGroupData.resumoProjeto) return;
-
-            // Le o blob direto, sem passar por hydrateProcBlobs(): aquele guard e
-            // marcado antes de a hidratacao terminar, entao quem chega junto seguiria
-            // com pdfData ainda vazio. Aqui e so leitura, e so quando falta o campo.
-            let base64Pdf = parentGroupData.pdfData || '';
-            if (!base64Pdf && parentGroupData.processId) {
-                try {
-                    const blobs = await this.getProcBlobs(parentGroupData.processId);
-                    if (blobs && blobs.pdfData) base64Pdf = blobs.pdfData;
-                } catch (e) { /* sem copia no banco: tenta a pasta */ }
-            }
-
-            let arrayBuffer = null;
-            if (base64Pdf) {
-                try {
-                    arrayBuffer = await base64ToBlob(base64Pdf, 'application/pdf').arrayBuffer();
-                } catch (e) { /* base64 corrompido: tenta a pasta */ }
-            }
-            if (!arrayBuffer) {
-                try {
-                    const arq = await this.lerArquivoDaProposta(parentGroupData, `proposta_${safeProcId}.pdf`, false);
-                    if (arq) arrayBuffer = await arq.arrayBuffer();
-                } catch (e) { /* sem pasta ou sem permissao: fica para a reimportacao */ }
-            }
-            if (!arrayBuffer) return;
-
-            if (!(await this._garantirPdfJs())) return;
-
-            let lido = null;
-            try {
-                const itens = await this._itensDoPdf(arrayBuffer);
-                if (itens) lido = this._lerTituloResumoPdf(itens.allPageItems, itens.allLines, itens.fullText);
-            } catch (e) {
-                console.warn('[dbTools] Falha ao ler título/resumo do PDF da proposta:', e);
-                return;
-            }
-            if (!lido) return;
-
-            // ja tentamos com este PDF: nao relê a cada abertura do relatorio
-            parentGroupData.tituloResumoLido = true;
-            const ganhouDados = (lido.tituloProjeto && !parentGroupData.tituloProjeto) ||
-                                (lido.resumoProjeto && !parentGroupData.resumoProjeto);
-            if (lido.tituloProjeto && !parentGroupData.tituloProjeto) parentGroupData.tituloProjeto = lido.tituloProjeto;
-            if (lido.resumoProjeto && !parentGroupData.resumoProjeto) parentGroupData.resumoProjeto = lido.resumoProjeto;
-
-            try {
-                await this.saveCVs([parentGroupData]);
-            } catch (e) {
-                console.warn('[dbTools] Falha ao guardar o título/resumo da proposta:', e);
-            }
-            // remonta so quando ha o que mostrar; na volta o campo ja esta preenchido,
-            // entao nao ha como isto se repetir
-            if (ganhouDados) this.renderProcessReport(parentGroupData, newTab, sortedDb);
-        };
-        completarTituloResumo();
 
 
         const prioSelect = doc.getElementById('proc-priority-select');
