@@ -186,6 +186,132 @@ window.JCRDBTools = {
         return true;
     },
 
+    // Quadro Geral da equipe: colunas por categoria e distribuicao por instituicao.
+    // So calcula — quem desenha e renderCVReport. Estava dentro dele, misturado ao
+    // HTML, e e a conta que ja produziu dois erros silenciosos: o coordenador de fora
+    // do total, e "Pesquisador Estrangeiro" somando junto com "Pesquisador".
+    //
+    // Devolve:
+    //   colunas      [{ categoria, quantidade }] na ordem de exibicao
+    //   origem       de onde vieram as colunas
+    //   total        soma das colunas
+    //   totalEquipe  participantes na tabela de equipe
+    //   divergente   true quando as duas contas nao batem (aviso ao revisor)
+    //   executora    instituicao do coordenador, que e a sede
+    //   instituicoes [{ nome, total, cols, ehExecutora }] ja ordenadas
+    _quadroDaEquipe: function (quadroGeral, teamMembers, proponenteName) {
+        const equipe = Array.isArray(teamMembers) ? teamMembers : [];
+        const totalEquipe = equipe.length;
+        let colunas = Array.isArray(quadroGeral) ? quadroGeral.filter(q => q && q.categoria) : [];
+        let origem = 'PDF da proposta';
+
+        // Sem o quadro do PDF, conta pelas categorias dos membros extraidos.
+        if (colunas.length === 0 && totalEquipe > 0) {
+            const contagem = {};
+            equipe.forEach(m => {
+                // aqui a categoria vem em "role" (o proponente entra como
+                // "Proponente / Coordenador"); "categoria" fica como alternativa
+                const bruto = m && (m.role || m.categoria);
+                const cat = bruto ? String(bruto).trim() : 'Sem categoria';
+                contagem[cat] = (contagem[cat] || 0) + 1;
+            });
+            colunas = Object.keys(contagem).sort().map(c => ({ categoria: c, quantidade: contagem[c] }));
+            origem = 'calculado a partir da equipe extraída';
+        }
+
+        // O Quadro Geral do PDF conta so a equipe: o coordenador nao aparece como
+        // categoria e a soma ficava uma pessoa abaixo do total de participantes.
+        // Acrescentamos a coluna dele, a menos que o quadro ja o inclua (categoria
+        // propria, ou soma que ja bate com o total da equipe).
+        if (colunas.length > 0 && proponenteName) {
+            const temCoordenador = colunas.some(q => this._ordemCategoria(q.categoria) === 0);
+            const soma = colunas.reduce((s, q) => s + (Number(q.quantidade) || 0), 0);
+            if (!temCoordenador && soma !== totalEquipe) {
+                colunas = colunas.concat([{ categoria: 'Coordenador', quantidade: 1 }]);
+            }
+        }
+
+        colunas = colunas.slice().sort((a, b) => {
+            const d = this._ordemCategoria(a.categoria) - this._ordemCategoria(b.categoria);
+            return d !== 0 ? d : String(a.categoria).localeCompare(String(b.categoria), 'pt-BR');
+        });
+
+        const total = colunas.reduce((s, q) => s + (Number(q.quantidade) || 0), 0);
+
+        // Casa a categoria do membro com uma coluna: primeiro pelo nome, depois pela
+        // familia (Pesquisador/Pesquisadores caem na mesma), e so quando ela identifica
+        // uma coluna sozinha — senao o membro fica fora das colunas, mas conta no total.
+        const info = colunas.map((q, i) => ({ i, chave: this._chaveCategoria(q.categoria), familia: this._ordemCategoria(q.categoria) }));
+        const colunaDoMembro = (m) => {
+            const bruto = (m && (m.role || m.categoria)) || '';
+            const exata = info.find(x => x.chave === this._chaveCategoria(bruto));
+            if (exata) return exata.i;
+            const mesmos = info.filter(x => x.familia === this._ordemCategoria(bruto));
+            return mesmos.length === 1 ? mesmos[0].i : -1;
+        };
+
+        // A sede e a instituicao do COORDENADOR, e nao o campo instituicaoExecutora da
+        // proposta. Os dois saem de blocos diferentes do PDF, com formatos diferentes
+        // ("Nome - SIGLA, UF, Brasil" no bloco INSTITUICOES ENVOLVIDAS contra
+        // "Nome / Departamento-SIGLA-UF-Brasil-" na tabela de equipe): em 11 propostas
+        // de amostra, nenhuma casava por cadeia exata. Pelo coordenador a marcacao e
+        // exata por construcao, porque e a mesma cadeia que agrupou a linha dele.
+        const coord = equipe.find(m => m && m.srcIdx === -1);
+        const executora = coord ? (String(coord.instituicao || '').trim() || '-') : '';
+
+        // Agrupa por cadeia EXATA: os nomes chegam do PDF em grafias diversas (com e
+        // sem departamento, sigla, acentuacao irregular) e casa-las automaticamente
+        // erra mais do que acerta. Para unir duas grafias, o revisor corrige o nome
+        // pelo lapis da tabela de equipe.
+        const porInstituicao = new Map();
+        equipe.forEach(m => {
+            const nome = String((m && m.instituicao) || '').trim() || '-';
+            if (!porInstituicao.has(nome)) {
+                porInstituicao.set(nome, { total: 0, cols: new Array(colunas.length).fill(0) });
+            }
+            const reg = porInstituicao.get(nome);
+            reg.total++;
+            const ci = colunaDoMembro(m);
+            if (ci >= 0) reg.cols[ci]++;
+        });
+
+        const instituicoes = [...porInstituicao.entries()]
+            .sort((a, b) => {
+                const ea = !!executora && a[0] === executora;
+                const eb = !!executora && b[0] === executora;
+                if (ea !== eb) return ea ? -1 : 1;              // a do coordenador no topo
+                if (b[1].total !== a[1].total) return b[1].total - a[1].total;
+                return String(a[0]).localeCompare(String(b[0]), 'pt-BR');
+            })
+            .map(([nome, reg]) => ({ nome, total: reg.total, cols: reg.cols, ehExecutora: !!executora && nome === executora }));
+
+        return {
+            colunas, origem, total, totalEquipe,
+            divergente: totalEquipe > 0 && total !== totalEquipe,
+            executora, instituicoes
+        };
+    },
+
+    // Chave de comparacao de categoria: sem acento, minuscula, sem espacos nas pontas.
+    _chaveCategoria: function (c) {
+        return String(c || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+    },
+
+    // Ordem fixa das colunas do Quadro Geral: proponente, pesquisador, colaborador,
+    // pesquisador estrangeiro, tecnico, [nao previstas] e Aluno sempre por ultimo.
+    // "estrangeir" e testado antes de "pesquisador" porque "Pesquisador Estrangeiro"
+    // casa com os dois, e ele tem coluna propria.
+    _ordemCategoria: function (cat) {
+        const c = this._chaveCategoria(cat);
+        if (c.startsWith('proponente') || c.startsWith('coordenador')) return 0;
+        if (c.includes('estrangeir')) return 3;
+        if (c.startsWith('tecnic')) return 4;
+        if (c.startsWith('aluno')) return 6;
+        if (c.startsWith('colaborador')) return 2;
+        if (c.startsWith('pesquisador')) return 1;
+        return 5;
+    },
+
     _matrizCoautoria: function (cvs, fichas, anos, anoAtual) {
         const lista = Array.isArray(cvs) ? cvs : [];
         const fichasArr = Array.isArray(fichas) ? fichas : [];
@@ -3517,110 +3643,22 @@ window.JCRDBTools = {
             // Usa o quadro do proprio PDF da proposta (contagem oficial do CNPq). Se ele
             // nao tiver sido capturado, calcula a partir das categorias dos membros extraidos.
             let quadroLinhas = Array.isArray(proc.quadroGeral) ? proc.quadroGeral.filter(q => q && q.categoria) : [];
-            let quadroOrigem = 'PDF da proposta';
-            if (quadroLinhas.length === 0 && Array.isArray(teamMembers) && teamMembers.length > 0) {
-                const contagem = {};
-                teamMembers.forEach(m => {
-                    // nesta lista a categoria vem em "role" (o proponente entra como
-                    // "Proponente / Coordenador"); "categoria" fica como alternativa
-                    const bruto = m && (m.role || m.categoria);
-                    const cat = bruto ? String(bruto).trim() : 'Sem categoria';
-                    contagem[cat] = (contagem[cat] || 0) + 1;
-                });
-                quadroLinhas = Object.keys(contagem).sort().map(c => ({ categoria: c, quantidade: contagem[c] }));
-                quadroOrigem = 'calculado a partir da equipe extraída';
-            }
-
-            // Ordem fixa das colunas: proponente, pesquisador, colaborador, pesquisador
-            // estrangeiro, tecnico, [categorias nao previstas] e Aluno sempre por ultimo.
-            const semAcento = (c) => String(c || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-            const ordemCategoria = (cat) => {
-                const c = semAcento(cat);
-                if (c.startsWith('proponente') || c.startsWith('coordenador')) return 0;
-                if (c.includes('estrangeir')) return 3;        // pesquisador estrangeiro
-                if (c.startsWith('tecnic')) return 4;
-                if (c.startsWith('aluno')) return 6;           // sempre no fim
-                if (c.startsWith('colaborador')) return 2;
-                if (c.startsWith('pesquisador')) return 1;
-                return 5;                                      // demais, antes de Aluno
-            };
-            // O Quadro Geral do PDF conta so a equipe: o coordenador nao aparece como
-            // categoria e a soma ficava uma pessoa abaixo do total de participantes.
-            // Acrescentamos a coluna do coordenador, a menos que o quadro ja o inclua
-            // (categoria propria, ou soma que ja bate com o total da equipe).
-            const totalEquipe = Array.isArray(teamMembers) ? teamMembers.length : 0;
-            if (quadroLinhas.length > 0 && proponenteName) {
-                const temCoordenador = quadroLinhas.some(q => ordemCategoria(q.categoria) === 0);
-                const somaQuadro = quadroLinhas.reduce((soma, q) => soma + (Number(q.quantidade) || 0), 0);
-                if (!temCoordenador && somaQuadro !== totalEquipe) {
-                    quadroLinhas = quadroLinhas.concat([{ categoria: 'Coordenador', quantidade: 1 }]);
-                }
-            }
-
-            quadroLinhas = quadroLinhas.slice().sort((a, b) => {
-                const d = ordemCategoria(a.categoria) - ordemCategoria(b.categoria);
-                return d !== 0 ? d : String(a.categoria).localeCompare(String(b.categoria), 'pt-BR');
-            });
-
+            const quadro = this._quadroDaEquipe(quadroLinhas, teamMembers, proponenteName);
+            const quadroOrigem = quadro.origem;
+            const totalEquipe = quadro.totalEquipe;
+            quadroLinhas = quadro.colunas;
 
             let quadroGeralHtml = '';
             if (quadroLinhas.length > 0) {
-                const totalParticipantes = quadroLinhas.reduce((soma, q) => soma + (Number(q.quantidade) || 0), 0);
+                const totalParticipantes = quadro.total;
                 const colunas = quadroLinhas.map(q => `
                     <th style="padding: 8px 12px; text-align: center; border-left: 1px solid #BBDEFB; font-weight: bold; white-space: nowrap;">${this._esc(q.categoria)}</th>`).join('');
                 const valores = quadroLinhas.map(q => `
                     <td style="padding: 10px 12px; text-align: center; border-left: 1px solid #E3F2FD; font-size: 1.25em; font-weight: bold; color: #0D47A1;">${this._esc(String(q.quantidade))}</td>`).join('');
 
-                // ---- Distribuição por instituição ----
-                // Agrupa por cadeia EXATA: os nomes chegam do PDF em grafias diversas
-                // (com e sem departamento, sigla, acentuação irregular) e casá-las
-                // automaticamente erra mais do que acerta. Para unir duas grafias, o
-                // revisor corrige o nome pelo ✏️ da tabela de equipe acima — assim a
-                // ligação entre membro e instituição nunca se perde.
-                const chaveCat = (c) => semAcento(c);
-                const colunasInfo = quadroLinhas.map((q, i) => ({ i, chave: chaveCat(q.categoria), bucket: ordemCategoria(q.categoria) }));
-                // casa a categoria do membro com uma coluna: primeiro pelo nome, depois
-                // pela familia (Pesquisador/Pesquisadores caem na mesma), e só quando ela
-                // identifica uma coluna sozinha
-                const colunaDoMembro = (m) => {
-                    const bruto = (m && (m.role || m.categoria)) || '';
-                    const exata = colunasInfo.find(x => x.chave === chaveCat(bruto));
-                    if (exata) return exata.i;
-                    const mesmos = colunasInfo.filter(x => x.bucket === ordemCategoria(bruto));
-                    return mesmos.length === 1 ? mesmos[0].i : -1;
-                };
-
-                // A sede e a instituicao do coordenador, e nao o campo instituicaoExecutora
-                // da proposta. Os dois saem de blocos diferentes do PDF, com formatos
-                // diferentes ("Nome - SIGLA, UF, Brasil" no bloco INSTITUICOES ENVOLVIDAS
-                // contra "Nome / Departamento-SIGLA-UF-Brasil-" na tabela de equipe): em
-                // 11 propostas de amostra, nenhuma casava por cadeia exata. Pelo
-                // coordenador a marcacao e exata por construcao, porque e a mesma cadeia
-                // que agrupou a linha dele.
-                const membroCoord = teamMembers.find(m => m && m.srcIdx === -1);
-                const executora = membroCoord ? (String(membroCoord.instituicao || '').trim() || '-') : '';
-                const porInstituicao = new Map();
-                teamMembers.forEach(m => {
-                    const nome = String(m.instituicao || '').trim() || '-';
-                    if (!porInstituicao.has(nome)) {
-                        porInstituicao.set(nome, { total: 0, cols: new Array(quadroLinhas.length).fill(0) });
-                    }
-                    const reg = porInstituicao.get(nome);
-                    reg.total++;
-                    const ci = colunaDoMembro(m);
-                    if (ci >= 0) reg.cols[ci]++;
-                });
-
-                const linhasInst = [...porInstituicao.entries()].sort((a, b) => {
-                    const ea = !!executora && a[0] === executora;
-                    const eb = !!executora && b[0] === executora;
-                    if (ea !== eb) return ea ? -1 : 1;              // a do coordenador no topo
-                    if (b[1].total !== a[1].total) return b[1].total - a[1].total;
-                    return String(a[0]).localeCompare(String(b[0]), 'pt-BR');
-                });
-
-                const corpoInst = linhasInst.map(([nome, reg], pos) => {
-                    const ehExecutora = !!executora && nome === executora;
+                // A distribuicao por instituicao vem calculada de _quadroDaEquipe.
+                const corpoInst = quadro.instituicoes.map((inst, pos) => {
+                    const nome = inst.nome, reg = inst, ehExecutora = inst.ehExecutora;
                     // a primeira linha carrega o separador que a destaca dos totais
                     const separador = pos === 0 ? ' border-top: 3px double #90CAF9;' : '';
                     const celulas = reg.cols.map(n => `

@@ -532,3 +532,130 @@ describe('_ehDoutorDaEquipe', () => {
 // normalizeName e a base de todo casamento de nomes entre a proposta e o banco de
 // CVs. Passou a ter um segundo chamador (picc_content, que antes mantinha uma copia
 // literal), entao a regra precisa ficar fixada aqui.
+
+// O Quadro Geral e a conta que ja produziu dois erros silenciosos: o coordenador
+// ficando de fora do total, e "Pesquisador Estrangeiro" somando junto com
+// "Pesquisador". Saiu de dentro de renderCVReport, onde estava misturada ao HTML.
+describe('_ordemCategoria', () => {
+    test('a ordem das colunas e fixa, com Aluno sempre por ultimo', () => {
+        const cats = ['Aluno', 'Técnico', 'Pesquisador Estrangeiro', 'Colaborador', 'Pesquisador', 'Proponente / Coordenador'];
+        const ordenadas = cats.slice().sort((a, b) => B._ordemCategoria(a) - B._ordemCategoria(b));
+        assert.deepStrictEqual(ordenadas, [
+            'Proponente / Coordenador', 'Pesquisador', 'Colaborador',
+            'Pesquisador Estrangeiro', 'Técnico', 'Aluno',
+        ]);
+    });
+
+    // "Pesquisador Estrangeiro" casa com "pesquisador" e com "estrangeir"; se o
+    // segundo nao for testado antes, ele cai na coluna de Pesquisador.
+    test('estrangeiro tem coluna propria, e nao a de pesquisador', () => {
+        assert.notStrictEqual(B._ordemCategoria('Pesquisador Estrangeiro'), B._ordemCategoria('Pesquisador'));
+    });
+
+    test('categoria desconhecida fica antes de Aluno', () => {
+        assert.ok(B._ordemCategoria('Consultor') < B._ordemCategoria('Aluno'));
+    });
+
+    test('ignora acento e caixa', () => {
+        assert.strictEqual(B._ordemCategoria('TÉCNICO'), B._ordemCategoria('tecnico'));
+    });
+});
+
+describe('_quadroDaEquipe', () => {
+    const m = (nome, role, inst, srcIdx) => ({ name: nome, role, instituicao: inst, srcIdx: srcIdx === undefined ? 0 : srcIdx });
+    const coord = (nome, inst) => m(nome, 'Proponente / Coordenador', inst, -1);
+
+    test('sem o quadro do PDF, conta pelas categorias dos membros', () => {
+        const r = B._quadroDaEquipe([], [coord('Ana', 'UFC'), m('Bruno', 'Pesquisador', 'UFC'), m('Carla', 'Aluno', 'UFC')], 'Ana');
+        assert.strictEqual(r.origem, 'calculado a partir da equipe extraída');
+        assert.deepStrictEqual(r.colunas.map(c => c.categoria), ['Proponente / Coordenador', 'Pesquisador', 'Aluno']);
+        assert.strictEqual(r.total, 3);
+        assert.strictEqual(r.divergente, false);
+    });
+
+    // O quadro do PDF conta so a equipe; sem esta coluna a soma fica uma pessoa
+    // abaixo do total e o aviso de divergencia disparava a toa.
+    test('acrescenta a coluna do coordenador quando o quadro do PDF nao o inclui', () => {
+        const r = B._quadroDaEquipe(
+            [{ categoria: 'Pesquisador', quantidade: 2 }],
+            [coord('Ana', 'UFC'), m('Bruno', 'Pesquisador', 'UFC'), m('Carla', 'Pesquisador', 'UFC')],
+            'Ana');
+        assert.deepStrictEqual(r.colunas.map(c => c.categoria), ['Coordenador', 'Pesquisador']);
+        assert.strictEqual(r.total, 3);
+        assert.strictEqual(r.divergente, false);
+    });
+
+    test('nao duplica o coordenador quando o quadro ja tem a categoria dele', () => {
+        const r = B._quadroDaEquipe(
+            [{ categoria: 'Proponente', quantidade: 1 }, { categoria: 'Pesquisador', quantidade: 1 }],
+            [coord('Ana', 'UFC'), m('Bruno', 'Pesquisador', 'UFC')],
+            'Ana');
+        assert.strictEqual(r.colunas.filter(c => B._ordemCategoria(c.categoria) === 0).length, 1);
+        assert.strictEqual(r.total, 2);
+    });
+
+    test('marca divergencia quando a soma nao bate com a equipe', () => {
+        const r = B._quadroDaEquipe(
+            [{ categoria: 'Pesquisador', quantidade: 9 }],
+            [coord('Ana', 'UFC'), m('Bruno', 'Pesquisador', 'UFC')],
+            'Ana');
+        assert.strictEqual(r.divergente, true);
+    });
+
+    test('a instituicao do coordenador e a sede e vem no topo', () => {
+        const r = B._quadroDaEquipe([],
+            [coord('Ana', 'UFPA'), m('Bruno', 'Pesquisador', 'USP'), m('Carla', 'Pesquisador', 'USP')],
+            'Ana');
+        assert.strictEqual(r.executora, 'UFPA');
+        assert.strictEqual(r.instituicoes[0].nome, 'UFPA');
+        assert.strictEqual(r.instituicoes[0].ehExecutora, true);
+        // USP tem mais gente, mas a sede vem antes
+        assert.strictEqual(r.instituicoes[1].nome, 'USP');
+        assert.strictEqual(r.instituicoes[1].total, 2);
+    });
+
+    test('fora a sede, ordena por numero de membros e depois pelo nome', () => {
+        const r = B._quadroDaEquipe([],
+            [m('A', 'Pesquisador', 'Zeta'), m('B', 'Pesquisador', 'Alfa'), m('C', 'Pesquisador', 'Alfa')],
+            '');
+        assert.deepStrictEqual(r.instituicoes.map(i => i.nome), ['Alfa', 'Zeta']);
+    });
+
+    test('cada membro cai na coluna da sua categoria', () => {
+        const r = B._quadroDaEquipe([],
+            [coord('Ana', 'UFC'), m('Bruno', 'Pesquisador', 'UFC'), m('Carla', 'Aluno', 'UFC')],
+            'Ana');
+        const iCoord = r.colunas.findIndex(c => B._ordemCategoria(c.categoria) === 0);
+        const iAluno = r.colunas.findIndex(c => B._ordemCategoria(c.categoria) === 6);
+        assert.strictEqual(r.instituicoes[0].cols[iCoord], 1);
+        assert.strictEqual(r.instituicoes[0].cols[iAluno], 1);
+        assert.strictEqual(r.instituicoes[0].total, 3);
+    });
+
+    // O estrangeiro tem coluna propria: se caisse na de Pesquisador, a distribuicao
+    // mostraria dois numa coluna e zero na outra.
+    test('estrangeiro conta na coluna dele, nao na de pesquisador', () => {
+        const r = B._quadroDaEquipe(
+            [{ categoria: 'Pesquisador', quantidade: 1 }, { categoria: 'Pesquisador Estrangeiro', quantidade: 1 }],
+            [m('Bruno', 'Pesquisador', 'UFC'), m('Hans', 'Pesquisador Estrangeiro', 'UFC')],
+            '');
+        const iPesq = r.colunas.findIndex(c => c.categoria === 'Pesquisador');
+        const iEstr = r.colunas.findIndex(c => c.categoria === 'Pesquisador Estrangeiro');
+        assert.strictEqual(r.instituicoes[0].cols[iPesq], 1);
+        assert.strictEqual(r.instituicoes[0].cols[iEstr], 1);
+    });
+
+    test('membro sem instituicao entra como "-" e nao some da conta', () => {
+        const r = B._quadroDaEquipe([], [m('Ana', 'Pesquisador', ''), m('Bruno', 'Pesquisador', 'UFC')], '');
+        assert.deepStrictEqual(r.instituicoes.map(i => i.nome).sort(), ['-', 'UFC']);
+        assert.strictEqual(r.instituicoes.reduce((s, i) => s + i.total, 0), 2);
+    });
+
+    test('equipe vazia nao quebra', () => {
+        const r = B._quadroDaEquipe([], [], '');
+        assert.deepStrictEqual(r.colunas, []);
+        assert.deepStrictEqual(r.instituicoes, []);
+        assert.strictEqual(r.divergente, false);
+        assert.deepStrictEqual(B._quadroDaEquipe(null, null, null).colunas, []);
+    });
+});
