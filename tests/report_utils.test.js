@@ -253,3 +253,73 @@ describe('agruparPorPeriodico', () => {
         assert.deepStrictEqual(R.agruparPorPeriodico(null, 0, 2026), []);
     });
 });
+
+// Classificacao de orientacoes: eram closures dentro do grafico por ano. A ordem
+// dos testes importa mais do que parece — "pos-doutorado" contem "doutorado".
+describe('tipoDeOrientacao', () => {
+    const t = (cat, ref) => R.tipoDeOrientacao({ category: cat, reference: ref || '' });
+
+    test('reconhece os tipos principais', () => {
+        assert.strictEqual(t('Tese de doutorado'), 'doutorado');
+        assert.strictEqual(t('Dissertação de mestrado'), 'mestrado');
+        assert.strictEqual(t('Iniciação científica'), 'ic');
+    });
+
+    // Inverter a ordem faria TODA supervisao de pos-doutorado virar doutorado,
+    // inflando justamente a contagem que mais pesa na avaliacao.
+    test('pos-doutorado nao e lido como doutorado, em nenhuma das grafias', () => {
+        ['Supervisão de pós-doutorado', 'Supervisao de pos-doutorado',
+         'Supervisão de pós doutorado', 'Supervisao de pos doutorado'].forEach(c => {
+            assert.strictEqual(t(c), 'posdoc', c);
+        });
+    });
+
+    test('pos-doutorado tambem e reconhecido pela referencia', () => {
+        assert.strictEqual(t('Outras', 'estágio de pós-doutorado no exterior'), 'posdoc');
+    });
+
+    test('o que nao casa com nenhum tipo vai para outras', () => {
+        assert.strictEqual(t('Orientações de outra natureza'), 'outras');
+        assert.strictEqual(t('Trabalho de conclusão de curso de graduação'), 'outras');
+        assert.strictEqual(t(''), 'outras');
+    });
+});
+
+describe('ehCoorientacao', () => {
+    test('reconhece as duas grafias, na categoria ou na referencia', () => {
+        assert.strictEqual(R.ehCoorientacao({ category: 'Tese de doutorado (Coorientador)' }), true);
+        assert.strictEqual(R.ehCoorientacao({ category: 'Tese', reference: 'Co-orientador: Fulano' }), true);
+    });
+
+    test('orientacao comum nao e coorientacao', () => {
+        assert.strictEqual(R.ehCoorientacao({ category: 'Tese de doutorado', reference: 'Orientador: Fulano' }), false);
+        assert.strictEqual(R.ehCoorientacao({}), false);
+    });
+});
+
+describe('subtipoDeOutras', () => {
+    const s = (cat, ref) => R.subtipoDeOutras({ category: cat, reference: ref || '' });
+
+    test('agrupa graduacao e TCC sob o mesmo rotulo', () => {
+        assert.strictEqual(s('Trabalho de conclusão de curso de graduação'), 'TCC / Graduação');
+    });
+
+    test('agrupa especializacao e aperfeicoamento', () => {
+        assert.strictEqual(s('Monografia de conclusão de curso de aperfeiçoamento/especialização'),
+                           'Especialização / Aperfeiçoamento');
+    });
+
+    test('outra natureza tem rotulo proprio', () => {
+        assert.strictEqual(s('Orientações de outra natureza'), 'Outra natureza');
+    });
+
+    // O sufixo (Coorientador) e informacao de papel, nao de tipo: sem remove-lo, a
+    // mesma categoria apareceria duas vezes na tabela.
+    test('remove o sufixo de coorientador do rotulo', () => {
+        assert.strictEqual(s('Categoria Estranha (Coorientador)'), 'Categoria Estranha');
+    });
+
+    test('sem categoria, cai em Outras', () => {
+        assert.strictEqual(s(''), 'Outras');
+    });
+});

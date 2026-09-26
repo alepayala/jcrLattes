@@ -667,6 +667,62 @@ window.JCRReportUtils = {
     `;
   },
 
+  // Classificacao de uma orientacao. Eram tres closures dentro do grafico de
+  // orientacoes por ano; sao regras de dominio, entao viram metodos com teste.
+  //
+  // A ordem importa: "pos-doutorado" CONTEM "doutorado", por isso o primeiro teste
+  // exclui explicitamente as quatro grafias de pos (com e sem hifen, com e sem
+  // acento). Inverter os dois faria toda supervisao de pos-doutorado virar
+  // doutorado, inflando a contagem que mais pesa na avaliacao.
+  //
+  // O teste de IC aceita a sigla solta ('ic'), o que e frouxo — qualquer categoria
+  // com essas duas letras casaria. Nas oito categorias que o Lattes usa de fato
+  // (conferidas nos curriculos de test_pages) nenhuma outra contem "ic", entao a
+  // regra fica como esta; apertar isso e mudanca de comportamento, nao arrumacao.
+  tipoDeOrientacao: function (item) {
+    const cat = (item.category || '').toLowerCase();
+    const ref = (item.reference || '').toLowerCase();
+
+    if (cat.includes('doutorado') && !cat.includes('pos-doutorado') && !cat.includes('pós-doutorado') && !cat.includes('pos doutorado') && !cat.includes('pós doutorado')) {
+      return 'doutorado';
+    }
+    if (cat.includes('pos-doutorado') || cat.includes('pós-doutorado') || cat.includes('pos doutorado') || cat.includes('pós doutorado') || ref.includes('pós-doutorado') || ref.includes('pos-doutorado')) {
+      return 'posdoc';
+    }
+    if (cat.includes('mestrado')) {
+      return 'mestrado';
+    }
+    if (cat.includes('iniciação científica') || cat.includes('iniciacao cientifica') || cat.includes('ic') || ref.includes('iniciação científica') || ref.includes('iniciacao cientifica')) {
+      return 'ic';
+    }
+    return 'outras';
+  },
+
+
+  ehCoorientacao: function (item) {
+    const cat = (item.category || '');
+    const ref = (item.reference || '');
+    return cat.includes('Coorientador') || cat.includes('Co-orientador') || ref.includes('Coorientador') || ref.includes('Co-orientador');
+  },
+
+
+  subtipoDeOutras: function (item) {
+    const cat = (item.category || '').toLowerCase();
+    const ref = (item.reference || '').toLowerCase();
+
+    if (cat.includes('trabalho de conclusão') || cat.includes('graduação') || cat.includes('tcc') || ref.includes('graduação')) {
+      return 'TCC / Graduação';
+    }
+    if (cat.includes('especialização') || cat.includes('especializacao') || cat.includes('aperfeiçoamento')) {
+      return 'Especialização / Aperfeiçoamento';
+    }
+    if (cat.includes('outra natureza') || ref.includes('outra natureza')) {
+      return 'Outra natureza';
+    }
+    let cleanCat = item.category ? item.category.replace(/\s*\(Coorientador\)/gi, '').trim() : 'Outras';
+    return cleanCat || 'Outras';
+  },
+
   generateSupervisionsPerYearGraphHTML: function(supervisionsInput) {
     let rawItems = [];
     if (Array.isArray(supervisionsInput)) {
@@ -687,53 +743,12 @@ window.JCRReportUtils = {
     let minYear = Infinity;
     let maxYear = new Date().getFullYear();
 
-    const getSupervisionType = (item) => {
-      const cat = (item.category || '').toLowerCase();
-      const ref = (item.reference || '').toLowerCase();
-
-      if (cat.includes('doutorado') && !cat.includes('pos-doutorado') && !cat.includes('pós-doutorado') && !cat.includes('pos doutorado') && !cat.includes('pós doutorado')) {
-        return 'doutorado';
-      }
-      if (cat.includes('pos-doutorado') || cat.includes('pós-doutorado') || cat.includes('pos doutorado') || cat.includes('pós doutorado') || ref.includes('pós-doutorado') || ref.includes('pos-doutorado')) {
-        return 'posdoc';
-      }
-      if (cat.includes('mestrado')) {
-        return 'mestrado';
-      }
-      if (cat.includes('iniciação científica') || cat.includes('iniciacao cientifica') || cat.includes('ic') || ref.includes('iniciação científica') || ref.includes('iniciacao cientifica')) {
-        return 'ic';
-      }
-      return 'outras';
-    };
-
-    const isCoorientacao = (item) => {
-      const cat = (item.category || '');
-      const ref = (item.reference || '');
-      return cat.includes('Coorientador') || cat.includes('Co-orientador') || ref.includes('Coorientador') || ref.includes('Co-orientador');
-    };
-
-    const getOutrasSubtypeLabel = (item) => {
-      const cat = (item.category || '').toLowerCase();
-      const ref = (item.reference || '').toLowerCase();
-
-      if (cat.includes('trabalho de conclusão') || cat.includes('graduação') || cat.includes('tcc') || ref.includes('graduação')) {
-        return 'TCC / Graduação';
-      }
-      if (cat.includes('especialização') || cat.includes('especializacao') || cat.includes('aperfeiçoamento')) {
-        return 'Especialização / Aperfeiçoamento';
-      }
-      if (cat.includes('outra natureza') || ref.includes('outra natureza')) {
-        return 'Outra natureza';
-      }
-      let cleanCat = item.category ? item.category.replace(/\s*\(Coorientador\)/gi, '').trim() : 'Outras';
-      return cleanCat || 'Outras';
-    };
 
     rawItems.forEach(item => {
-      const type = getSupervisionType(item);
+      const type = this.tipoDeOrientacao(item);
       if (!type) return;
 
-      const isCo = isCoorientacao(item);
+      const isCo = this.ehCoorientacao(item);
       const isEmAndamento = item.status === 'Em andamento' || (item.status !== 'Concluída' && isNaN(item.year));
 
       if (type === 'ic') {
@@ -742,7 +757,7 @@ window.JCRReportUtils = {
       } else if (type === 'outras') {
         outrasData.total++;
         if (isCo) outrasData.coor++;
-        const sub = getOutrasSubtypeLabel(item);
+        const sub = this.subtipoDeOutras(item);
         outrasData.subTypes[sub] = (outrasData.subTypes[sub] || 0) + 1;
       } else if (isEmAndamento) {
         inProgressData[type].total++;
