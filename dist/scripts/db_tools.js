@@ -3889,6 +3889,9 @@ window.JCRDBTools = {
 
         // Filter publications based on UI state
         const filteredPublications = publications.filter(pub => {
+            // jif PRIMEIRO, ao contrario de JCRReportUtils.valorJcr: aqui as publicacoes
+            // vem do banco, onde extractData grava o fator como jif. impactFactor so
+            // aparece em registro salvo por versao antiga, e serve de reserva.
             let ifVal = pub.jif !== undefined ? pub.jif : (pub.impactFactor !== undefined ? pub.impactFactor : 0);
             ifVal = parseFloat(ifVal) || 0;
             

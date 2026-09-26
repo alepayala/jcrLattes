@@ -158,3 +158,27 @@ describe('faixaDeJcr', () => {
         assert.strictEqual(R.faixaDeJcr(6, 1, 0.1), 'high');
     });
 });
+
+// O fator de impacto tem dois formatos: impactFactor em memoria (o que os leitores
+// devolvem) e jif no banco (extractData converte ao salvar). Este acessor cobre o
+// caso comum; o filtro do relatorio em db_tools inverte a ordem de proposito,
+// porque la os dados vem do banco.
+describe('valorJcr', () => {
+    test('prefere impactFactor, o formato em memoria', () => {
+        assert.strictEqual(R.valorJcr({ impactFactor: '3.5', jif: 9 }), '3.5');
+    });
+
+    test('usa jif quando nao ha impactFactor', () => {
+        assert.strictEqual(R.valorJcr({ jif: 2.4 }), 2.4);
+    });
+
+    // impactFactor: 0 e um valor lido, nao ausencia: nao pode cair para o jif
+    test('impactFactor zero nao e tratado como ausente', () => {
+        assert.strictEqual(R.valorJcr({ impactFactor: 0, jif: 9 }), 0);
+    });
+
+    test('sem nenhum dos dois, devolve undefined', () => {
+        assert.strictEqual(R.valorJcr({}), undefined);
+        assert.strictEqual(R.valorJcr(null), undefined);
+    });
+});

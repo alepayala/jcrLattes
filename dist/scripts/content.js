@@ -1467,7 +1467,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       if (isTableFiltered) {
         const targetRank = parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1;
         const filteredForStats = lattesInfo.filter(pub => {
-          const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+          const impactFactorStr = window.JCRReportUtils.valorJcr(pub);
           const category = window.JCRReportUtils.faixaDeJcr(impactFactorStr, highJcr, lowJcr);
           const ifVal = category === 'noJcr' ? 0 : parseFloat(impactFactorStr);
 

@@ -36,6 +36,24 @@ window.JCRReportUtils = {
 
   JOURNAL_STRIP_SUFFIXES: ['(print)', '(online)','(Cambridge. Online)','(Impresso)','(Internet)','(Philadelphia, PA)','(New York)','(São Paulo. Impresso)','(London. 1996. Print)'],
 
+  // Fator de impacto de uma publicacao. Existem DOIS formatos, e isso nao e
+  // descuido:
+  //   impactFactor  e o que os leitores devolvem, em memoria (lattes_parser)
+  //   jif           e o que fica gravado no banco — extractData converte na hora de
+  //                 salvar (jif: pub.impactFactor ? parseFloat(...) : 0)
+  //
+  // Por isso cada lado prefere o formato do seu contexto: aqui e em content.js, que
+  // trabalham com dados recem-lidos, impactFactor vem primeiro; o filtro do
+  // relatorio em db_tools, que le do banco, inverte a ordem de proposito. Nao
+  // "unifique" aquela ordem: ela esta certa para o lado dela.
+  //
+  // cvNeedsUpdate usa a presenca de impactFactor num registro GRAVADO como sinal de
+  // formato antigo, que e o mesmo raciocinio visto do outro lado.
+  valorJcr: function (pub) {
+    if (!pub) return undefined;
+    return pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+  },
+
   // Faixa de JCR de um valor de fator de impacto. Uma implementacao so: a regra
   // estava repetida em cinco lugares (tres aqui, uma em db_tools e uma em
   // content.js) e um limiar interpretado de forma diferente em qualquer uma delas
@@ -118,7 +136,7 @@ window.JCRReportUtils = {
           if (pub.year > maxYear) maxYear = pub.year;
         }
         
-        const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+        const impactFactorStr = this.valorJcr(pub);
         
         let isFirstAuthor = false;
         if (targetRank === 1) {
@@ -291,7 +309,7 @@ window.JCRReportUtils = {
     lowVal = parseFloat(lowVal);
     const allJcrValues = publications
       .map(pub => {
-        const val = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+        const val = this.valorJcr(pub);
         return val !== null && val !== undefined && val !== '' ? parseFloat(val) : 0;
       });
 
@@ -448,7 +466,7 @@ window.JCRReportUtils = {
       }
 
       let category = 'none';
-      const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+      const impactFactorStr = this.valorJcr(pub);
       
       category = this.faixaDeJcr(impactFactorStr, highVal, lowVal);
       papersByYear[pub.year][category]++;
@@ -523,7 +541,7 @@ window.JCRReportUtils = {
 
     publications.forEach(pub => {
       let category = 'none';
-      const impactFactorStr = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+      const impactFactorStr = this.valorJcr(pub);
       
       category = this.faixaDeJcr(impactFactorStr, highVal, lowVal);
 
@@ -1658,7 +1676,7 @@ ${htmlText}`;
       const stripped = stripName(pub.journalName);
       if (!stripped) continue;
       const lk = stripped.toLowerCase();
-      const rawJif = pub.impactFactor !== undefined ? pub.impactFactor : pub.jif;
+      const rawJif = this.valorJcr(pub);
       const pubJif = parseFloat(rawJif) || 0;
       const issn = (pub.issn && pub.issn.trim() !== '-') ? pub.issn.trim() : '';
 
