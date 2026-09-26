@@ -443,3 +443,70 @@ describe('lerEquipe', () => {
         assert.deepStrictEqual(P.lerEquipe(undefined), []);
     });
 });
+
+// --- Quadro Geral ------------------------------------------------------------
+
+describe('lerQuadroGeral', () => {
+    const it = (x, y, str) => ({ page: 1, x, y, str });
+    const topo = [it(50, 500, 'Quadro Geral'), it(50, 490, 'CATEGORIA'), it(200, 490, 'NÚMERO')];
+
+    test('le o numero quando vem no mesmo item da categoria', () => {
+        const r = P.lerQuadroGeral([].concat(topo, [it(50, 470, 'Pesquisador 5'), it(50, 460, 'Aluno 10')]));
+        assert.deepStrictEqual(r, [
+            { categoria: 'Pesquisador', quantidade: 5 },
+            { categoria: 'Aluno', quantidade: 10 },
+        ]);
+    });
+
+    test('le o numero quando vem numa coluna a direita, pelo y', () => {
+        const r = P.lerQuadroGeral([].concat(topo, [
+            it(50, 470, 'Pesquisador'), it(200, 470, '5'),
+            it(50, 460, 'Aluno'), it(200, 460, '10'),
+        ]));
+        assert.deepStrictEqual(r, [
+            { categoria: 'Pesquisador', quantidade: 5 },
+            { categoria: 'Aluno', quantidade: 10 },
+        ]);
+    });
+
+    // O PDF quebra "Pesquisador Estrangeiro" em dois itens com o mesmo y. Casando
+    // cada pedaco com o numero da linha, saiam duas categorias — "Pesquisador" e
+    // "Estrangeiro" —, ambas com a mesma quantidade, inflando o total da equipe.
+    test('remonta a categoria quebrada em dois itens na mesma linha', () => {
+        const r = P.lerQuadroGeral([].concat(topo, [
+            it(50, 470, 'Pesquisador'), it(110, 470, 'Estrangeiro'), it(200, 470, '3'),
+        ]));
+        assert.deepStrictEqual(r, [{ categoria: 'Pesquisador Estrangeiro', quantidade: 3 }]);
+    });
+
+    test('remonta na ordem de leitura, nao na ordem dos itens', () => {
+        const r = P.lerQuadroGeral([].concat(topo, [
+            it(110, 470, 'Estrangeiro'), it(50, 470, 'Pesquisador'), it(200, 470, '3'),
+        ]));
+        assert.strictEqual(r[0].categoria, 'Pesquisador Estrangeiro');
+    });
+
+    test('o cabecalho da tabela nao vira categoria', () => {
+        const r = P.lerQuadroGeral([].concat(topo, [
+            it(50, 470, 'CATEGORIA'), it(120, 470, 'PARTICIPANTES'),
+            it(50, 460, 'Aluno'), it(200, 460, '7'),
+        ]));
+        assert.deepStrictEqual(r, [{ categoria: 'Aluno', quantidade: 7 }]);
+    });
+
+    // O bloco termina onde a secao seguinte comeca.
+    test('para na secao seguinte e nao invade o RESUMO', () => {
+        const r = P.lerQuadroGeral([].concat(topo, [
+            it(50, 470, 'Pesquisador'), it(200, 470, '5'),
+            it(50, 450, 'RESUMO'),
+            it(50, 440, 'Texto do resumo'), it(200, 440, '99'),
+        ]));
+        assert.deepStrictEqual(r, [{ categoria: 'Pesquisador', quantidade: 5 }]);
+    });
+
+    test('sem o bloco, ou com entrada invalida, devolve lista vazia', () => {
+        assert.deepStrictEqual(P.lerQuadroGeral([it(50, 500, 'Outra coisa')]), []);
+        assert.deepStrictEqual(P.lerQuadroGeral([]), []);
+        assert.deepStrictEqual(P.lerQuadroGeral(null), []);
+    });
+});

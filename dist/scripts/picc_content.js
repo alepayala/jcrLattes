@@ -618,78 +618,8 @@
         // 6. Anexos da proposta (bloco DOCUMENTOS ANEXOS), curriculos por ultimo.
         const attachments = P._anexos(fullText);
 
-        // ---- Quadro Geral: totais por categoria informados no proprio PDF ----
-        //   Quadro Geral
-        //   CATEGORIA        NUMERO DE PARTICIPANTES
-        //   Pesquisador      5
-        //   Aluno            10
-        // O numero pode vir no MESMO item de texto da categoria ("Pesquisador 5") ou numa
-        // coluna a direita, com y proximo — tratamos os dois casos por coordenada.
-        let quadroGeral = [];
-        {
-            const iQg = allPageItems.findIndex(it => /^Quadro\s+Geral\b/i.test(it.str.trim()));
-            if (iQg >= 0) {
-                const pagina = allPageItems[iQg].page;
-                const yTopo = allPageItems[iQg].y;
-                let yFim = yTopo - 120;   // limite inferior do bloco
-
-                // ...ou ate o inicio da secao seguinte, se ela vier antes
-                for (let k = 0; k < allPageItems.length; k++) {
-                    const it = allPageItems[k];
-                    if (it.page !== pagina || it.y >= yTopo) continue;
-                    if (/^(RESUMO|PALAVRAS|OBJETIVO|METODOLOGIA)/i.test(it.str.trim())) {
-                        yFim = Math.max(yFim, it.y);
-                        break;
-                    }
-                }
-
-                const bloco = allPageItems.filter(it => it.page === pagina && it.y < yTopo && it.y > yFim);
-                const categorias = [];   // { y, texto }
-                const numeros = [];      // { y, valor }
-
-                bloco.forEach(it => {
-                    const t = it.str.trim();
-                    if (!t) return;
-                    if (/^(CATEGORIA|N[ÚU]MERO|DE|PARTICIPANTES)$/i.test(t)) return;   // cabecalho
-                    if (/^N[ÚU]MERO\s+DE\s+PARTICIPANTES$/i.test(t)) return;
-                    if (/^\d+$/.test(t)) { numeros.push({ y: it.y, valor: parseInt(t, 10) }); return; }
-
-                    const juntos = t.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.\-]*?)\s+(\d+)$/);
-                    if (juntos) {
-                        quadroGeral.push({ categoria: juntos[1].replace(/\s+/g, ' ').trim(), quantidade: parseInt(juntos[2], 10) });
-                        return;
-                    }
-                    if (/^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.\-]*$/.test(t) && t.length <= 40) {
-                        categorias.push({ y: it.y, x: it.x, texto: t.replace(/\s+/g, ' ').trim() });
-                    }
-                });
-
-                // Layout em duas colunas: casa cada LINHA de categoria com o numero de y
-                // proximo. Os pedacos de uma mesma linha sao juntados antes: o PDF quebra
-                // "Pesquisador Estrangeiro" em dois itens de texto com o mesmo y, e casar
-                // cada pedaco com o numero da linha criava duas categorias — "Pesquisador"
-                // e "Estrangeiro" —, ambas com a mesma quantidade, inflando o total.
-                if (quadroGeral.length === 0) {
-                    const linhasCat = [];
-                    categorias.forEach(c => {
-                        const alvo = linhasCat.find(l => Math.abs(l.y - c.y) <= 4);
-                        if (alvo) alvo.partes.push(c);
-                        else linhasCat.push({ y: c.y, partes: [c] });
-                    });
-                    linhasCat.forEach(l => {
-                        const texto = l.partes
-                            .slice()
-                            .sort((a, b) => a.x - b.x)      // remonta a linha na ordem de leitura
-                            .map(p => p.texto)
-                            .join(' ')
-                            .replace(/\s+/g, ' ')
-                            .trim();
-                        const n = numeros.find(v => Math.abs(v.y - l.y) <= 4);
-                        if (texto && n) quadroGeral.push({ categoria: texto, quantidade: n.valor });
-                    });
-                }
-            }
-        }
+        // Quadro Geral (contagem oficial do CNPq), lido em picc_parser.js.
+        const quadroGeral = P.lerQuadroGeral(allPageItems);
 
         const supplementaryLink = attachments.length > 0 ? attachments[0].url : '';
 
