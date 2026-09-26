@@ -310,23 +310,10 @@
     }
 
     function isValidBolsa(b) {
-        if (!b || typeof b !== 'string') return false;
-        const clean = b.trim().replace(/\s+/g, ' ');
-        if (clean === '' || clean === '-') return false;
-        // Niveis aceitos: 1A-1D, 2 e SR, alem de A, B e C — estes aparecem na coluna
-        // BOLSA do PDF separados por espaco ("Doutorado PQ C Universidade..."), e sem
-        // eles mais da metade dos membros de equipe das propostas de amostra perdia o
-        // nivel e ficava com "-".
-        //
-        // 1A-1D, 2 e SR podem vir colados ao prefixo ("PQ1A"); a letra sozinha exige
-        // separador, senao "DTA" — analise termica, comum no texto das propostas —
-        // seria lido como bolsa DT nivel A.
-        return /^(PQ|DT)\s*[-–]?\s*(1[A-D]|2|SR)$/i.test(clean)
-            || /^(PQ|DT)\s*[-–\s]\s*[A-C]$/i.test(clean);
+        const P = (typeof window !== 'undefined') ? window.JCRPiccParser : null;
+        return P ? P._ehBolsaValida(b) : false;
     }
 
-    // Implementação única em JCRReportUtils (report_utils.js), carregado antes deste
-    // script tanto no efomento quanto na página do Lattes. Antes havia duas cópias.
     function makeSelfContainedHtml(htmlText, baseUrl) {
         if (window.JCRReportUtils && typeof window.JCRReportUtils.makeSelfContainedHtml === 'function') {
             return window.JCRReportUtils.makeSelfContainedHtml(htmlText, baseUrl);
@@ -507,58 +494,19 @@
 
     // Helper to fetch and parse process details directly from PDF arrayBuffer
     async function parseProcessFromPDF(arrayBuffer, pdfUrl) {
-        // A montagem dos itens do PDF (ordenar por pagina/Y/X e agrupar em linhas com
-        // tolerancia de 4pt) mora em db_tools._itensDoPdf: o relatorio da proposta faz a
-        // mesma leitura quando precisa completar titulo e resumo de uma proposta antiga.
-        // Eram duas copias da mesma regra; se a tolerancia mudasse numa so, as duas
-        // leituras passariam a discordar sobre o que e uma linha.
-        const DBm = (typeof window !== 'undefined') ? window.JCRDBTools : null;
-        const itensPdf = (DBm && typeof DBm._itensDoPdf === 'function')
-            ? await DBm._itensDoPdf(arrayBuffer)
-            : null;
+        // A leitura do PDF mora em picc_parser.js.
+        const P = (typeof window !== 'undefined') ? window.JCRPiccParser : null;
+        if (!P) throw new Error("picc_parser.js nao carregado");
+        const itensPdf = await P.itensDoPdf(arrayBuffer);
         if (!itensPdf) throw new Error("pdfjsLib não disponível");
         const allPageItems = itensPdf.allPageItems;
         const allLines = itensPdf.allLines;
         const fullText = itensPdf.fullText;
 
-        // Helper to extract UF from institution string
-        function extractUf(instStr) {
-            if (!instStr) return '';
-            const m = instStr.match(/-([A-Z]{2})-/i) || instStr.match(/,?\s*\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/i);
-            return m ? m[1].toUpperCase() : '';
-        }
-
-        function isValidLattesUrl(url) {
-            if (!url) return false;
-            return /^https?:\/\/lattes\.cnpq\.br\/\d{16}$/i.test(url.trim());
-        }
-
-        function cleanFormacao(str) {
-            if (!str) return '';
-            let s = str
-                .replace(/https?:\/\/[^\s]+/gi, '')
-                .replace(/lattes\.cnpq\.br\/\d*/gi, '')
-                .replace(/\b\d{16}\b/g, '')
-                .replace(/\b(URL|DO|CURRÍCULO|FORMAÇÃO|TITULAÇÃO|NOME|BOLSA|INSTITUIÇÃO|DEPARTAMENTO|ÁREAS|ATUAÇÃO|PESQUISADOR|EQUIPE|TEMPO|DEDIC|PROJ|HORAS|SEMANA)\b/gi, '')
-                .replace(/\s+/g, ' ')
-                .trim();
-
-            const validDegreeRegex = /\b(Doutorado|Doutor|Mestrado|Mestre|Especializa[çc][ãa]o|Especialista|Gradua[çc][ãa]o|Graduado|Bacharel|Licenciatura|Ensino\s+M[ée]dio|T[ée]cnico|P[óo]s-Doutorado)\b/i;
-            const match = s.match(validDegreeRegex);
-            if (match) {
-                const rawMatch = match[0];
-                const lower = rawMatch.toLowerCase();
-                if (lower.startsWith('doutor')) return 'Doutorado';
-                if (lower.startsWith('mestr')) return 'Mestrado';
-                if (lower.startsWith('especializ') || lower.startsWith('especialist')) return 'Especialização';
-                if (lower.startsWith('gradua') || lower.startsWith('bacharel') || lower.startsWith('licencia')) return 'Graduação';
-                if (lower.startsWith('pós-doutor') || lower.startsWith('pos-doutor')) return 'Pós-Doutorado';
-                if (lower.startsWith('ensino')) return 'Ensino Médio';
-                if (lower.startsWith('téc') || lower.startsWith('tec')) return 'Técnico';
-                return rawMatch;
-            }
-            return '';
-        }
+        // Os helpers de texto (UF, URL do Lattes, titulacao) vivem no leitor.
+        const extractUf = P._uf;
+        const isValidLattesUrl = P._ehUrlLattes;
+        const cleanFormacao = P._formacao;
 
         // 1. Extract Edital (from URL path like /doc/Universal_2026/ or PDF text SIGLA:)
         let edital = '';
@@ -659,12 +607,8 @@
             }
         }
 
-        // 5c. Titulo (em portugues) e Resumo do projeto. A leitura mora em db_tools.js
-        //     porque o relatorio da proposta tambem precisa dela, e ele roda em db.html,
-        //     onde este arquivo nao e carregado.
-        const tituloResumo = (window.JCRDBTools && typeof window.JCRDBTools._lerTituloResumoPdf === 'function')
-            ? window.JCRDBTools._lerTituloResumoPdf(allPageItems, allLines, fullText)
-            : { tituloProjeto: '', resumoProjeto: '' };
+        // 5c. Titulo (em portugues) e Resumo do projeto.
+        const tituloResumo = P.lerTituloResumo(allPageItems, allLines, fullText);
         const tituloProjeto = tituloResumo.tituloProjeto;
         const resumoProjeto = tituloResumo.resumoProjeto;
 

@@ -20,5 +20,6 @@ module.exports = {
     producoes: () => carregar('producoes_parser.js').JCRProducoes,
     relatorio: () => carregar('report_utils.js').JCRReportUtils,
     banco: () => carregar('db_tools.js').JCRDBTools,
-    lattes: () => carregar('lattes_parser.js').JCRLattesParser
+    lattes: () => carregar('lattes_parser.js').JCRLattesParser,
+    picc: () => carregar('picc_parser.js').JCRPiccParser
 };

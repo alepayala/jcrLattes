@@ -62,6 +62,7 @@
         "scripts/db_tools.js",
         "scripts/producoes_parser.js",
         "scripts/pdf.min.js",
+        "scripts/picc_parser.js",
         "scripts/picc_content.js"
       ]
     }
