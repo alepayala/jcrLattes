@@ -675,14 +675,17 @@ function colunaTabelaCv(chave, rotulo, dica) {
   return `<th class="jcr-main-header-extra" style="display: ${jcrTablesState[chave] ? 'none' : ''}; padding: 8px; text-align: center;" title="${dica}">${rotulo}</th>`;
 }
 
-async function injectReportTable(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank = 1) {
-  // get main content div (absent na versão impressa do CV)
-  const mainContentDiv = document.getElementsByClassName('main-content')[0];
-  if (!mainContentDiv) {
-    console.log('JCR Lattes: div .main-content não encontrada. Relatório não será injetado.');
-    return;
-  }
-
+// ---------------------------------------------------------------------------
+// Monta o HTML do painel que vai para o topo do CV. So GERA — nao procura
+// elemento, nao escreve na pagina, nao liga listener. Quem injeta e
+// injectReportTable, logo abaixo.
+//
+// A separacao existe porque a mudanca anunciada do Curriculo Lattes traz
+// formatacao nova junto com a estrutura nova: assim, o que muda com o layout
+// fica aqui, e quem calcula os numeros nao e tocado. A geracao estava
+// intercalada com a criacao do container, que passou para o lado da injecao.
+// ---------------------------------------------------------------------------
+function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank) {
   const getSoftColor = window.JCRReportUtils.getSoftColor.bind(window.JCRReportUtils);
   const bgTotal = '#f8f9fa';
   const bgHigh = getSoftColor(COLORS.highJcr, 0.85);
@@ -749,19 +752,6 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
         </tbody>
       </table>
     </div>`;
-
-  // create new alert div
-  let alertDiv = document.querySelector('#annotation-alert-div');
-  if (!alertDiv) {
-    alertDiv = document.createElement('div');
-    setAttributes(alertDiv, {
-      class: 'max-width min-width', // Removed main-content class as it is now nested
-      id: 'annotation-alert-div',
-      style: `margin-bottom: 10px; border-bottom: 4px double ${COLORS.alertBorder}; padding-bottom: 10px;`
-    });
-    // inject alert div into Lattes page as the first child of the main content div
-    mainContentDiv.insertBefore(alertDiv, mainContentDiv.firstChild);
-  }
 
 
   let declaredHTML = '';
@@ -960,9 +950,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   // Preserva os botões do banco de dados já renderizados: o innerHTML abaixo
   // apaga o mount, e o re-render dos botões é assíncrono (loadSettings/RID).
   // Sem isso, os ícones somem/reaparecem a cada reprocessamento e a página "treme".
-  const prevDbMount = document.getElementById('jcr-db-tools-mount');
 
-  alertDiv.innerHTML = headerHTML + `
+  return headerHTML + `
     <div id="jcr-report-content">
       <div id="jcr-report-tables">
          ${tableHTML}
@@ -973,6 +962,35 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       </div>
     </div>
   `;
+}
+
+async function injectReportTable(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank = 1) {
+  // get main content div (absent na versão impressa do CV)
+  const mainContentDiv = document.getElementsByClassName('main-content')[0];
+  if (!mainContentDiv) {
+    console.log('JCR Lattes: div .main-content não encontrada. Relatório não será injetado.');
+    return;
+  }
+
+  const painelHTML = montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCustom,
+    customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank);
+
+  // create new alert div
+  let alertDiv = document.querySelector('#annotation-alert-div');
+  if (!alertDiv) {
+    alertDiv = document.createElement('div');
+    setAttributes(alertDiv, {
+      class: 'max-width min-width', // Removed main-content class as it is now nested
+      id: 'annotation-alert-div',
+      style: `margin-bottom: 10px; border-bottom: 4px double ${COLORS.alertBorder}; padding-bottom: 10px;`
+    });
+    // inject alert div into Lattes page as the first child of the main content div
+    mainContentDiv.insertBefore(alertDiv, mainContentDiv.firstChild);
+  }
+
+  const prevDbMount = document.getElementById('jcr-db-tools-mount');
+
+  alertDiv.innerHTML = painelHTML;
 
   if (prevDbMount && prevDbMount.childNodes.length > 0) {
     const newMount = alertDiv.querySelector('#jcr-db-tools-mount');
