@@ -685,6 +685,58 @@ function colunaTabelaCv(chave, rotulo, dica) {
 // fica aqui, e quem calcula os numeros nao e tocado. A geracao estava
 // intercalada com a criacao do container, que passou para o lado da injecao.
 // ---------------------------------------------------------------------------
+// Area de controles e graficos que vai abaixo das tabelas do painel. So GERA:
+// recebe o que precisa e devolve HTML. Os quatro graficos vem prontos do
+// report_utils; aqui eles so sao embalados no layout da pagina.
+function montarAreaDeGraficos(togglesHTML, lattesInfo, stats, highJcr, lowJcr) {
+  const histogramHTML = window.JCRReportUtils.generateHistogramHTML(lattesInfo, highJcr, lowJcr);
+  const papersPerYearHTML = window.JCRReportUtils.generatePapersPerYearGraphHTML(lattesInfo, highJcr, lowJcr);
+  const authorRankHistogramHTML = window.JCRReportUtils.generateAuthorRankHistogramHTML(lattesInfo, highJcr, lowJcr, true, true);
+  const supervisionsPerYearHTML = window.JCRReportUtils.generateSupervisionsPerYearGraphHTML(stats.supervisions);
+
+  return `
+    <div style="width: 100%;">
+        ${togglesHTML}
+    </div>
+    <div style="width: 100%; display: flex; flex-direction: column; gap: 10px;" id="graphs-wrapper">
+      <div class="rodape-cv" style="margin-top: 0px; color: ${COLORS.footerText}; font-size: 1.1em;">
+        <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
+          <thead>
+            <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
+              <th style="padding: 8px; text-align: left;">
+                <span class="toggle-table-btn" data-target="graficos" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.graficos ? '[+]' : '[-]'}</span> Gráficos
+              </th>
+            </tr>
+          </thead>
+          <tbody id="tbody-graficos" style="display: ${jcrTablesState.graficos ? 'none' : ''};">
+            <tr>
+              <td style="padding: 0; text-align: left;">
+                <div style="padding: 10px; background-color: ${COLORS.backgroundSubHeader}; font-size: 0.9em; color: ${COLORS.footerText}; display: flex; flex-direction: column; gap: 10px;">
+                  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 300px;" id="histogram-container">
+                        ${histogramHTML}
+                    </div>
+                    <div style="flex: 1; min-width: 300px;" id="papers-year-container">
+                        ${papersPerYearHTML}
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 300px;" id="author-rank-histogram-container">
+                        ${authorRankHistogramHTML}
+                    </div>
+                    <div style="flex: 1; min-width: 300px;" id="supervisions-year-container">
+                        ${supervisionsPerYearHTML}
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank) {
   const getSoftColor = window.JCRReportUtils.getSoftColor.bind(window.JCRReportUtils);
   const bgTotal = '#f8f9fa';
@@ -1018,53 +1070,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   toggleContainer.style.flexDirection = 'column';
   toggleContainer.style.gap = '10px';
 
-  const histogramHTML = window.JCRReportUtils.generateHistogramHTML(lattesInfo, highJcr, lowJcr);
-  const papersPerYearHTML = window.JCRReportUtils.generatePapersPerYearGraphHTML(lattesInfo, highJcr, lowJcr);
-  const authorRankHistogramHTML = window.JCRReportUtils.generateAuthorRankHistogramHTML(lattesInfo, highJcr, lowJcr, true, true);
-  const supervisionsPerYearHTML = window.JCRReportUtils.generateSupervisionsPerYearGraphHTML(stats.supervisions);
-
-  toggleContainer.innerHTML = `
-    <div style="width: 100%;">
-        ${togglesHTML}
-    </div>
-    <div style="width: 100%; display: flex; flex-direction: column; gap: 10px;" id="graphs-wrapper">
-      <div class="rodape-cv" style="margin-top: 0px; color: ${COLORS.footerText}; font-size: 1.1em;">
-        <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-          <thead>
-            <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
-              <th style="padding: 8px; text-align: left;">
-                <span class="toggle-table-btn" data-target="graficos" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.graficos ? '[+]' : '[-]'}</span> Gráficos
-              </th>
-            </tr>
-          </thead>
-          <tbody id="tbody-graficos" style="display: ${jcrTablesState.graficos ? 'none' : ''};">
-            <tr>
-              <td style="padding: 0; text-align: left;">
-                <div style="padding: 10px; background-color: ${COLORS.backgroundSubHeader}; font-size: 0.9em; color: ${COLORS.footerText}; display: flex; flex-direction: column; gap: 10px;">
-                  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 300px;" id="histogram-container">
-                        ${histogramHTML}
-                    </div>
-                    <div style="flex: 1; min-width: 300px;" id="papers-year-container">
-                        ${papersPerYearHTML}
-                    </div>
-                  </div>
-                  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 300px;" id="author-rank-histogram-container">
-                        ${authorRankHistogramHTML}
-                    </div>
-                    <div style="flex: 1; min-width: 300px;" id="supervisions-year-container">
-                        ${supervisionsPerYearHTML}
-                    </div>
-                  </div>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  `;
+  toggleContainer.innerHTML = montarAreaDeGraficos(togglesHTML, lattesInfo, stats, highJcr, lowJcr);
   reportContent.appendChild(toggleContainer);
 
   // --- Cache DB Elements ---
