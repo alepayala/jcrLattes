@@ -636,6 +636,45 @@ function injectYearSeparator(pubElem, year) {
 
 
 
+// ---------------------------------------------------------------------------
+// Desenho das tabelas recolhiveis do painel do CV.
+//
+// Isto e APRESENTACAO: quando a pagina do Lattes mudar de formato, e aqui que se
+// mexe, e nao em quem calcula os numeros. As quatro tabelas menores — citacoes,
+// orientacoes, patentes e eventos — tinham esta moldura escrita uma vez cada,
+// variando so a chave, o numero de colunas e os cabecalhos. Publicacoes fica de
+// fora: o cabecalho dela tem duas linhas, por causa das faixas de JCR.
+//
+// recolhida controla tres coisas ao mesmo tempo: o simbolo do botao, o colspan do
+// titulo (que ocupa a largura toda quando as colunas somem) e a visibilidade do
+// corpo.
+// ---------------------------------------------------------------------------
+function molduraTabelaCv({ chave, titulo, totalCols, colunas, corpo }) {
+  const recolhida = !!jcrTablesState[chave];
+  return `
+            <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
+              <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
+                <thead>
+                  <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
+                    <th class="jcr-main-header-cell" data-total-cols="${totalCols}" colspan="${recolhida ? totalCols : 1}" style="padding: 8px; text-align: left;">
+                      <span class="toggle-table-btn" data-target="${chave}" style="cursor: pointer; user-select: none; margin-right: 5px;">${recolhida ? '[+]' : '[-]'}</span> ${titulo}
+                    </th>
+                    ${colunas}
+                  </tr>
+                </thead>
+                <tbody id="tbody-${chave}" style="display: ${recolhida ? 'none' : ''};">
+                  ${corpo}
+                </tbody>
+              </table>
+            </div>
+      `;
+}
+
+// Coluna do cabecalho de uma tabela recolhivel: some junto com o corpo.
+function colunaTabelaCv(chave, rotulo, dica) {
+  return `<th class="jcr-main-header-extra" style="display: ${jcrTablesState[chave] ? 'none' : ''}; padding: 8px; text-align: center;" title="${dica}">${rotulo}</th>`;
+}
+
 async function injectReportTable(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank = 1) {
   // get main content div (absent na versão impressa do CV)
   const mainContentDiv = document.getElementsByClassName('main-content')[0];
@@ -882,26 +921,15 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   if (stats.all.patents.total > 0) {
     const rowsHtml = window.JCRReportUtils.corpoTabelaContagens(stats, 'patents', 'statusCounts');
 
-    patentTableHTML = `
-            <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
-              <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-                <thead>
-                  <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
-                    <th class="jcr-main-header-cell" data-total-cols="5" colspan="${jcrTablesState.patentes ? 5 : 1}" style="padding: 8px; text-align: left;">
-                      <span class="toggle-table-btn" data-target="patentes" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.patentes ? '[+]' : '[-]'}</span> Patentes
-                    </th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Total de patentes (todos os anos)">Total (${minYear} - ${maxYear})</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Patentes registradas nos últimos 10 anos">10 Anos (${startYearLast10} - ${maxYear})</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Patentes registradas nos últimos 5 anos">5 Anos (${startYearRecent} - ${maxYear})</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.patentes ? 'none' : ''}; padding: 8px; text-align: center;" title="Patentes registradas nos últimos ${customYears} anos">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'} (${startYearCustom} - ${maxYear})</th>
-                  </tr>
-                </thead>
-                <tbody id="tbody-patentes" style="display: ${jcrTablesState.patentes ? 'none' : ''};">
-                  ${rowsHtml}
-                </tbody>
-              </table>
-            </div>
-      `;
+    patentTableHTML = molduraTabelaCv({
+      chave: 'patentes', titulo: 'Patentes', totalCols: 5, corpo: rowsHtml,
+      colunas: [
+        colunaTabelaCv('patentes', `Total (${minYear} - ${maxYear})`, `Total de patentes (todos os anos)`),
+        colunaTabelaCv('patentes', `10 Anos (${startYearLast10} - ${maxYear})`, `Patentes registradas nos últimos 10 anos`),
+        colunaTabelaCv('patentes', `5 Anos (${startYearRecent} - ${maxYear})`, `Patentes registradas nos últimos 5 anos`),
+        colunaTabelaCv('patentes', `${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'} (${startYearCustom} - ${maxYear})`, `Patentes registradas nos últimos ${customYears} anos`),
+      ].join('')
+    });
   }
 
   // Event Table
@@ -909,26 +937,15 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   if (stats.all.events.total > 0) {
     const rowsHtml = window.JCRReportUtils.corpoTabelaContagens(stats, 'events', 'typeCounts');
 
-    eventTableHTML = `
-            <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
-              <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-                <thead>
-                  <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
-                    <th class="jcr-main-header-cell" data-total-cols="5" colspan="${jcrTablesState.eventos ? 5 : 1}" style="padding: 8px; text-align: left;">
-                      <span class="toggle-table-btn" data-target="eventos" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.eventos ? '[+]' : '[-]'}</span> Participação em Eventos
-                    </th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Total de participações em eventos (todos os anos)">Total (${minYear} - ${maxYear})</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Participações em eventos nos últimos 10 anos">10 Anos (${startYearLast10} - ${maxYear})</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Participações em eventos nos últimos 5 anos">5 Anos (${startYearRecent} - ${maxYear})</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.eventos ? 'none' : ''}; padding: 8px; text-align: center;" title="Participações em eventos nos últimos ${customYears} anos">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'} (${startYearCustom} - ${maxYear})</th>
-                  </tr>
-                </thead>
-                <tbody id="tbody-eventos" style="display: ${jcrTablesState.eventos ? 'none' : ''};">
-                  ${rowsHtml}
-                </tbody>
-              </table>
-            </div>
-      `;
+    eventTableHTML = molduraTabelaCv({
+      chave: 'eventos', titulo: 'Participação em Eventos', totalCols: 5, corpo: rowsHtml,
+      colunas: [
+        colunaTabelaCv('eventos', `Total (${minYear} - ${maxYear})`, `Total de participações em eventos (todos os anos)`),
+        colunaTabelaCv('eventos', `10 Anos (${startYearLast10} - ${maxYear})`, `Participações em eventos nos últimos 10 anos`),
+        colunaTabelaCv('eventos', `5 Anos (${startYearRecent} - ${maxYear})`, `Participações em eventos nos últimos 5 anos`),
+        colunaTabelaCv('eventos', `${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'} (${startYearCustom} - ${maxYear})`, `Participações em eventos nos últimos ${customYears} anos`),
+      ].join('')
+    });
   }
 
   const headerHTML = `
