@@ -1061,6 +1061,33 @@ window.JCRReportUtils = {
     `;
   },
 
+  // Moldura da tabela de orientacoes: a mesma para os dois caminhos de
+  // generateSupervisionTableHTML — o formato antigo, que so tem as contagens
+  // agregadas, e a arvore por tipo e instituicao. O cabecalho estava escrito duas
+  // vezes, e um ajuste de coluna feito num so deixaria as duas tabelas diferentes.
+  _tabelaDeOrientacoes: function (linhas, customYears) {
+    const plural = (customYears == 1 || customYears == 0) ? 'Ano' : 'Anos';
+    return `
+      <div class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
+        <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
+          <thead>
+            <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
+              <th style="padding: 8px; text-align: left;">Orientações</th>
+              <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Em Andamento</th>
+              <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Concluídas</th>
+              <th style="padding: 8px; text-align: center;">10 Anos</th>
+              <th style="padding: 8px; text-align: center;">5 Anos</th>
+              <th style="padding: 8px; text-align: center;">${customYears} ${plural}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linhas}
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
   generateSupervisionTableHTML: function(stats, customYears) {
     const { supervisions } = stats;
     if (!supervisions || (!supervisions.inCourse && !supervisions.concluded && (!supervisions.raw || supervisions.raw.length === 0))) return '';
@@ -1095,25 +1122,7 @@ window.JCRReportUtils = {
           `;
         });
 
-        return `
-          <div class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
-            <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-              <thead>
-                <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
-                  <th style="padding: 8px; text-align: left;">Orientações</th>
-                  <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Em Andamento</th>
-                  <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Concluídas</th>
-                  <th style="padding: 8px; text-align: center;">10 Anos</th>
-                  <th style="padding: 8px; text-align: center;">5 Anos</th>
-                  <th style="padding: 8px; text-align: center;">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows}
-              </tbody>
-            </table>
-          </div>
-        `;
+        return this._tabelaDeOrientacoes(rows, customYears);
     }
 
     const currentYear = new Date().getFullYear();
@@ -1282,25 +1291,7 @@ window.JCRReportUtils = {
         rows += instRows;
     });
 
-    return `
-      <div class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
-        <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-          <thead>
-            <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
-              <th style="padding: 8px; text-align: left;">Orientações</th>
-              <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Em Andamento</th>
-              <th style="padding: 8px; text-align: center; border-left: 1px solid #ccc;">Concluídas</th>
-              <th style="padding: 8px; text-align: center;">10 Anos</th>
-              <th style="padding: 8px; text-align: center;">5 Anos</th>
-              <th style="padding: 8px; text-align: center;">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      </div>
-    `;
+    return this._tabelaDeOrientacoes(rows, customYears);
   },
 
   generatePatentTableHTML: function(stats, customYears) {
