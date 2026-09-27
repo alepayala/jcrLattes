@@ -777,22 +777,9 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
     `;
   }
 
-  const citationTableHTML = `
-    <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
-      <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-        <thead>
-          <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
-            <th class="jcr-main-header-cell" data-total-cols="5" colspan="${jcrTablesState.citacoes ? 5 : 1}" style="padding: 8px; text-align: left;">
-              <span class="toggle-table-btn" data-target="citacoes" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.citacoes ? '[+]' : '[-]'}</span> Citações
-            </th>
-            <th class="jcr-main-header-extra" style="display: ${jcrTablesState.citacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Total de citações extraídas da Web of Science">Citações Web of Science</th>
-            <th class="jcr-main-header-extra" style="display: ${jcrTablesState.citacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Índice H calculado a partir das citações da Web of Science">Índice H Web of Science</th>
-            <th class="jcr-main-header-extra" style="display: ${jcrTablesState.citacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Total de citações extraídas da Scopus">Citações Scopus</th>
-            <th class="jcr-main-header-extra" style="display: ${jcrTablesState.citacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Índice H calculado a partir das citações da Scopus">Índice H Scopus</th>
-          </tr>
-        </thead>
-        <tbody id="tbody-citacoes" style="display: ${jcrTablesState.citacoes ? 'none' : ''};">
-          ${declaredHTML}
+  const citationTableHTML = molduraTabelaCv({
+      chave: 'citacoes', titulo: 'Citações', totalCols: 5,
+      corpo: `${declaredHTML}
           <tr style="border-bottom: 1px solid #ddd;">
              <td style="padding: 8px; text-align: left;">Total (${minYear} - ${maxYear})</td>
              <td style="padding: 8px; text-align: center;">${stats.all.citations.wos.sum}</td>
@@ -820,11 +807,14 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
              <td style="padding: 8px; text-align: center;">${stats.custom.citations.wos.hIndex}</td>
              <td style="padding: 8px; text-align: center;">${stats.custom.citations.scopus.sum}</td>
              <td style="padding: 8px; text-align: center;">${stats.custom.citations.scopus.hIndex}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  `;
+          </tr>`,
+      colunas: [
+        colunaTabelaCv('citacoes', `Citações Web of Science`, `Total de citações extraídas da Web of Science`),
+        colunaTabelaCv('citacoes', `Índice H Web of Science`, `Índice H calculado a partir das citações da Web of Science`),
+        colunaTabelaCv('citacoes', `Citações Scopus`, `Total de citações extraídas da Scopus`),
+        colunaTabelaCv('citacoes', `Índice H Scopus`, `Índice H calculado a partir das citações da Scopus`),
+      ].join('')
+    });
 
   // Supervision Table
   let supervisionTableHTML = '';
@@ -892,27 +882,17 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
               `;
       });
 
-      supervisionTableHTML = `
-            <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
-              <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-                <thead>
-                  <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
-                    <th class="jcr-main-header-cell" data-total-cols="6" colspan="${jcrTablesState.orientacoes ? 6 : 1}" style="padding: 8px; text-align: left;">
-                      <span class="toggle-table-btn" data-target="orientacoes" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.orientacoes ? '[+]' : '[-]'}</span> Orientações
-                    </th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Total de orientações atualmente em curso">Em Andamento</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Total histórico de orientações concluídas">Concluídas</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Orientações concluídas nos últimos 10 anos">10 Anos</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Orientações concluídas nos últimos 5 anos">5 Anos</th>
-                    <th class="jcr-main-header-extra" style="display: ${jcrTablesState.orientacoes ? 'none' : ''}; padding: 8px; text-align: center;" title="Orientações concluídas nos últimos ${customYears} anos">${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}</th>
-                  </tr>
-                </thead>
-                <tbody id="tbody-orientacoes" style="display: ${jcrTablesState.orientacoes ? 'none' : ''};">
-                  ${rows}
-                </tbody>
-              </table>
-            </div>
-          `;
+      supervisionTableHTML = molduraTabelaCv({
+      chave: 'orientacoes', titulo: 'Orientações', totalCols: 6,
+      corpo: `${rows}`,
+      colunas: [
+        colunaTabelaCv('orientacoes', `Em Andamento`, `Total de orientações atualmente em curso`),
+        colunaTabelaCv('orientacoes', `Concluídas`, `Total histórico de orientações concluídas`),
+        colunaTabelaCv('orientacoes', `10 Anos`, `Orientações concluídas nos últimos 10 anos`),
+        colunaTabelaCv('orientacoes', `5 Anos`, `Orientações concluídas nos últimos 5 anos`),
+        colunaTabelaCv('orientacoes', `${customYears} ${customYears == 1 || customYears == 0 ? 'Ano' : 'Anos'}`, `Orientações concluídas nos últimos ${customYears} anos`),
+      ].join('')
+    });
     }
   }
 
