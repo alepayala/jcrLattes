@@ -626,3 +626,19 @@ describe('colunasDaPlanilha', () => {
         assert.strictEqual(P.colunasDaPlanilha(null).instituicao, 4);
     });
 });
+
+// Um rotulo repetido no cabecalho tem de resolver para a coluna da esquerda. Sem
+// isto a leitura iria para a coluna mais a direita, que costuma ser um resumo.
+// A regra veio de lerChamadaDaTabela, que a tinha e agora usa esta funcao.
+describe('colunasDaPlanilha com rotulo repetido', () => {
+    test('a primeira ocorrencia vence', () => {
+        const r = P.colunasDaPlanilha(['Chamada', 'Instituição', 'Chamada (resumo)']);
+        assert.strictEqual(r.chamada, 0);
+    });
+
+    test('vale para todos os campos', () => {
+        const r = P.colunasDaPlanilha(['Nº do Processo', 'Ações', 'Nº do Processo', 'Ações']);
+        assert.strictEqual(r.processo, 0);
+        assert.strictEqual(r.acoes, 1);
+    });
+});

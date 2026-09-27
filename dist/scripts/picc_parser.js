@@ -683,24 +683,28 @@
             chamada: -1, parecerAdHoc: -1, parecerTecnico: -1, acoes: -1
         };
 
+        // A PRIMEIRA ocorrencia vence: se um rotulo aparecer duas vezes, a coluna da
+        // esquerda e a que vale. Sem isto, um cabecalho repetido levaria a leitura
+        // para a coluna mais a direita, que costuma ser um resumo ou um total.
         (Array.isArray(textosDoCabecalho) ? textosDoCabecalho : []).forEach((bruto, idx) => {
             const texto = String(bruto || '').trim().toLowerCase();
+            const jaAchou = (campo) => col[campo] !== -1;
             if (texto.includes('processo') || texto.includes('nº do processo') || texto.includes('n° do processo')) {
-                col.processo = idx;
+                if (!jaAchou('processo')) col.processo = idx;
             } else if (texto.includes('proponente') && !texto.includes('uf')) {
-                col.proponente = idx;
+                if (!jaAchou('proponente')) col.proponente = idx;
             } else if (texto.includes('uf')) {
-                col.uf = idx;
+                if (!jaAchou('uf')) col.uf = idx;
             } else if (texto.includes('institui')) {
-                col.instituicao = idx;
+                if (!jaAchou('instituicao')) col.instituicao = idx;
             } else if (texto.includes('chamada') || texto.includes('edital')) {
-                col.chamada = idx;
+                if (!jaAchou('chamada')) col.chamada = idx;
             } else if (texto.includes('parecer ad') || texto.includes('parecer adhoc') || texto.includes('parecer ad-hoc')) {
-                col.parecerAdHoc = idx;
+                if (!jaAchou('parecerAdHoc')) col.parecerAdHoc = idx;
             } else if (texto.includes('parecer téc') || texto.includes('parecer tec')) {
-                col.parecerTecnico = idx;
+                if (!jaAchou('parecerTecnico')) col.parecerTecnico = idx;
             } else if (texto.includes('açõ') || texto.includes('acoes')) {
-                col.acoes = idx;
+                if (!jaAchou('acoes')) col.acoes = idx;
             }
         });
 

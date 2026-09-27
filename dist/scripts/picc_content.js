@@ -906,11 +906,10 @@
                 const primeira = tabela.querySelector('tr');
                 if (primeira) cabecalho = Array.from(primeira.querySelectorAll('th, td'));
             }
-            let idx = -1;
-            cabecalho.forEach((c, i) => {
-                const t = (c.innerText || c.textContent || '').trim().toLowerCase();
-                if (idx === -1 && (t.includes('chamada') || t.includes('edital'))) idx = i;
-            });
+            // Qual coluna e a da chamada quem decide e o leitor, com a mesma regra que
+            // a extracao da carteira usa — antes esta funcao tinha a sua propria copia.
+            const idx = window.JCRPiccParser.colunasDaPlanilha(
+                cabecalho.map(c => (c.innerText || c.textContent || ''))).chamada;
             if (idx === -1) return '';
 
             const linhas = tabela.querySelectorAll('tbody tr, tr');
