@@ -553,3 +553,76 @@ describe('lerProponente', () => {
         assert.deepStrictEqual(P.lerProponente(null), { instituicao: '', formacao: '' });
     });
 });
+
+// --- Planilha de julgamento --------------------------------------------------
+// A posicao das colunas muda conforme o comite e conforme o que o usuario habilita
+// na propria pagina, entao nada pode ser fixo. Quando a Plataforma mudar os
+// rotulos, e esta funcao que se ajusta.
+describe('colunasDaPlanilha', () => {
+    const CABECALHO = ['', 'Nº do Processo', 'Proponente', 'UF', 'Instituição',
+                       'Chamada', 'Parecer Ad Hoc', 'Parecer Técnico', 'Ações'];
+
+    test('mapeia cada campo pela sua coluna', () => {
+        assert.deepStrictEqual(P.colunasDaPlanilha(CABECALHO), {
+            processo: 1, proponente: 2, uf: 3, instituicao: 4,
+            chamada: 5, parecerAdHoc: 6, parecerTecnico: 7, acoes: 8,
+        });
+    });
+
+    test('acompanha a coluna quando a ordem muda', () => {
+        const r = P.colunasDaPlanilha(['Ações', 'Instituição', 'Nº do Processo', 'Proponente']);
+        assert.strictEqual(r.acoes, 0);
+        assert.strictEqual(r.instituicao, 1);
+        assert.strictEqual(r.processo, 2);
+        assert.strictEqual(r.proponente, 3);
+    });
+
+    // Os dois comecam com "parecer": se o tecnico fosse testado primeiro, roubaria a
+    // coluna do ad hoc e os pareceres iriam para o campo errado.
+    test('parecer tecnico nao rouba a coluna do parecer ad hoc', () => {
+        const r = P.colunasDaPlanilha(['Parecer Ad Hoc', 'Parecer Técnico']);
+        assert.strictEqual(r.parecerAdHoc, 0);
+        assert.strictEqual(r.parecerTecnico, 1);
+    });
+
+    test('aceita as grafias de parecer ad hoc, com e sem hifen', () => {
+        assert.strictEqual(P.colunasDaPlanilha(['Parecer AdHoc']).parecerAdHoc, 0);
+        assert.strictEqual(P.colunasDaPlanilha(['Parecer Ad-Hoc']).parecerAdHoc, 0);
+    });
+
+    test('parecer tecnico e reconhecido com e sem acento', () => {
+        assert.strictEqual(P.colunasDaPlanilha(['Parecer Técnico']).parecerTecnico, 0);
+        assert.strictEqual(P.colunasDaPlanilha(['Parecer Tecnico']).parecerTecnico, 0);
+    });
+
+    // Existe cabecalho "UF do proponente": sem a exclusao, ele viraria a coluna do
+    // nome do proponente.
+    test('"UF do proponente" e coluna de UF, e nao de proponente', () => {
+        const r = P.colunasDaPlanilha(['UF do proponente', 'Proponente']);
+        assert.strictEqual(r.uf, 0);
+        assert.strictEqual(r.proponente, 1);
+    });
+
+    test('chamada tambem atende por edital', () => {
+        assert.strictEqual(P.colunasDaPlanilha(['Edital']).chamada, 0);
+    });
+
+    // Fallback historico: so os quatro campos que sempre existiram na mesma ordem.
+    test('cabecalho irreconhecivel cai nas posicoes historicas', () => {
+        const r = P.colunasDaPlanilha(['a', 'b', 'c', 'd', 'e']);
+        assert.strictEqual(r.processo, 1);
+        assert.strictEqual(r.proponente, 2);
+        assert.strictEqual(r.uf, 3);
+        assert.strictEqual(r.instituicao, 4);
+        // os demais ficam ausentes, e quem le trata isso
+        assert.strictEqual(r.chamada, -1);
+        assert.strictEqual(r.parecerAdHoc, -1);
+        assert.strictEqual(r.parecerTecnico, -1);
+        assert.strictEqual(r.acoes, -1);
+    });
+
+    test('entrada vazia ou invalida ainda devolve os fallbacks', () => {
+        assert.strictEqual(P.colunasDaPlanilha([]).processo, 1);
+        assert.strictEqual(P.colunasDaPlanilha(null).instituicao, 4);
+    });
+});

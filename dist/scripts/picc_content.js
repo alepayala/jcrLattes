@@ -1900,47 +1900,11 @@
             return;
         }
 
-        // Map column headers dynamically by header text
-        const colIndexes = {
-            processo: -1,
-            proponente: -1,
-            uf: -1,
-            instituicao: -1,
-            chamada: -1,
-            parecerAdHoc: -1,
-            parecerTecnico: -1,
-            acoes: -1
-        };
-
-        const headerCells = table.querySelectorAll('thead th, thead td');
-        headerCells.forEach((th, idx) => {
-            const text = (th.innerText || th.textContent || '').trim().toLowerCase();
-            if (text.includes('processo') || text.includes('nº do processo') || text.includes('n° do processo')) {
-                colIndexes.processo = idx;
-            } else if (text.includes('proponente') && !text.includes('uf')) {
-                colIndexes.proponente = idx;
-            } else if (text.includes('uf')) {
-                colIndexes.uf = idx;
-            } else if (text.includes('institui')) {
-                colIndexes.instituicao = idx;
-            } else if (text.includes('chamada') || text.includes('edital')) {
-                colIndexes.chamada = idx;
-            } else if (text.includes('parecer ad') || text.includes('parecer adhoc') || text.includes('parecer ad-hoc')) {
-                colIndexes.parecerAdHoc = idx;
-            } else if (text.includes('parecer téc') || text.includes('parecer tec')) {
-                // Coluna "Parecer técnico": vazia, "Pré-selecionado" ou "Não pré-selecionado".
-                // Checada depois de "parecer ad" para nao roubar aquela coluna.
-                colIndexes.parecerTecnico = idx;
-            } else if (text.includes('açõ') || text.includes('acoes')) {
-                colIndexes.acoes = idx;
-            }
-        });
-
-        // Fallbacks if header mapping wasn't found
-        if (colIndexes.processo === -1) colIndexes.processo = 1;
-        if (colIndexes.proponente === -1) colIndexes.proponente = 2;
-        if (colIndexes.uf === -1) colIndexes.uf = 3;
-        if (colIndexes.instituicao === -1) colIndexes.instituicao = 4;
+        // Os textos do cabecalho sao lidos aqui; a interpretacao — qual coluna e
+        // qual — mora em picc_parser.js, junto com o resto da leitura da Plataforma.
+        const textosDoCabecalho = Array.from(table.querySelectorAll('thead th, thead td'))
+            .map(th => (th.innerText || th.textContent || ''));
+        const colIndexes = window.JCRPiccParser.colunasDaPlanilha(textosDoCabecalho);
 
         // Parse requested process list from filter input if provided (space-separated)
         const filterInput = document.getElementById('picc-process-filter-input');

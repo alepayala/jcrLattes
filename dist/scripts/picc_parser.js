@@ -661,8 +661,63 @@
         return { instituicao: propInst, formacao: page1PropFormacao };
     }
 
+    // ------------------------------------------------------------------
+    // Planilha de julgamento
+    // ------------------------------------------------------------------
+
+    // Descobre em que coluna esta cada campo, a partir dos textos do cabecalho da
+    // tabela de propostas. Recebe os textos ja extraidos — quem le o DOM e
+    // picc_content — e devolve os indices.
+    //
+    // E o ponto mais fragil da leitura da planilha: a posicao das colunas muda
+    // conforme o comite e conforme o que o usuario habilita na propria pagina, entao
+    // nada pode ser fixo. Quando a Plataforma mudar os rotulos, e aqui que se ajusta.
+    //
+    // A ORDEM dos testes importa: "parecer tecnico" e verificado DEPOIS de "parecer
+    // ad hoc" porque os dois comecam com "parecer", e o primeiro roubaria a coluna do
+    // segundo. "proponente" exclui "uf" pelo mesmo motivo, ja que existe cabecalho
+    // "UF do proponente".
+    function colunasDaPlanilha(textosDoCabecalho) {
+        const col = {
+            processo: -1, proponente: -1, uf: -1, instituicao: -1,
+            chamada: -1, parecerAdHoc: -1, parecerTecnico: -1, acoes: -1
+        };
+
+        (Array.isArray(textosDoCabecalho) ? textosDoCabecalho : []).forEach((bruto, idx) => {
+            const texto = String(bruto || '').trim().toLowerCase();
+            if (texto.includes('processo') || texto.includes('nº do processo') || texto.includes('n° do processo')) {
+                col.processo = idx;
+            } else if (texto.includes('proponente') && !texto.includes('uf')) {
+                col.proponente = idx;
+            } else if (texto.includes('uf')) {
+                col.uf = idx;
+            } else if (texto.includes('institui')) {
+                col.instituicao = idx;
+            } else if (texto.includes('chamada') || texto.includes('edital')) {
+                col.chamada = idx;
+            } else if (texto.includes('parecer ad') || texto.includes('parecer adhoc') || texto.includes('parecer ad-hoc')) {
+                col.parecerAdHoc = idx;
+            } else if (texto.includes('parecer téc') || texto.includes('parecer tec')) {
+                col.parecerTecnico = idx;
+            } else if (texto.includes('açõ') || texto.includes('acoes')) {
+                col.acoes = idx;
+            }
+        });
+
+        // Posicoes historicas, para o caso de o cabecalho nao ser reconhecido. So
+        // valem para os quatro campos que sempre existiram na mesma ordem; os demais
+        // ficam em -1 e quem le trata a ausencia.
+        if (col.processo === -1) col.processo = 1;
+        if (col.proponente === -1) col.proponente = 2;
+        if (col.uf === -1) col.uf = 3;
+        if (col.instituicao === -1) col.instituicao = 4;
+
+        return col;
+    }
+
     raiz.JCRPiccParser = {
         itensDoPdf: itensDoPdf,
+        colunasDaPlanilha: colunasDaPlanilha,
         lerTituloResumo: lerTituloResumo,
         lerEquipe: lerEquipe,
         lerQuadroGeral: lerQuadroGeral,
