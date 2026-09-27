@@ -365,3 +365,55 @@ describe('corpoTabelaPublicacoes', () => {
         assert.strictEqual((html.match(/<tr/g) || []).length, 4);
     });
 });
+
+// Patentes por situacao e trabalhos em eventos por tipo tem a mesma forma — uma
+// linha por categoria nos quatro periodos, mais o Total. Estavam escritas quatro
+// vezes: a tabela do CV e a do relatorio, para cada uma das duas.
+describe('corpoTabelaContagens', () => {
+    const pat = (c) => ({ patents: { statusCounts: c, total: Object.values(c).reduce((a, b) => a + b, 0) } });
+    const stats = {
+        all: pat({ 'Depositada': 3, 'Concedida': 2 }),
+        last10: pat({ 'Depositada': 2, 'Concedida': 1 }),
+        recent: pat({ 'Depositada': 1 }),
+        custom: pat({}),
+    };
+    const html = () => R.corpoTabelaContagens(stats, 'patents', 'statusCounts');
+
+    test('uma linha por categoria, mais a linha de Total', () => {
+        assert.strictEqual((html().match(/<tr/g) || []).length, 3);
+    });
+
+    test('as categorias saem em ordem alfabetica', () => {
+        const rotulos = html().match(/text-align: left;">([^<]+)</g).map(m => m.replace(/.*">/, '').replace('<', ''));
+        assert.deepStrictEqual(rotulos, ['Concedida', 'Depositada', 'Total']);
+    });
+
+    test('as colunas sao os quatro periodos, nesta ordem', () => {
+        // Concedida: 2 no total, 1 em 10 anos, 0 em 5 anos, 0 no periodo escolhido
+        const linha = html().split('<tr').find(l => l.includes('Concedida'));
+        const valores = (linha.match(/center;">(\d+)</g) || []).map(m => m.replace(/\D/g, ''));
+        assert.deepStrictEqual(valores, ['2', '1', '0', '0']);
+    });
+
+    test('a linha de Total usa os totais de cada periodo', () => {
+        const linha = html().split('<tr').find(l => l.includes('>Total<'));
+        const valores = (linha.match(/center;">(\d+)</g) || []).map(m => m.replace(/\D/g, ''));
+        assert.deepStrictEqual(valores, ['5', '3', '1', '0']);
+    });
+
+    test('escapa o nome da categoria', () => {
+        const st = { all: pat({ 'A & B <x>': 1 }), last10: pat({}), recent: pat({}), custom: pat({}) };
+        assert.ok(R.corpoTabelaContagens(st, 'patents', 'statusCounts').includes('A &amp; B &lt;x&gt;'));
+    });
+
+    test('serve igual para eventos, que usam outro mapa', () => {
+        const ev = (c) => ({ events: { typeCounts: c, total: Object.values(c).reduce((a, b) => a + b, 0) } });
+        const st = { all: ev({ 'Painel': 2 }), last10: ev({ 'Painel': 1 }), recent: ev({}), custom: ev({}) };
+        assert.ok(R.corpoTabelaContagens(st, 'events', 'typeCounts').includes('Painel'));
+    });
+
+    test('entrada sem o campo esperado devolve vazio, sem lancar', () => {
+        assert.strictEqual(R.corpoTabelaContagens({ all: {} }, 'patents', 'statusCounts'), '');
+        assert.strictEqual(R.corpoTabelaContagens(null, 'patents', 'statusCounts'), '');
+    });
+});

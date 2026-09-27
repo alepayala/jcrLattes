@@ -199,12 +199,9 @@ function debounce(func, wait) {
   };
 }
 
+// Mesma funcao que JCRReportUtils._esc; delega para nao manter duas copias.
 function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return window.JCRReportUtils._esc(str);
 }
 
 async function processLattesPage(nameLink) {
@@ -883,42 +880,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   // Patent Table
   let patentTableHTML = '';
   if (stats.all.patents.total > 0) {
-    // 1. Identify all unique rows (statuses) from 'all' stats
-    const allStatuses = Object.keys(stats.all.patents.statusCounts).sort();
-
-    // 2. Build Rows for each Status
-    let rowsHtml = '';
-
-    // Status Rows
-    allStatuses.forEach(status => {
-      const countAll = stats.all.patents.statusCounts[status] || 0;
-      // const countRecent = stats.recent.patents.statusCounts[status] || 0;
-      // const countLast10 = stats.last10.patents.statusCounts[status] || 0;
-
-      // Safe access helper
-      const getCount = (periodStats, s) => (periodStats.patents.statusCounts[s] || 0);
-
-      rowsHtml += `
-        <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${escHtml(status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.all, status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.last10, status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.custom, status)}</td>
-        </tr>
-      `;
-    });
-
-    // Total Row
-    rowsHtml += `
-      <tr style="border-bottom: 1px solid #ddd; background-color: ${COLORS.backgroundSubHeader}; font-weight: bold;">
-        <td style="padding: 8px; text-align: left;">Total</td>
-        <td style="padding: 8px; text-align: center;">${stats.all.patents.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.last10.patents.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.recent.patents.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.custom.patents.total}</td>
-      </tr>
-    `;
+    const rowsHtml = window.JCRReportUtils.corpoTabelaContagens(stats, 'patents', 'statusCounts');
 
     patentTableHTML = `
             <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
@@ -945,32 +907,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   // Event Table
   let eventTableHTML = '';
   if (stats.all.events.total > 0) {
-    const allTypes = Object.keys(stats.all.events.typeCounts).sort();
-    let rowsHtml = '';
-
-    allTypes.forEach(type => {
-      const getCount = (periodStats, t) => (periodStats.events.typeCounts[t] || 0);
-
-      rowsHtml += `
-        <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${escHtml(type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.all, type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.last10, type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.custom, type)}</td>
-        </tr>
-      `;
-    });
-
-    rowsHtml += `
-      <tr style="border-bottom: 1px solid #ddd; background-color: ${COLORS.backgroundSubHeader}; font-weight: bold;">
-        <td style="padding: 8px; text-align: left;">Total</td>
-        <td style="padding: 8px; text-align: center;">${stats.all.events.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.last10.events.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.recent.events.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.custom.events.total}</td>
-      </tr>
-    `;
+    const rowsHtml = window.JCRReportUtils.corpoTabelaContagens(stats, 'events', 'typeCounts');
 
     eventTableHTML = `
             <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">

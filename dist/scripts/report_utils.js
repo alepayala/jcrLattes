@@ -1314,35 +1314,41 @@ window.JCRReportUtils = {
     return this._tabelaDeOrientacoes(rows, customYears);
   },
 
+  // Corpo das tabelas que contam itens por categoria nos quatro periodos: patentes
+  // por situacao e trabalhos em eventos por tipo de participacao. As duas tem a
+  // mesma forma — uma linha por chave, mais a linha de Total —, e estavam escritas
+  // QUATRO vezes: a tabela do CV e a do relatorio, para cada uma das duas.
+  //
+  // Aqui vai so o corpo. A moldura fica em cada lado, porque e legitimamente
+  // diferente: no CV o cabecalho tem o botao de recolher, colspan dinamico e um
+  // tbody com id; no relatorio e um cabecalho simples.
+  //
+  // campo e 'patents' ou 'events'; mapa e o nome do mapa de contagens dentro dele
+  // ('statusCounts' para patentes, 'typeCounts' para eventos).
+  corpoTabelaContagens: function (stats, campo, mapa) {
+    const bloco = stats && stats.all && stats.all[campo];
+    if (!bloco || !bloco[mapa]) return '';
+
+    const linha = (rotulo, valores, destaque) => `
+        <tr style="border-bottom: 1px solid #ddd;${destaque ? ` background-color: ${this.COLORS.backgroundSubHeader}; font-weight: bold;` : ''}">
+          <td style="padding: 8px; text-align: left;">${rotulo}</td>
+          ${valores.map(v => `<td style="padding: 8px; text-align: center;">${v}</td>`).join('')}
+        </tr>
+      `;
+
+    const periodos = [stats.all, stats.last10, stats.recent, stats.custom];
+    let html = '';
+    Object.keys(bloco[mapa]).sort().forEach(chave => {
+      html += linha(this._esc(chave), periodos.map(p => (p[campo][mapa][chave] || 0)), false);
+    });
+    html += linha('Total', periodos.map(p => p[campo].total), true);
+    return html;
+  },
+
   generatePatentTableHTML: function(stats, customYears) {
     if (!stats.all.patents || stats.all.patents.total === 0) return '';
     
-    const allStatuses = Object.keys(stats.all.patents.statusCounts).sort();
-    let rowsHtml = '';
-
-    allStatuses.forEach(status => {
-      const getCount = (periodStats, s) => (periodStats.patents.statusCounts[s] || 0);
-
-      rowsHtml += `
-        <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${this._esc(status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.all, status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.last10, status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, status)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.custom, status)}</td>
-        </tr>
-      `;
-    });
-
-    rowsHtml += `
-      <tr style="border-bottom: 1px solid #ddd; background-color: ${this.COLORS.backgroundSubHeader}; font-weight: bold;">
-        <td style="padding: 8px; text-align: left;">Total</td>
-        <td style="padding: 8px; text-align: center;">${stats.all.patents.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.last10.patents.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.recent.patents.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.custom.patents.total}</td>
-      </tr>
-    `;
+    const rowsHtml = this.corpoTabelaContagens(stats, 'patents', 'statusCounts');
 
     return `
       <div class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
@@ -1367,32 +1373,7 @@ window.JCRReportUtils = {
   generateEventTableHTML: function(stats, customYears) {
     if (!stats.all.events || stats.all.events.total === 0) return '';
     
-    const allTypes = Object.keys(stats.all.events.typeCounts).sort();
-    let rowsHtml = '';
-
-    allTypes.forEach(type => {
-      const getCount = (periodStats, t) => (periodStats.events.typeCounts[t] || 0);
-
-      rowsHtml += `
-        <tr style="border-bottom: 1px solid #ddd;">
-          <td style="padding: 8px; text-align: left;">${this._esc(type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.all, type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.last10, type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.recent, type)}</td>
-          <td style="padding: 8px; text-align: center;">${getCount(stats.custom, type)}</td>
-        </tr>
-      `;
-    });
-
-    rowsHtml += `
-      <tr style="border-bottom: 1px solid #ddd; background-color: ${this.COLORS.backgroundSubHeader}; font-weight: bold;">
-        <td style="padding: 8px; text-align: left;">Total</td>
-        <td style="padding: 8px; text-align: center;">${stats.all.events.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.last10.events.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.recent.events.total}</td>
-        <td style="padding: 8px; text-align: center;">${stats.custom.events.total}</td>
-      </tr>
-    `;
+    const rowsHtml = this.corpoTabelaContagens(stats, 'events', 'typeCounts');
 
     return `
       <div class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
