@@ -323,3 +323,45 @@ describe('subtipoDeOutras', () => {
         assert.strictEqual(s(''), 'Outras');
     });
 });
+
+// A ordem das linhas desta tabela ja divergiu entre os tres lugares que a
+// montavam: a do topo do CV mostrava 10 anos antes de 5, e a redesenhada ao mexer
+// nos filtros invertia as duas. Os numeros estavam certos, mas as linhas trocavam
+// de lugar ao marcar o filtro, o que faz comparar periodos diferentes sem perceber.
+describe('corpoTabelaPublicacoes', () => {
+    const faixa = { count: 0, sum: 0 };
+    const bloco = { total: { count: 0, sum: 0, papersWithJcr: 0, firstAuthorCount: 0, lastAuthorCount: 0, gcCount: 0, authorCountSum: 0 },
+                    high: faixa, mid: faixa, low: faixa, noJcr: 0 };
+    const stats = { all: bloco, last10: bloco, recent: bloco, custom: bloco };
+    const anos = { min: 2000, max: 2026, last10: 2016, recent: 2021 };
+
+    test('a ordem e Total, 10 anos, 5 anos e o periodo escolhido', () => {
+        const html = R.corpoTabelaPublicacoes(stats, anos, '3 anos (2023 - 2026)');
+        const rotulos = html.match(/Total \(|10 anos \(|5 anos \(|3 anos \(/g);
+        assert.deepStrictEqual(rotulos, ['Total (', '10 anos (', '5 anos (', '3 anos (']);
+    });
+
+    test('10 anos vem sempre antes de 5 anos', () => {
+        const html = R.corpoTabelaPublicacoes(stats, anos, 'x');
+        assert.ok(html.indexOf('10 anos') < html.indexOf('5 anos'),
+            '10 anos precisa vir antes de 5 anos');
+    });
+
+    test('os intervalos de cada linha saem dos anos recebidos', () => {
+        const html = R.corpoTabelaPublicacoes(stats, anos, 'x');
+        assert.ok(html.includes('Total (2000 - 2026)'));
+        assert.ok(html.includes('10 anos (2016 - 2026)'));
+        assert.ok(html.includes('5 anos (2021 - 2026)'));
+    });
+
+    // No CV o rotulo do periodo e um <input> editavel; no relatorio e so o numero.
+    test('o rotulo do periodo entra como veio, inclusive com HTML', () => {
+        const html = R.corpoTabelaPublicacoes(stats, anos, '<input id="custom-year-input" value="7">');
+        assert.ok(html.includes('<input id="custom-year-input" value="7">'));
+    });
+
+    test('devolve quatro linhas', () => {
+        const html = R.corpoTabelaPublicacoes(stats, anos, 'x');
+        assert.strictEqual((html.match(/<tr/g) || []).length, 4);
+    });
+});

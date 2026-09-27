@@ -266,6 +266,26 @@ window.JCRReportUtils = {
     };
   },
 
+  // Corpo da tabela de estatisticas de publicacoes: Total, 10 anos, 5 anos e o
+  // periodo escolhido pelo usuario, nesta ordem.
+  //
+  // Existe porque as quatro linhas estavam escritas em TRES lugares — a tabela do
+  // topo do CV, a mesma tabela redesenhada quando se mexe nos filtros, e o
+  // relatorio — e uma delas tinha 5 e 10 anos trocados. Os numeros estavam certos
+  // nas duas, mas as linhas mudavam de lugar ao marcar o filtro, o que faz o leitor
+  // comparar periodos diferentes sem perceber.
+  //
+  // rotuloPeriodo e o unico texto que varia: no CV e um <input> editavel, no
+  // relatorio e so o numero.
+  corpoTabelaPublicacoes: function (stats, anos, rotuloPeriodo) {
+    return [
+      this.generateRow(`Total (${anos.min} - ${anos.max})`, stats.all),
+      this.generateRow(`10 anos (${anos.last10} - ${anos.max})`, stats.last10),
+      this.generateRow(`5 anos (${anos.recent} - ${anos.max})`, stats.recent),
+      this.generateRow(rotuloPeriodo, stats.custom),
+    ].join(String.fromCharCode(10));
+  },
+
   generateRow: function(label, data) {
     const bgTotal = '#f8f9fa';
     const bgHigh = this.getSoftColor(this.COLORS.highJcr, 0.85);

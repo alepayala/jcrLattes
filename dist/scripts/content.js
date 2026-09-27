@@ -707,10 +707,9 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
           </tr>
         </thead>
         <tbody id="tbody-publicacoes" style="display: ${jcrTablesState.publicacoes ? 'none' : ''};">
-          ${window.JCRReportUtils.generateRow(`Total (${minYear} - ${maxYear})`, stats.all)}
-          ${window.JCRReportUtils.generateRow(`10 anos (${startYearLast10} - ${maxYear})`, stats.last10)}
-          ${window.JCRReportUtils.generateRow(`5 anos (${startYearRecent} - ${maxYear})`, stats.recent)}
-          ${window.JCRReportUtils.generateRow(`<input type="number" id="custom-year-input" value="${customYears}" min="0" style="width: 40px; padding: 2px; text-align: center;"> ${customYears == 1 || customYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`, stats.custom)}
+          ${window.JCRReportUtils.corpoTabelaPublicacoes(stats,
+            { min: minYear, max: maxYear, last10: startYearLast10, recent: startYearRecent },
+            `<input type="number" id="custom-year-input" value="${customYears}" min="0" style="width: 40px; padding: 2px; text-align: center;"> ${customYears == 1 || customYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`)}
         </tbody>
       </table>
     </div>`;
@@ -1501,10 +1500,9 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       }
 
       tbody.innerHTML = `
-        ${window.JCRReportUtils.generateRow(`Total (${minYear} - ${maxYear})`, tableStats.all)}
-        ${window.JCRReportUtils.generateRow(`5 anos (${startYearRecent} - ${maxYear})`, tableStats.recent)}
-        ${window.JCRReportUtils.generateRow(`10 anos (${startYearLast10} - ${maxYear})`, tableStats.last10)}
-        ${window.JCRReportUtils.generateRow(`<input type="number" id="custom-year-input" value="${currentCustomYears}" min="0" style="width: 40px; padding: 2px; text-align: center;"> ${currentCustomYears == 1 || currentCustomYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`, tableStats.custom)}
+        ${window.JCRReportUtils.corpoTabelaPublicacoes(tableStats,
+          { min: minYear, max: maxYear, last10: startYearLast10, recent: startYearRecent },
+          `<input type="number" id="custom-year-input" value="${currentCustomYears}" min="0" style="width: 40px; padding: 2px; text-align: center;"> ${currentCustomYears == 1 || currentCustomYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`)}
       `;
       const newCyInput = document.getElementById('custom-year-input');
       if (newCyInput) {
