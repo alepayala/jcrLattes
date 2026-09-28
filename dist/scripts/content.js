@@ -369,12 +369,13 @@ async function checkAndUpdateProponenteLattesId(nameLink, finalStats = null, sup
       piccCvData.cvCongelado = frozenUrl;
     }
 
-    // ALWAYS save full CV object to dedicated piccTools CV DB (jcr_picc_cv:) and general DB (jcr_cv:)
+    // O CV completo vai para a base dedicada do piccTools (jcr_picc_cv:) e, por
+    // inGeneralDb, conta também como CV do banco geral — é uma cópia só, lida dos dois
+    // lados. Havia aqui uma segunda chamada, a saveCurrentCv (com v minúsculo), que
+    // pretendia gravar no banco geral: esse método não existe, então nunca rodou.
+    piccCvData.inGeneralDb = true;
     if (window.JCRDBTools.savePiccCV) {
       await window.JCRDBTools.savePiccCV(piccCvData);
-    }
-    if (window.JCRDBTools.saveCurrentCv) {
-      await window.JCRDBTools.saveCurrentCv(true);
     }
 
     // Update matching proposal entries with Lattes ID and Fellowship string

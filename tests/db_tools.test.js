@@ -734,3 +734,122 @@ describe('_filtrarPublicacoes', () => {
         assert.deepStrictEqual(B._filtrarPublicacoes([null], est()), []);
     });
 });
+
+// Um pesquisador pode ser membro de uma proposta do piccTools e ter o CV analisado
+// no Lattes. O registro fica numa chave so (jcr_picc_cv:) e aparece no banco geral
+// pelo campo inGeneralDb. Antes, ele sumia do geral.
+describe('CV do piccTools visivel no banco geral', () => {
+    // Stub minimo de chrome.storage.local sobre um objeto em memoria.
+    function comStorage(dados) {
+        const store = Object.assign({}, dados);
+        globalThis.chrome = {
+            runtime: { id: 'teste', lastError: null },
+            storage: {
+                local: {
+                    get: (_chaves, cb) => cb(Object.assign({}, store)),
+                    set: (obj, cb) => { Object.assign(store, obj); cb(); },
+                    remove: (chaves, cb) => {
+                        (Array.isArray(chaves) ? chaves : [chaves]).forEach(k => { delete store[k]; });
+                        cb();
+                    }
+                }
+            }
+        };
+        return store;
+    }
+
+    const cvCompleto = (nome, id) => ({
+        name: nome, lattesId: id, hasFullCv: true, publications: [{ year: 2024 }]
+    });
+    const esqueleto = (nome, id) => ({
+        name: nome, lattesId: id, hasFullCv: false, totalPapers: 0, papersWithJcr: 0
+    });
+
+    test('CV completo que so existe no banco do picc aparece no geral', async () => {
+        comStorage({ 'jcr_picc_cv:id:1111111111111111': cvCompleto('Maria', '1111111111111111') });
+        const db = await B.getDB(false);
+        assert.strictEqual(db.length, 1);
+        assert.strictEqual(db[0].name, 'Maria');
+    });
+
+    test('esqueleto criado pela importacao da proposta nao polui o banco geral', async () => {
+        comStorage({ 'jcr_picc_cv:id:2222222222222222': esqueleto('Joao', '2222222222222222') });
+        assert.deepStrictEqual(await B.getDB(false), []);
+    });
+
+    test('inGeneralDb:false esconde o registro do banco geral', async () => {
+        const cv = cvCompleto('Ana', '3333333333333333');
+        cv.inGeneralDb = false;
+        comStorage({ 'jcr_picc_cv:id:3333333333333333': cv });
+        assert.deepStrictEqual(await B.getDB(false), []);
+    });
+
+    test('inGeneralDb:true mostra ate um registro sem dados analisados', async () => {
+        const cv = esqueleto('Paulo', '4444444444444444');
+        cv.inGeneralDb = true;
+        comStorage({ 'jcr_picc_cv:id:4444444444444444': cv });
+        assert.strictEqual((await B.getDB(false)).length, 1);
+    });
+
+    test('nao duplica quando o mesmo CV esta nos dois bancos', async () => {
+        comStorage({
+            'jcr_cv:id:5555555555555555': cvCompleto('Rita', '5555555555555555'),
+            'jcr_picc_cv:id:5555555555555555': cvCompleto('Rita', '5555555555555555')
+        });
+        assert.strictEqual((await B.getDB(false)).length, 1);
+    });
+
+    test('a proposta continua vendo so o seu banco', async () => {
+        comStorage({
+            'jcr_picc_cv:id:6666666666666666': cvCompleto('Luis', '6666666666666666'),
+            'jcr_proc:proc:404040': { name: 'Projeto', isProcesso: true, processId: '404040' }
+        });
+        const propostas = await B.getDB(true);
+        assert.strictEqual(propostas.length, 1);
+        assert.strictEqual(propostas[0].processId, '404040');
+    });
+
+    test('excluir do geral nao apaga o CV de que a proposta depende', async () => {
+        const chave = 'jcr_picc_cv:id:7777777777777777';
+        const store = comStorage({ [chave]: cvCompleto('Clara', '7777777777777777') });
+        const db = await B.getDB(false);
+        await B.removeCVs(db);
+        assert.ok(store[chave], 'o registro do picc tem de continuar no storage');
+        assert.strictEqual(store[chave].inGeneralDb, false);
+        assert.deepStrictEqual(await B.getDB(false), []);
+    });
+
+    test('a marca da chave do picc nao vai para o storage nem para o backup', async () => {
+        comStorage({ 'jcr_picc_cv:id:8888888888888888': cvCompleto('Ines', '8888888888888888') });
+        const cv = (await B.getDB(false))[0];
+        assert.strictEqual(cv._piccOnlyKey, 'jcr_picc_cv:id:8888888888888888');
+        assert.ok(!Object.keys(cv).includes('_piccOnlyKey'));
+        assert.ok(!JSON.stringify(cv).includes('_piccOnlyKey'));
+    });
+});
+
+// Editar pelo banco geral um registro emprestado do piccTools nao pode criar uma
+// segunda copia em jcr_cv:, que depois divergiria da que a proposta usa.
+describe('gravacao de CV emprestado do piccTools', () => {
+    test('saveCVs grava de volta na chave de origem', async () => {
+        const chave = 'jcr_picc_cv:id:9999999999999999';
+        const store = {
+            [chave]: { name: 'Bruno', lattesId: '9999999999999999', hasFullCv: true, publications: [{ year: 2024 }] }
+        };
+        globalThis.chrome = {
+            runtime: { id: 'teste', lastError: null },
+            storage: {
+                local: {
+                    get: (_c, cb) => cb(Object.assign({}, store)),
+                    set: (obj, cb) => { Object.assign(store, obj); cb(); },
+                    remove: (c, cb) => { (Array.isArray(c) ? c : [c]).forEach(k => { delete store[k]; }); cb(); }
+                }
+            }
+        };
+        const cv = (await B.getDB(false))[0];
+        cv.customId = 'GRUPO-1';
+        await B.saveCVs([cv]);
+        assert.deepStrictEqual(Object.keys(store), [chave]);
+        assert.strictEqual(store[chave].customId, 'GRUPO-1');
+    });
+});

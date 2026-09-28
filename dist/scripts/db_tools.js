@@ -1241,6 +1241,31 @@ window.JCRDBTools = {
             }
         }
 
+        // Um pesquisador pode ser membro de uma proposta do piccTools e, ao mesmo tempo,
+        // ter o CV analisado no Lattes pelo usuario. O registro mora numa chave so
+        // (jcr_picc_cv:), para nao existirem duas copias que divergem, e aparece tambem
+        // aqui quando o campo inGeneralDb permite.
+        //
+        // A ausencia do campo nao esconde nada: registros gravados antes dele entram se
+        // forem CVs de verdade. Ficam de fora apenas os esqueletos que a importacao da
+        // proposta cria (so nome, bolsa e formacao), que nunca estiveram no banco geral.
+        if (!isProcessoOnly) {
+            const jaNoGeral = new Set(db.map(cv => this._cvStorageKey(cv)));
+            const piccPrefix = this.piccCvPrefix || 'jcr_picc_cv:';
+            Object.keys(items).forEach(k => {
+                if (!k.startsWith(piccPrefix)) return;
+                const cv = items[k];
+                if (!cv || cv.isProcesso || cv.processId) return;
+                if (cv.inGeneralDb === false) return;
+                if (cv.inGeneralDb !== true && !this.isFullCv(cv)) return;
+                if (jaNoGeral.has(this._cvStorageKey(cv))) return;
+                // A chave real fica marcada fora da serializacao: quem gravar ou exportar
+                // o registro depois nao leva a marca junto.
+                Object.defineProperty(cv, '_piccOnlyKey', { value: k, enumerable: false, configurable: true });
+                db.push(cv);
+            });
+        }
+
         // Normalize older entries that don't have wosCitations
         db.forEach(cv => {
             if (cv.wosCitations === undefined && cv.publications) {
@@ -1262,7 +1287,11 @@ window.JCRDBTools = {
                 if (!chrome.runtime?.id) { reject(new Error('Extension context invalidated')); return; }
                 const toSet = {};
                 cvArray.forEach(cv => {
-                    if (cv && cv.name) toSet[this._cvStorageKey(cv)] = cv;
+                    // _piccOnlyKey: registro emprestado da base do piccTools (ver getDB).
+                    // Editar algo nele pelo banco geral — um ID de grupo, por exemplo —
+                    // tem de gravar de volta na chave de origem, ou nasceria uma segunda
+                    // copia em jcr_cv: que passaria a divergir da que a proposta usa.
+                    if (cv && cv.name) toSet[cv._piccOnlyKey || this._cvStorageKey(cv)] = cv;
                 });
                 if (Object.keys(toSet).length === 0) { resolve(); return; }
                 chrome.storage.local.set(toSet, () => {
@@ -1298,6 +1327,7 @@ window.JCRDBTools = {
 
         const keys = new Set();
         const piccCandidates = new Set();
+        const aDesvincular = [];
 
         const peopleOf = (proc) => {
             const people = [];
@@ -1308,6 +1338,11 @@ window.JCRDBTools = {
 
         cvArray.forEach(cv => {
             if (!cv) return;
+            // Registro que vive na base do piccTools e so aparece no banco geral por
+            // emprestimo (ver getDB): excluir "do geral" nao pode apagar o CV de que a
+            // proposta depende. Marca-se que ele deixou de ser do banco geral e o
+            // registro fica onde esta.
+            if (cv._piccOnlyKey) { aDesvincular.push(cv); return; }
             keys.add(this._cvStorageKey(cv));
             if (cv._storageKey) keys.add(cv._storageKey);
             if (cv.isProcesso || cv.processId) {
@@ -1328,6 +1363,17 @@ window.JCRDBTools = {
             } catch (e) {
                 console.warn('[JCRLattes] removeCVs: falha ao checar referências restantes; CVs do picc preservados.', e);
             }
+        }
+
+        if (aDesvincular.length > 0) {
+            const toSet = {};
+            aDesvincular.forEach(cv => { cv.inGeneralDb = false; toSet[cv._piccOnlyKey] = cv; });
+            await new Promise((resolve, reject) => {
+                chrome.storage.local.set(toSet, () => {
+                    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+                    else resolve();
+                });
+            });
         }
 
         const keysArray = Array.from(keys).filter(Boolean);
@@ -1401,9 +1447,19 @@ window.JCRDBTools = {
         this.currentCvData.hasFullCv = true;
 
         if (isPicc) {
+            // O CV mora na base dedicada do piccTools, mas continua sendo um CV que o
+            // usuário analisou: inGeneralDb registra que ele pertence também ao banco
+            // geral, e getDB() o mostra lá. Antes, este ramo apagava a cópia do banco
+            // geral — quem analisasse no Lattes alguém que por acaso estivesse numa
+            // proposta via o CV sumir da sua lista.
+            this.currentCvData.inGeneralDb = true;
             await this.savePiccCV(this.currentCvData);
-            // Remove do banco de CVs geral se porventura existia lá anteriormente para evitar duplicação
-            await this.removeCVs([this.currentCvData]);
+            // Se havia uma cópia em jcr_cv: (CV analisado antes de a pessoa entrar numa
+            // proposta), ela sai: o registro do picc passa a ser o único.
+            const copiaAntiga = (await this.getDB(false)).find(cv =>
+                !cv.isProcesso && !cv._piccOnlyKey &&
+                this.cvMatches(cv, this.currentCvData.name, this.currentCvData.lattesId));
+            if (copiaAntiga) await this.removeCVs([copiaAntiga]);
             if (!silent) this.showToast('CV do piccTools Salvo na Base Dedicada!');
             return;
         }
