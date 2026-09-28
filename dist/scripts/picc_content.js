@@ -2,17 +2,6 @@
 // Content script for Plataforma Carlos Chagas (piccTools)
 
 (function () {
-    // ------------------------------------------------------------------
-    // Ferramenta de desenvolvimento: o botao "HTML brutos" da barra da planilha
-    // baixa em lote o HTML original de "Producoes e orientacoes" para estudarmos
-    // a estrutura da pagina.
-    //
-    // MANTENHA SEMPRE false nas distribuicoes da Chrome Web Store. Ligue apenas
-    // em copias locais, para coletar novas amostras, e desligue antes de gerar
-    // o zip da loja.
-    // ------------------------------------------------------------------
-    const MOSTRAR_BOTAO_BRUTOS = false;
-
     // Setup PDF.js worker
     if (typeof pdfjsLib !== 'undefined') {
         pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('scripts/pdf.worker.min.js');
@@ -1590,39 +1579,9 @@
                 chamadaWrap.appendChild(chamadaInput);
                 chamadaWrap.appendChild(chamadaAviso);
 
-                // TEMPORARIO: junta os HTML brutos de "Producoes e orientacoes" das linhas
-                // visiveis numa pasta so, para estudarmos como extrair as informacoes.
-                // So aparece com MOSTRAR_BOTAO_BRUTOS ligado (nunca nas versoes da loja).
-                // Remover junto com extrairBrutosDaTabela() quando a extracao estiver pronta.
-                let brutosBtn = null;
-                if (MOSTRAR_BOTAO_BRUTOS) {
-                    brutosBtn = document.createElement('button');
-                    brutosBtn.id = 'picc-brutos-btn';
-                    brutosBtn.innerText = '🧪 HTML brutos';
-                    brutosBtn.title = 'Temporário: baixa o HTML original de "Produções e orientações" para '
-                        + 'Downloads/piccData/_brutos_producoes/. Usa a lista de processos ao lado; se ela estiver '
-                        + 'vazia, pega todas as linhas visíveis. Não altera o banco de dados.';
-                    brutosBtn.style.cssText = `
-                        background-color: #6A1B9A;
-                        color: white;
-                        border: none;
-                        padding: 6px 12px;
-                        border-radius: 4px;
-                        cursor: pointer;
-                        font-weight: bold;
-                        transition: background 0.2s;
-                        white-space: nowrap;
-                        margin-left: 8px;
-                    `;
-                    brutosBtn.onmouseover = () => { if (!brutosBtn.disabled) brutosBtn.style.backgroundColor = '#4A148C'; };
-                    brutosBtn.onmouseout = () => { if (!brutosBtn.disabled) brutosBtn.style.backgroundColor = '#6A1B9A'; };
-                    brutosBtn.addEventListener('click', extrairBrutosDaTabela);
-                }
-
                 toolbar.appendChild(chamadaWrap);
                 toolbar.appendChild(filterInput);
                 toolbar.appendChild(extractBtn);
-                if (brutosBtn) toolbar.appendChild(brutosBtn);
                 toolbar.appendChild(stopBtn);
 
                 prepararCampoChamada();
@@ -1712,12 +1671,6 @@
 
     // Alterna a barra entre "ocioso" e "extraindo"
     function definirModoExtracao(extraindo) {
-        const brutosBtn = document.getElementById('picc-brutos-btn');   // TEMPORARIO
-        if (brutosBtn) {
-            brutosBtn.disabled = extraindo;
-            brutosBtn.style.opacity = extraindo ? '0.6' : '1';
-            brutosBtn.style.cursor = extraindo ? 'default' : 'pointer';
-        }
         const extractBtn = document.getElementById('picc-extract-btn');
         const stopBtn = document.getElementById('picc-stop-btn');
         if (extractBtn) {
@@ -1729,143 +1682,6 @@
             stopBtn.style.display = extraindo ? '' : 'none';
             stopBtn.disabled = false;
             stopBtn.innerText = '⏹ Parar';
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // TEMPORARIO: junta numa pasta so o HTML bruto de "Producoes e orientacoes"
-    // de todas as linhas visiveis, para estudarmos a estrutura da pagina e definir
-    // como extrair as informacoes. Nao mexe no banco nem nas pastas das propostas.
-    // Sai daqui — junto com o botao — quando a extracao estiver definida.
-    // ------------------------------------------------------------------
-    const PASTA_BRUTOS = 'piccData/_brutos_producoes';
-
-    function linkProducoesDaLinha(row) {
-        const anchors = row.querySelectorAll('a');
-        for (const a of anchors) {
-            const href = a.getAttribute('href') || a.href || '';
-            const texto = (a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-            if (href.includes('publicacao.do') || (texto.includes('orienta') && /produ[çc]/.test(texto))) {
-                const url = getValidUrlFromAnchor(a);
-                if (url) return url;
-            }
-        }
-        return '';
-    }
-
-    async function extrairBrutosDaTabela() {
-        const setStatus = (msg, cor) => setStatusGlobal(msg, cor);
-
-        // Mesma regra da atualizacao das propostas: com a lista preenchida, so esses
-        // processos; vazia, todas as linhas visiveis.
-        const filtroEl = document.getElementById('picc-process-filter-input');
-        const filtroBruto = filtroEl ? filtroEl.value.trim() : '';
-        const alvosPedidos = filtroBruto
-            ? filtroBruto.split(/[\s,;]+/).map(t => t.trim()).filter(t => t.length > 0) : [];
-        const normProc = (v) => String(v || '').replace(/[^0-9]/g, '');
-        const baseProc = (v) => String(v || '').split('/')[0].replace(/[^0-9]/g, '');
-        const casaProcesso = (naTabela, pedido) => {
-            if (!naTabela || !pedido) return false;
-            const a = naTabela.trim().toLowerCase(), b = pedido.trim().toLowerCase();
-            if (a === b) return true;
-            if (normProc(a) && normProc(a) === normProc(b)) return true;
-            return !!baseProc(a) && baseProc(a) === baseProc(b);
-        };
-        const encontrados = new Set();
-
-        const table = document.getElementById('tabelaPropostas')
-                   || document.querySelector('table.dataTable')
-                   || document.querySelector('table');
-        const tbody = table && (table.querySelector('tbody#tbodyPropostas') || table.querySelector('tbody'));
-        if (!tbody) {
-            setStatus('Erro: tabela de propostas não encontrada na página.', '#ffcccc');
-            return;
-        }
-
-        // indice da coluna do processo, so para nomear os arquivos
-        let idxProc = -1;
-        let cabecalho = Array.from(table.querySelectorAll('thead th, thead td'));
-        if (cabecalho.length === 0) {
-            const primeira = table.querySelector('tr');
-            if (primeira) cabecalho = Array.from(primeira.querySelectorAll('th, td'));
-        }
-        cabecalho.forEach((c, i) => {
-            const t = (c.innerText || c.textContent || '').trim().toLowerCase();
-            if (idxProc === -1 && t.includes('processo')) idxProc = i;
-        });
-        if (idxProc === -1) idxProc = 1;
-
-        const linhas = Array.from(tbody.querySelectorAll('tr[role="row"], tr'));
-        const alvos = [];
-        linhas.forEach((row, i) => {
-            const celulas = row.querySelectorAll('td');
-            const proc = (idxProc < celulas.length)
-                ? (celulas[idxProc].innerText || '').trim()
-                : '';
-
-            if (alvosPedidos.length > 0) {
-                const pedido = alvosPedidos.find(t => casaProcesso(proc, t));
-                if (!pedido) return;            // fora da lista: pula
-                encontrados.add(pedido);
-            }
-
-            const link = linkProducoesDaLinha(row);
-            if (!link) return;
-            alvos.push({ link, nome: proc || ('linha_' + (i + 1)) });
-        });
-
-        if (alvosPedidos.length > 0) {
-            const faltando = alvosPedidos.filter(t => !encontrados.has(t));
-            if (faltando.length > 0) {
-                alert(`⚠️ Os seguintes processos da lista não foram encontrados na tabela:\n\n• ${faltando.join('\n• ')}`);
-            }
-        }
-
-        if (alvos.length === 0) {
-            setStatus(alvosPedidos.length > 0
-                ? 'Nenhum dos processos da lista foi encontrado com o item "Produções e orientações".'
-                : 'Nenhuma linha visível tem o item "Produções e orientações".', '#ffcc80');
-            return;
-        }
-
-        piccAbortarExtracao = false;
-        definirModoExtracao(true);
-        const btnBrutos = document.getElementById('picc-brutos-btn');
-        if (btnBrutos) { btnBrutos.disabled = true; btnBrutos.style.opacity = '0.6'; }
-
-        let salvos = 0, falhas = 0;
-        for (let i = 0; i < alvos.length; i++) {
-            if (piccAbortarExtracao) {
-                setStatus(`Interrompido: ${salvos} arquivo(s) bruto(s) salvos em ${PASTA_BRUTOS}/.`, '#ffcc80');
-                break;
-            }
-            const alvo = alvos[i];
-            setStatus(`Baixando HTML bruto ${i + 1}/${alvos.length} (${alvo.nome})...`, '#fff59d');
-            try {
-                const prod = await extractProducoesHtml(alvo.link);
-                if (prod.bruto) {
-                    const seguro = String(alvo.nome).replace(/[\/\\?%*:|"<>]/g, '-').trim();
-                    requestDownload({
-                        action: 'download_data',
-                        data: prod.bruto,
-                        filename: `${PASTA_BRUTOS}/producoes_${seguro}_bruto.html`
-                    }, `o HTML bruto de ${alvo.nome}`);
-                    salvos++;
-                } else {
-                    falhas++;
-                }
-            } catch (e) {
-                console.warn('[piccTools] Falha ao baixar o HTML bruto de', alvo.nome, e);
-                falhas++;
-            }
-        }
-
-        definirModoExtracao(false);
-        if (btnBrutos) { btnBrutos.disabled = false; btnBrutos.style.opacity = '1'; }
-        if (!piccAbortarExtracao) {
-            const aviso = falhas > 0 ? ` (${falhas} sem resposta)` : '';
-            setStatus(`Pronto: ${salvos} de ${alvos.length} arquivo(s) bruto(s) em Downloads/${PASTA_BRUTOS}/${aviso}`,
-                      falhas > 0 ? '#ffcc80' : '#a5d6a7');
         }
     }
 

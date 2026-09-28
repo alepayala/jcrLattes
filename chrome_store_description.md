@@ -87,11 +87,6 @@ Eleve o nível de sua gestão acadêmica e análise de produção científica co
 
 ### ✅ CHECKLIST ANTES DE GERAR O ZIP DA LOJA
 
-* `dist/scripts/picc_content.js` → `MOSTRAR_BOTAO_BRUTOS = false`.
-  O botão **🧪 HTML brutos** da barra do piccTools é ferramenta de desenvolvimento
-  (baixa em lote o HTML original de "Produções e orientações" para estudo da página)
-  e **nunca** vai nas distribuições da Chrome Web Store. Ligue apenas em cópias
-  locais e desligue antes de empacotar.
 * piccTools continua **desabilitado por padrão** e fora de todo texto público.
 * Versão do `dist/manifest.json` incrementada em relação à publicada.
 

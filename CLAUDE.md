@@ -56,6 +56,5 @@ Content scripts run in the page's origin and can't cross-origin `fetch`, open ta
 ### Editing conventions seen in the code
 
 - Files with `manual`/`editado`/`removedMembers` markers on team-member records (in `db_tools.js`) represent hand-edits by the reviewer; re-import/extraction logic must never silently overwrite these.
-- `picc_content.js` has a `MOSTRAR_BOTAO_BRUTOS` debug flag for bulk-downloading raw HTML samples — must stay `false` in anything built for the Chrome Web Store.
 - `pdf.min.js`/`pdf.worker.min.js` are vendored/minified third-party PDF.js builds — don't hand-edit them.
 - A function whose comment starts with `ÓRFÃ PROPOSITAL — não remover.` is uncalled **on purpose**: an alternative rendering or variant kept ready for when it's wanted again. A dead-code sweep must leave these alone, and whoever changes the data shape they consume should keep them compiling. `grep -rn "ÓRFÃ PROPOSITAL" dist/` lists them.
