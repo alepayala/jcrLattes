@@ -743,6 +743,471 @@ window.JCRReportUtils = {
     return cleanCat || 'Outras';
   },
 
+
+  // ------------------------------------------------------------------
+  // Lista de orientacoes, para copiar para outros documentos
+  // ------------------------------------------------------------------
+  // O CV Lattes nao separa aluno, titulo e instituicao em campos: a captura devolve
+  // a linha inteira em `reference`. As funcoes abaixo quebram essa linha nos campos
+  // que a lista mostra. E processamento puro sobre texto que JA esta no registro, de
+  // modo que CVs importados antes desta versao entram na lista sem reimportacao.
+  //
+  // Os quatro formatos que aparecem de fato (conferidos nos CVs de test_pages):
+  //   Aluno. Titulo. 2023. Dissertacao (Mestrado em Fisica) - UFC, CAPES. Orientador: X.
+  //   Aluno. Titulo. Inicio: 2025. Tese (Doutorado em Fisica) - UFC, CNPq. (Orientador).
+  //   Aluno. Titulo. Inicio: 2026 - UFJF, FAPEMIG. (Orientador).   <- ano seguido de " - "
+  //   Aluno. Inicio: 2024. UFC, FINEP.                             <- pos-doc, SEM titulo
+
+  // Onde comeca a parte do ano. "Inicio:" manda, porque e inequivoco; sem ele vale o
+  // ULTIMO ano da linha, o mesmo criterio da captura (lattes_parser._ultimoAno), para
+  // que o ano da lista nunca discorde do ano das contagens.
+  _ancoraDoAno: function (limpo) {
+    const inicio = String(limpo || '').match(/(?:In[íi]cio)\s*:\s*((?:19|20)\d{2})/);
+    if (inicio) return { indice: inicio.index, ano: parseInt(inicio[1], 10) };
+
+    const re = /\b((?:19|20)\d{2})\b/g;
+    let m, ultimo = null;
+    while ((m = re.exec(String(limpo || ''))) !== null) ultimo = m;
+    if (!ultimo) return { indice: -1, ano: NaN };
+    return { indice: ultimo.index, ano: parseInt(ultimo[1], 10) };
+  },
+
+  // Separa "Aluno. Titulo" em dois. O ponto que fecha o nome nao serve de corte
+  // sozinho: nomes trazem iniciais abreviadas ("Claudio de Oliveira A. Castro"), e
+  // cortar no primeiro ponto devolveria "Claudio de Oliveira A" como aluno. So se
+  // continua alem de um ponto quando o trecho termina em UMA letra — isto e, quando
+  // aquele ponto e de abreviatura.
+  _alunoETitulo: function (prefixo) {
+    const texto = String(prefixo || '').trim().replace(/[.\s]+$/, '');
+    if (!texto) return { aluno: '', titulo: '' };
+
+    const partes = texto.split(/\.\s+/);
+    let aluno = partes[0];
+    let i = 1;
+    while (i < partes.length && /(?:^|\s)[A-Za-zÀ-ÿ]$/.test(aluno)) {
+      aluno += '. ' + partes[i];
+      i++;
+    }
+    return { aluno: aluno.trim(), titulo: partes.slice(i).join('. ').trim() };
+  },
+
+  // Instituicao a partir do trecho que vem depois do ano. So e usada quando a captura
+  // nao trouxe o campo — acontece na Iniciacao cientifica escrita "Inicio: 2026 - UFJF",
+  // em que o ano nao e seguido de ponto e a regra da captura nao casa.
+  // Depois do ano o texto tem sempre a mesma forma:
+  //
+  //     <ano>[. <natureza>[ (<area>)] ] - <INSTITUICAO>, <financiadora>. <orientador>.
+  //
+  // A instituicao e, portanto, o trecho ate a PRIMEIRA virgula, e dentro dele o que
+  // vem depois do ultimo travessao com espacos. Parar na virgula e o que importa: a
+  // financiadora vem depois dela e tambem traz travessao no nome ("...Cientifico e
+  // Tecnologico - MA"), que sem esse corte roubaria a vaga da instituicao. A natureza
+  // as vezes nao tem area entre parenteses ("Orientacao de outra natureza - UFC"),
+  // entao o travessao e o unico separador em que se pode confiar.
+  _instituicaoDaOrientacao: function (resto) {
+    const texto = String(resto || '');
+    const apos = texto.replace(/^[\s\S]*?(?:19|20)\d{2}/, '');
+    if (apos === texto) return '';
+
+    const ateVirgula = apos.split(',')[0];
+    const partes = ateVirgula.split(/\s-\s/);
+    // Sem financiadora nao ha virgula nenhuma, e o trecho segue direto para
+    // "Orientador: Fulano." — o ponto final da instituicao e o corte.
+    const bruto = partes.length > 1 ? partes[partes.length - 1] : partes[0].replace(/^[.\s-]+/, '');
+    return (bruto.split('.')[0] || '').trim();
+  },
+
+  // ------------------------------------------------------------------
+  // Lista de publicacoes
+  // ------------------------------------------------------------------
+  // Mesma ideia da lista de orientacoes: agrupar, montar a linha e o texto para copiar
+  // ficam aqui; desenhar fica em db_tools. As duas listas devolvem blocos com o MESMO
+  // formato ({ titulo, grupos: [{ titulo, itens }], total }), para que um desenhista so
+  // sirva as duas e o estilo nao volte a divergir.
+  //
+  // As publicacoes nao tem segundo nivel, entao cada ano traz um grupo unico e sem nome.
+
+  // A referencia como o Lattes a escreve, sem o que o proprio relatorio ja mostra em
+  // separado: o numero da lista original, o fator de impacto e as citacoes.
+  _referenciaLimpa: function (pub) {
+    if (!pub) return '';
+    const bruta = pub.reference
+      || [pub.paperTitle || pub.title, pub.journalName, pub.year].filter(Boolean).join('. ')
+      || 'Referência indisponível';
+    return String(bruta)
+      .replace(/^\s*\d+\.\s*/, '')
+      .replace(/\s*Fator de Impacto:\s*[\d.]+\s*(?:\(.*?\))?/g, '')
+      .replace(/\s*Não classificado\s*(?:\(.*?\))?/g, '')
+      .replace(/\s*Citações:\s*\d+(?:\|\d+)?/g, '')
+      .trim();
+  },
+
+  // Publicacoes do periodo, por ano decrescente e, dentro do ano, do maior JCR para o
+  // menor.
+  //
+  // `anosCorte` conta para TRAS a partir do ano atual, e o zero nao e atalho para "tudo":
+  // zero ano de recuo e o ano corrente sozinho. E o que o campo "Periodo (anos)" sempre
+  // fez no relatorio; para ver tudo, poe-se um numero grande. So um valor invalido (campo
+  // vazio) desliga o corte.
+  publicacoesAgrupadas: function (publicacoes, anosCorte, anoAtual) {
+    const lista = Array.isArray(publicacoes) ? publicacoes : [];
+    const corte = parseInt(anosCorte, 10);
+    const atual = parseInt(anoAtual, 10) || new Date().getFullYear();
+    const anoInicial = isNaN(corte) ? null : atual - corte;
+
+    const noPeriodo = lista.filter(p => {
+      if (!p) return false;
+      const y = parseInt(p.year, 10);
+      if (isNaN(y)) return false;
+      return anoInicial === null || y >= anoInicial;
+    });
+
+    noPeriodo.sort((a, b) => {
+      const yA = parseInt(a.year, 10) || 0;
+      const yB = parseInt(b.year, 10) || 0;
+      if (yB !== yA) return yB - yA;
+      return (parseFloat(b.jif) || 0) - (parseFloat(a.jif) || 0);
+    });
+
+    const porAno = new Map();
+    noPeriodo.forEach(p => {
+      const ano = String(p.year || 'Desconhecido');
+      if (!porAno.has(ano)) porAno.set(ano, []);
+      porAno.get(ano).push(p);
+    });
+
+    // A ordem ja saiu do sort acima; percorrer o Map preserva a ordem de insercao.
+    return Array.from(porAno.entries()).map(([ano, itens]) => ({
+      titulo: ano,
+      grupos: [{ titulo: '', itens: itens }],
+      total: itens.length
+    }));
+  },
+
+  // Uma publicacao em uma linha de texto. `opcoes` espelha as caixas de selecao da tela
+  // ({ jcr, doi, citacoes }), para que o que se copia seja o que se ve.
+  publicacaoEmLinha: function (pub, opcoes) {
+    if (!pub) return '';
+    const o = opcoes || {};
+    const extras = [];
+
+    const jif = parseFloat(pub.jif) || 0;
+    if (o.jcr !== false && jif > 0) extras.push('JCR: ' + jif.toFixed(3));
+
+    if (o.citacoes !== false && ((pub.wosCitations || 0) > 0 || (pub.scopusCitations || 0) > 0)) {
+      const partes = [];
+      if (pub.wosCitations > 0) partes.push('WoS: ' + pub.wosCitations);
+      if (pub.scopusCitations > 0) partes.push('Scopus: ' + pub.scopusCitations);
+      extras.push('Citações: ' + partes.join(' / '));
+    }
+
+    if (o.doi !== false && pub.doi) extras.push('DOI: ' + pub.doi);
+
+    const ref = this._referenciaLimpa(pub);
+    return extras.length > 0 ? ref + ' | ' + extras.join(' | ') : ref;
+  },
+
+  // Texto puro para colar num documento. Sem numeracao por padrao, pelo mesmo motivo da
+  // lista de orientacoes: numero colado vira texto fixo e qualquer edicao obriga a
+  // renumerar tudo a mao. `opcoes.numerar` liga a numeracao continua.
+  publicacoesEmTexto: function (blocos, opcoes) {
+    const o = opcoes || {};
+    const numerar = !!o.numerar;
+    const linhas = [];
+    let n = 0;
+    (Array.isArray(blocos) ? blocos : []).forEach(bloco => {
+      if (linhas.length > 0) linhas.push('');
+      linhas.push(bloco.titulo);
+      bloco.grupos.forEach(grupo => {
+        if (grupo.titulo) linhas.push('  ' + grupo.titulo);
+        grupo.itens.forEach(pub => {
+          n++;
+          linhas.push('    ' + (numerar ? n + '. ' : '') + this.publicacaoEmLinha(pub, o));
+        });
+      });
+    });
+    return linhas.join('\n');
+  },
+
+
+  // Boa parte dos nomes e titulos e digitada no Lattes em CAIXA ALTA. Numa lista para
+  // colar num documento isso grita; aqui a caixa e normalizada.
+  //
+  // So mexe no texto que esta TODO em maiuscula — 85% das letras, com pelo menos
+  // quatro. Assim um titulo escrito normalmente nunca e tocado, e ainda pega os que
+  // trazem formula quimica no meio ("...PEROVSKITA CsPbBr 3 VIA LARP...").
+  _emCaixaAlta: function (texto) {
+    const letras = String(texto || '').match(/\p{L}/gu);
+    if (!letras || letras.length < 4) return false;
+    const maiusculas = String(texto).match(/\p{Lu}/gu);
+    return !!maiusculas && (maiusculas.length / letras.length) >= 0.85;
+  },
+
+  // Palavras que ficam em minuscula no meio de um nome ou titulo. Boa parte das teses
+  // tem titulo em ingles, entao as duas listas convivem aqui.
+  _CONECTIVOS: ['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'no', 'na', 'nos', 'nas',
+                'a', 'o', 'as', 'os', 'ao', 'aos', 'com', 'para', 'por', 'sob', 'sobre',
+                'di', 'del', 'la', 'van', 'von', 'y',
+                'the', 'and', 'of', 'in', 'on', 'for', 'with', 'at', 'to', 'from',
+                'by', 'an', 'or', 'as', 'into', 'under', 'over'],
+
+  // Caixa de titulo, e nao de frase: "Espectroscopia Raman" continua com o R maiusculo.
+  // Em caixa de frase o sobrenome viraria "raman", que para um leitor da area e erro
+  // visivel; ja um conectivo em maiuscula so parece estranho, e esses sao rebaixados.
+  //
+  // Palavra que JA tem minuscula fica como esta — e onde moram as formulas quimicas
+  // ("CsPbBr", "Rb2InCl5"). Palavra com digito idem.
+  _normalizarCaixa: function (texto) {
+    const original = String(texto || '');
+    if (!this._emCaixaAlta(original)) return original;
+
+    let primeira = true;
+    return original.replace(/[^\s]+/g, (palavra) => {
+      if (/\p{Ll}/u.test(palavra) || /\d/.test(palavra)) { primeira = false; return palavra; }
+
+      const convertida = palavra.replace(/\p{L}[\p{L}’']*/gu, (bloco, pos) => {
+        const minuscula = bloco.toLowerCase();
+        const ehInicio = primeira && pos === 0;
+        if (!ehInicio && this._CONECTIVOS.indexOf(minuscula) !== -1) return minuscula;
+        return minuscula.charAt(0).toUpperCase() + minuscula.slice(1);
+      });
+      primeira = false;
+      return convertida;
+    });
+  },
+
+  // Quem orientou. O nome sai do dono do CV de onde a linha veio — quem monta a lista
+  // marca isso em `_orientador`, e so ele serve para as orientacoes em andamento, cujo
+  // texto diz apenas "(Orientador)." sem nome. Quando falta, sobra o fim da propria
+  // linha, que nas concluidas traz "Orientador: Fulano." ou "Coorientador: Fulano.".
+  _orientadorDoItem: function (item) {
+    if (!item) return [];
+    const coorientador = this.ehCoorientacao(item);
+    const marcado = item && item._orientador ? String(item._orientador).trim() : '';
+    if (marcado) return [{ nome: this._normalizarCaixa(marcado), coorientador: coorientador }];
+
+    const noTexto = String((item && item.reference) || '').match(/\bCo-?orientador(?:a)?:\s*([^.]+)/i)
+                 || String((item && item.reference) || '').match(/\bOrientador(?:a)?:\s*([^.]+)/i);
+    if (!noTexto) return [];
+    return [{ nome: this._normalizarCaixa(noTexto[1].trim()), coorientador: coorientador }];
+  },
+
+  // Junta orientadores sem repetir a mesma pessoa. Quem aparece como orientador tem
+  // precedencia sobre a mesma pessoa marcada como coorientador.
+  _juntarOrientadores: function (atuais, novos) {
+    (novos || []).forEach(novo => {
+      if (!novo || !novo.nome) return;
+      const chave = novo.nome.toLowerCase();
+      const existente = atuais.find(x => x.nome.toLowerCase() === chave);
+      if (!existente) { atuais.push(novo); return; }
+      if (existente.coorientador && !novo.coorientador) existente.coorientador = false;
+    });
+    return atuais;
+  },
+
+  // "Orientador: A" / "Coorientador: B", na forma que vai no fim da linha.
+  textoDeOrientadores: function (orientadores) {
+    const lista = Array.isArray(orientadores) ? orientadores : [];
+    const orient = lista.filter(x => x && !x.coorientador).map(x => x.nome);
+    const coor = lista.filter(x => x && x.coorientador).map(x => x.nome);
+    const partes = [];
+    if (orient.length > 0) partes.push((orient.length > 1 ? 'Orientadores: ' : 'Orientador: ') + orient.join(', '));
+    if (coor.length > 0) partes.push((coor.length > 1 ? 'Coorientadores: ' : 'Coorientador: ') + coor.join(', '));
+    return partes.join('; ');
+  },
+
+  // Os campos de uma orientacao, na ordem em que a lista os mostra.
+  //
+  // Campo que a captura ja tenha separado vence a leitura do texto. A planilha de
+  // producoes do efomento vem em colunas e traz student/title/institution prontos;
+  // so o CV Lattes obriga a quebrar a linha.
+  camposDaOrientacao: function (item) {
+    const limpo = String((item && item.reference) || '').replace(/\s+/g, ' ').trim();
+    const ancora = this._ancoraDoAno(limpo);
+    const prefixo = ancora.indice >= 0 ? limpo.slice(0, ancora.indice) : limpo;
+    const resto = ancora.indice >= 0 ? limpo.slice(ancora.indice) : '';
+
+    const nome = this._alunoETitulo(prefixo);
+    if (item && item.student) nome.aluno = String(item.student).trim();
+    if (item && item.title) nome.titulo = String(item.title).trim();
+    else if (item && item.student) nome.titulo = '';
+
+    let ano = parseInt(item && item.year, 10);
+    if (isNaN(ano)) ano = ancora.ano;
+
+    const capturada = (item && item.institution) ? String(item.institution).trim() : '';
+    const instituicao = capturada || this._instituicaoDaOrientacao(resto);
+
+    // "(Coorientador)" sai da categoria: quem coorientou agora aparece por nome no fim
+    // da linha, e manter a marca aqui partiria o mesmo trabalho em duas categorias.
+    const categoria = String((item && item.category) || '')
+      .replace(/\s*\(Co-?orientador(?:a)?\)/gi, '').trim() || 'Outras';
+    const emAndamento = !!(item && item.status === 'Em andamento');
+
+    return {
+      aluno: this._normalizarCaixa(nome.aluno),
+      titulo: this._normalizarCaixa(nome.titulo),
+      instituicao: instituicao,
+      ano: ano,
+      tipo: categoria,
+      emAndamento: emAndamento,
+      orientadores: this._orientadorDoItem(item)
+    };
+  },
+
+  // Ordem das categorias: da mais graduada para a menos.
+  _ordemDeOrientacao: function (item) {
+    const ordem = { posdoc: 0, doutorado: 1, mestrado: 2, outras: 3, ic: 4 };
+    const t = this.tipoDeOrientacao(item);
+    return ordem[t] !== undefined ? ordem[t] : 5;
+  },
+
+  // Titulo da secao das orientacoes que ainda nao terminaram. Elas NAO entram pelo ano
+  // de inicio: uma tese que comecou em 2023 e continua em curso nao e producao de 2023,
+  // e listada entre as de 2023 daria a entender que foi concluida ali. Vao todas para
+  // uma secao propria, antes do primeiro ano.
+  EM_ANDAMENTO: 'Em andamento',
+
+  // Agrupa as orientacoes em dois niveis, para uma lista numerada.
+  //
+  //   ordem 'ano'       -> nivel 1 = Em andamento / ano (decrescente), nivel 2 = categoria
+  //   ordem 'categoria' -> nivel 1 = categoria, nivel 2 = Em andamento / ano
+  //
+  // `anosCorte` segue a mesma regra da lista de publicacoes: conta para tras a partir do
+  // ano atual, e zero e o ano corrente sozinho, nao "tudo". O corte so vale para as
+  // CONCLUIDAS; as em andamento aparecem sempre, porque sao o que esta acontecendo agora
+  // — filtra-las pelo ano de inicio esconderia justamente os doutorados longos.
+  //
+  // Num relatorio de equipe o mesmo aluno aparece no CV do orientador e no do
+  // coorientador. Mesmo aluno, mesmo ano e mesmo titulo e o mesmo trabalho, entao
+  // entra uma vez so; sem titulo (o caso do pos-doutorado) o desempate e a categoria.
+  orientacoesAgrupadas: function (itens, anosCorte, anoAtual, ordem) {
+    const lista = Array.isArray(itens)
+      ? itens
+      : (itens && Array.isArray(itens.raw) ? itens.raw : []);
+
+    const porCategoria = String(ordem || 'ano').toLowerCase() === 'categoria';
+    const corte = parseInt(anosCorte, 10);
+    const atual = parseInt(anoAtual, 10) || new Date().getFullYear();
+    const anoInicial = isNaN(corte) ? null : atual - corte;
+
+    const vistos = new Map();
+    const pares = [];
+
+    lista.forEach(item => {
+      if (!item) return;
+      const campos = this.camposDaOrientacao(item);
+      if (!campos.emAndamento) {
+        if (!campos.ano || isNaN(campos.ano)) return;
+        if (anoInicial !== null && campos.ano < anoInicial) return;
+      }
+
+      const assinatura = [
+        campos.emAndamento ? 'curso' : 'fim',
+        campos.aluno.toLowerCase(),
+        campos.ano,
+        campos.titulo ? campos.titulo.toLowerCase() : campos.tipo.toLowerCase()
+      ].join('|');
+
+      // Repetido nao e descartado: e a MESMA orientacao vista do CV de outra pessoa da
+      // equipe, e e dali que sai o coorientador. O registro fica um so e ganha mais um
+      // nome no fim da linha.
+      const jaVisto = vistos.get(assinatura);
+      if (jaVisto) {
+        this._juntarOrientadores(jaVisto.campos.orientadores, campos.orientadores);
+        return;
+      }
+
+      const par = { campos: campos, item: item };
+      vistos.set(assinatura, par);
+      pares.push(par);
+    });
+
+    // Chave "temporal": a secao Em andamento vem antes de qualquer ano.
+    const chaveTempo = (p) => p.campos.emAndamento ? this.EM_ANDAMENTO : String(p.campos.ano);
+    const ordemTempo = (a, b) => {
+      if (a === this.EM_ANDAMENTO) return b === this.EM_ANDAMENTO ? 0 : -1;
+      if (b === this.EM_ANDAMENTO) return 1;
+      return parseInt(b, 10) - parseInt(a, 10);
+    };
+
+    const chaveCategoria = (p) => p.campos.tipo;
+    const ordemCategoria = (a, b, pa, pb) =>
+      (this._ordemDeOrientacao(pa.item) - this._ordemDeOrientacao(pb.item)) || a.localeCompare(b, 'pt-BR');
+
+    const chave1 = porCategoria ? chaveCategoria : chaveTempo;
+    const chave2 = porCategoria ? chaveTempo : chaveCategoria;
+
+    const agrupar = (lista_, chave) => {
+      const m = new Map();
+      lista_.forEach(p => {
+        const k = chave(p);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push(p);
+      });
+      return m;
+    };
+
+    const ordenarChaves = (mapa, porCat) => {
+      const chaves = Array.from(mapa.keys());
+      if (!porCat) return chaves.sort(ordemTempo);
+      return chaves.sort((a, b) => ordemCategoria(a, b, mapa.get(a)[0], mapa.get(b)[0]));
+    };
+
+    const nivel1 = agrupar(pares, chave1);
+    return ordenarChaves(nivel1, porCategoria).map(titulo1 => {
+      const nivel2 = agrupar(nivel1.get(titulo1), chave2);
+      const grupos = ordenarChaves(nivel2, !porCategoria).map(titulo2 => ({
+        titulo: titulo2,
+        itens: nivel2.get(titulo2)
+          .map(p => p.campos)
+          .sort((x, y) => x.aluno.localeCompare(y.aluno, 'pt-BR'))
+      }));
+      return { titulo: titulo1, grupos: grupos, total: nivel1.get(titulo1).length };
+    });
+  },
+
+  // Uma orientacao em uma linha, na ordem de campos que o relatorio pede:
+  // aluno, titulo, instituicao, ano, tipo. Campo vazio some, em vez de deixar
+  // ". ." no meio da frase.
+  //
+  // Para quem esta em andamento o ano e o de INICIO, e a linha diz isso: sem a
+  // palavra, "2023" no fim seria lido como ano de conclusao.
+  orientacaoEmLinha: function (o) {
+    if (!o) return '';
+    const ano = (o.ano && !isNaN(o.ano)) ? (o.emAndamento ? 'início ' + o.ano : String(o.ano)) : '';
+    return [o.aluno, o.titulo, o.instituicao, ano, o.tipo, this.textoDeOrientadores(o.orientadores)]
+      .filter(Boolean).join('. ');
+  },
+
+  // A mesma lista em texto puro, com os titulos das secoes — o que o botao Copiar poe
+  // na area de transferencia. E o formato de colar num documento; nao e tabela, de
+  // proposito.
+  //
+  // SEM numeracao por padrao. O numero que a tela mostra e so para leitura: colado num
+  // documento ele vira texto fixo, e qualquer linha inserida ou removida depois obriga
+  // a renumerar tudo a mao. A numeracao do editor de texto faz isso sozinha.
+  //
+  // `opcoes.numerar` liga a numeracao continua, para quando quisermos oferecer as duas
+  // formas de copiar; hoje nenhum caminho passa essa opcao.
+  orientacoesEmTexto: function (blocos, opcoes) {
+    const numerar = !!(opcoes && opcoes.numerar);
+    const linhas = [];
+    let n = 0;
+    (Array.isArray(blocos) ? blocos : []).forEach(bloco => {
+      if (linhas.length > 0) linhas.push('');
+      linhas.push(bloco.titulo);
+      bloco.grupos.forEach(grupo => {
+        linhas.push('  ' + grupo.titulo);
+        grupo.itens.forEach(o => {
+          n++;
+          linhas.push('    ' + (numerar ? n + '. ' : '') + this.orientacaoEmLinha(o));
+        });
+      });
+    });
+    return linhas.join('\n');
+  },
+
   generateSupervisionsPerYearGraphHTML: function(supervisionsInput) {
     let rawItems = [];
     if (Array.isArray(supervisionsInput)) {

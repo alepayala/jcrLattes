@@ -3330,11 +3330,163 @@ window.JCRDBTools = {
         return this.renderCVReport(dadosRelatorio, newTab, sortedDb, processData);
     },
 
+    // Blocos recolhíveis de uma lista do relatório — publicações e orientações usam esta
+    // mesma função. Elas foram escritas em momentos diferentes e o estilo tinha divergido;
+    // com um desenhista só, "mesmo estilo" continua verdade depois de qualquer ajuste.
+    //
+    // Recebe os blocos no formato que report_utils devolve ({ titulo, grupos, total }) e
+    // `linhaHTML(item, n)`, que sabe desenhar um item — é a única parte que difere entre
+    // as duas listas. Grupo sem título não vira subtítulo: é o caso das publicações, que
+    // não têm segundo nível.
+    _listaEmBlocosHTML: function (blocos, linhaHTML, rotuloTotal) {
+        const rotulo = rotuloTotal || 'item(ns)';
+        let n = 0;
+        let html = '';
+        (Array.isArray(blocos) ? blocos : []).forEach(bloco => {
+            html += `
+            <div style="margin-bottom: 15px;">
+                <div class="jcr-bloco-header" style="background: #e0e0e0; padding: 6px 12px; cursor: pointer; font-weight: bold; border-radius: 4px; display: flex; justify-content: space-between; border: 1px solid #ccc;">
+                    <span>${this._esc(bloco.titulo)}</span>
+                    <span><span style="font-weight: normal; color: #555; margin-right: 10px;">${bloco.total} ${rotulo}</span><span class="y-icon">[-]</span></span>
+                </div>
+                <div class="jcr-bloco-content" style="padding: 12px; border: 1px solid #ccc; border-top: none; background: #fff; display: block; border-radius: 0 0 4px 4px;">`;
+
+            bloco.grupos.forEach(grupo => {
+                if (grupo.titulo) {
+                    html += `<div style="font-weight: bold; color: #37474F; margin: 4px 0 6px;">${this._esc(grupo.titulo)} <span style="font-weight: normal; color: #777;">(${grupo.itens.length})</span></div>`;
+                }
+                grupo.itens.forEach(item => {
+                    n++;
+                    html += `<div style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #ddd; text-align: left;">
+                        ${linhaHTML(item, n)}
+                    </div>`;
+                });
+            });
+
+            html += `</div></div>`;
+        });
+        return html;
+    },
+
+    // Recolher/expandir de cada bloco. Era inline em onclick, bloqueado pela CSP em db.html.
+    _ligarBlocosRecolhiveis: function (container) {
+        if (!container || typeof container.querySelectorAll !== 'function') return;
+        container.querySelectorAll('.jcr-bloco-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const content = header.nextElementSibling;
+                if (!content) return;
+                const escondido = content.style.display === 'none';
+                content.style.display = escondido ? 'block' : 'none';
+                const icon = header.querySelector('.y-icon');
+                if (icon) icon.textContent = escondido ? '[-]' : '[+]';
+            });
+        });
+    },
+
+    // Põe um texto na área de transferência da aba do relatório. Sem a API de clipboard
+    // (aba sem permissão), cai num campo temporário selecionado e copiado à mão.
+    _copiarTexto: async function (janela, texto) {
+        try {
+            if (janela.navigator && janela.navigator.clipboard) {
+                await janela.navigator.clipboard.writeText(texto);
+                return true;
+            }
+        } catch (e) { /* segue para o campo temporário */ }
+
+        const doc = janela.document;
+        const area = doc.createElement('textarea');
+        area.value = texto;
+        area.style.cssText = 'position: fixed; left: -9999px; top: 0;';
+        doc.body.appendChild(area);
+        area.select();
+        let copiou = false;
+        try { copiou = doc.execCommand('copy'); } catch (e) { copiou = false; }
+        doc.body.removeChild(area);
+        return copiou;
+    },
+
+    // Aviso "✓ Copiado" ao lado do botão, que some sozinho.
+    _avisarCopia: function (janela, aviso, copiou) {
+        if (!aviso) return;
+        aviso.textContent = copiou ? '✓ Copiado' : 'Não foi possível copiar';
+        aviso.style.color = copiou ? '#2E7D32' : '#E65100';
+        aviso.style.visibility = 'visible';
+        janela.setTimeout(() => { aviso.style.visibility = 'hidden'; }, 2500);
+    },
+
+    // ÓRFÃ PROPOSITAL — não remover.
+    //
+    // Desenha as orientações em tabela, uma coluna por campo, com os blocos de ano
+    // recolhíveis. Foi a primeira versão da "Lista de Orientações"; o relatório hoje usa
+    // a lista numerada, porque o destino dela é ser colada num documento e a tabela dava
+    // mais trabalho de formatar do lado de lá. Fica aqui pronta, acompanhando o formato
+    // de report_utils.orientacoesAgrupadas, para quando a tabela fizer falta.
+    //
+    // Usa as mesmas classes de bloco das duas listas vivas, entao quem a chamar liga o
+    // recolher/expandir com _ligarBlocosRecolhiveis(container), como elas fazem.
+    _orientacoesEmTabelaHTML: function (blocos) {
+        const celula = 'padding: 5px 8px; border-bottom: 1px solid #eee; vertical-align: top;';
+        let html = '';
+        (Array.isArray(blocos) ? blocos : []).forEach(bloco => {
+            html += `
+            <div style="margin-bottom: 15px;">
+                <div class="jcr-bloco-header" style="background: #e0e0e0; padding: 6px 12px; cursor: pointer; font-weight: bold; border-radius: 4px; display: flex; justify-content: space-between; border: 1px solid #ccc;">
+                    <span>${this._esc(bloco.titulo)}</span>
+                    <span><span style="font-weight: normal; color: #555; margin-right: 10px;">${bloco.total} orientação(ões)</span><span class="y-icon">[-]</span></span>
+                </div>
+                <div class="jcr-bloco-content" style="padding: 12px; border: 1px solid #ccc; border-top: none; background: #fff; display: block; border-radius: 0 0 4px 4px;">`;
+
+            bloco.grupos.forEach(grupo => {
+                html += `<div style="margin-bottom: 12px;">
+                    <div style="font-weight: bold; color: #37474F; margin-bottom: 4px;">${this._esc(grupo.titulo)} <span style="font-weight: normal; color: #777;">(${grupo.itens.length})</span></div>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                        <tbody>`;
+                grupo.itens.forEach(o => {
+                    html += `<tr>
+                        <td style="${celula} font-weight: 600; white-space: nowrap;">${this._esc(o.aluno)}</td>
+                        <td style="${celula}">${this._esc(o.titulo)}</td>
+                        <td style="${celula} color: #555;">${this._esc(o.instituicao)}</td>
+                        <td style="${celula} text-align: center; white-space: nowrap;">${o.ano || ''}</td>
+                        <td style="${celula} color: #555; white-space: nowrap;">${this._esc(o.tipo)}</td>
+                        <td style="${celula} color: #555;">${this._esc(window.JCRReportUtils.textoDeOrientadores(o.orientadores))}</td>
+                    </tr>`;
+                });
+                html += `</tbody></table></div>`;
+            });
+
+            html += `</div></div>`;
+        });
+        return html;
+    },
+
     renderCVReport: function(cvData, newTab, sortedDb = null, parentGroupData = null) {
         const publications = cvData.publications || [];
         const rawPatents = cvData.rawPatents || [];
         const rawEvents = cvData.rawEvents || [];
         const supervisions = cvData.supervisions || {};
+        // As orientações linha a linha, cada uma marcada com o dono do CV de onde veio —
+        // é assim que a lista sabe quem orientou, inclusive nas que estão em andamento,
+        // cujo texto diz só "(Orientador)." sem nome.
+        //
+        // Num relatório de equipe a fonte são os CVs dos membros, e não o array já
+        // unificado de cvData.supervisions: é a mesma orientação aparecendo no CV do
+        // orientador E no do coorientador que revela a coorientação, e a unificação
+        // desmancharia esse par. Quem junta os dois numa linha só é orientacoesAgrupadas.
+        //
+        // A cópia é rasa e proposital: marcar o registro original gravaria `_orientador`
+        // no banco no próximo save.
+        const cvsDoRelatorio = (Array.isArray(cvData.groupMembers) && cvData.groupMembers.length > 0)
+            ? cvData.groupMembers
+            : [cvData];
+        const rawSupervisions = [];
+        cvsDoRelatorio.forEach(cv => {
+            if (!cv) return;
+            const sup = cv.supervisions || {};
+            const raw = Array.isArray(sup.raw) ? sup.raw : (Array.isArray(sup) ? sup : []);
+            raw.forEach(s => {
+                if (s) rawSupervisions.push(Object.assign({}, s, { _orientador: cv.name || '' }));
+            });
+        });
         const declaredCitations = cvData.declaredCitations || null;
 
         // Process entry metadata if called from renderProcessReport
@@ -3957,6 +4109,8 @@ window.JCRDBTools = {
                 customYears: 1,
                 targetAuthorRank: 1,
                 pubListYears: 5,
+                supListYears: 5,
+                supListOrdem: 'ano',
                 journalYears: 5,
                 minJournalPapers: 1,
                 showHighJcr: true,
@@ -3985,6 +4139,7 @@ window.JCRDBTools = {
             if (anos.min && anos.max && anos.max >= anos.min) {
                 const extensao = anos.max - anos.min + 1;
                 if (state.pubListYears === 5) state.pubListYears = extensao;
+                if (state.supListYears === 5) state.supListYears = extensao;
                 if (state.journalYears === 5) state.journalYears = extensao;
             }
             this._periodoProducoesAjustado = true;
@@ -4333,7 +4488,7 @@ window.JCRDBTools = {
                         .btn-view-member-report { display: none !important; }
 
                         /* Mantém "Período (anos)" e "Mín. artigos" legíveis, só remove o estilo de campo */
-                        #header-pub-list input, #header-journal-list input {
+                        #header-pub-list input, #header-sup-list input, #header-journal-list input {
                             border: none !important; background: transparent !important; padding: 0 !important;
                             -webkit-appearance: none; appearance: textfield;
                         }
@@ -4460,6 +4615,8 @@ window.JCRDBTools = {
                                 <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                                     <span>Período (anos): <input type="number" id="inp-pub-list-years" value="${state.pubListYears !== undefined ? state.pubListYears : 5}" min="0" style="width: 50px; padding: 2px;"></span>
                                     <button id="btn-pub-list-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                    <button id="btn-pub-list-copy" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #1565C0; background: #fff; color: #1565C0;">📋 Copiar</button>
+                                    <span id="pub-list-copy-aviso" class="no-print" style="font-size: 0.9em; font-weight: bold; color: #2E7D32; visibility: hidden;">✓ Copiado</span>
                                     <span class="no-print" style="display: flex; align-items: center; gap: 10px; color: #555;">
                                         <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-jcr" ${state.showPubListJcr !== false ? 'checked' : ''}> JCR</label>
                                         <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-doi" ${state.showPubListDoi !== false ? 'checked' : ''}> DOI</label>
@@ -4471,6 +4628,31 @@ window.JCRDBTools = {
                         </div>
                         <div class="collapsible-content" style="display: none;" id="content-pub-list">
                             <div id="pub-list-container" style="max-height: 500px; overflow-y: auto; padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 4px;">
+                                <div style="color: #777; text-align: center;">Carregando...</div>
+                            </div>
+                        </div>
+                    </div>` : ''}
+
+                    ${rawSupervisions.length > 0 ? `
+                    <div class="collapsible-section" id="sec-sup-list">
+                        <div class="collapsible-header" id="header-sup-list">
+                            <div style="display: flex; align-items: center; gap: 15px;">
+                                <h3 style="margin: 0;">Lista de Orientações</h3>
+                                <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                    <span>Período (anos): <input type="number" id="inp-sup-list-years" value="${state.supListYears !== undefined ? state.supListYears : 5}" min="0" style="width: 50px; padding: 2px;"></span>
+                                    <span class="no-print">Ordem: <select id="sel-sup-list-ordem" style="padding: 2px;">
+                                        <option value="ano" ${state.supListOrdem !== 'categoria' ? 'selected' : ''}>Ano / Categoria</option>
+                                        <option value="categoria" ${state.supListOrdem === 'categoria' ? 'selected' : ''}>Categoria / Ano</option>
+                                    </select></span>
+                                    <button id="btn-sup-list-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                    <button id="btn-sup-list-copy" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #1565C0; background: #fff; color: #1565C0;">📋 Copiar</button>
+                                    <span id="sup-list-copy-aviso" class="no-print" style="font-size: 0.9em; font-weight: bold; color: #2E7D32; visibility: hidden;">✓ Copiado</span>
+                                </div>
+                            </div>
+                            <span class="toggle-icon">[+]</span>
+                        </div>
+                        <div class="collapsible-content" style="display: none;" id="content-sup-list">
+                            <div id="sup-list-container" style="max-height: 500px; overflow-y: auto; padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 4px;">
                                 <div style="color: #777; text-align: center;">Carregando...</div>
                             </div>
                         </div>
@@ -5753,100 +5935,56 @@ window.JCRDBTools = {
         const pubContainer = doc.getElementById('pub-list-container');
         const inpPubYears = doc.getElementById('inp-pub-list-years');
         const btnPubUpdate = doc.getElementById('btn-pub-list-update');
-        
+        const btnPubCopy = doc.getElementById('btn-pub-list-copy');
+        const avisoPubCopy = doc.getElementById('pub-list-copy-aviso');
+
         let isPubListGenerated = false;
+        let blocosPublicacoes = [];
 
         const generatePubList = () => {
+            if (!pubContainer) return;
             const pubYears = parseInt(inpPubYears.value, 10) || 0;
             state.pubListYears = pubYears;
-            const startYear = currentYear - pubYears;
-            
-            const pubsInRange = filteredPublications.filter(p => {
-                const y = parseInt(p.year, 10);
-                return !isNaN(y) && y >= startYear;
-            });
+            blocosPublicacoes = window.JCRReportUtils.publicacoesAgrupadas(
+                filteredPublications, pubYears, currentYear);
 
-            pubsInRange.sort((a, b) => {
-                const yA = parseInt(a.year, 10) || 0;
-                const yB = parseInt(b.year, 10) || 0;
-                if (yB !== yA) return yB - yA;
-                const jA = parseFloat(a.jif) || 0;
-                const jB = parseFloat(b.jif) || 0;
-                return jB - jA;
-            });
-
-            let html = '';
-            let currentPubYear = null;
-            
-            pubsInRange.forEach((pub, index) => {
-                const pYear = pub.year || 'Desconhecido';
-                if (pYear !== currentPubYear) {
-                    if (currentPubYear !== null) html += `</div></div>`;
-                    currentPubYear = pYear;
-                    html += `
-                    <div style="margin-bottom: 15px;">
-                        <div class="pub-year-header" style="background: #e0e0e0; padding: 6px 12px; cursor: pointer; font-weight: bold; border-radius: 4px; display: flex; justify-content: space-between; border: 1px solid #ccc;">
-                            <span>Ano: ${pYear}</span>
-                            <span class="y-icon">[-]</span>
-                        </div>
-                        <div class="pub-year-content" style="padding: 12px; border: 1px solid #ccc; border-top: none; background: #fff; display: block; border-radius: 0 0 4px 4px;">
-                    `;
-                }
-
-                let cleanRef = pub.reference || [pub.paperTitle || pub.title, pub.journalName, pub.year].filter(Boolean).join('. ') || 'Referência indisponível';
-                cleanRef = cleanRef.replace(/^\s*\d+\.\s*/, '');
-                cleanRef = cleanRef.replace(/\s*Fator de Impacto:\s*[\d.]+\s*(?:\(.*?\))?/g, '');
-                cleanRef = cleanRef.replace(/\s*Não classificado\s*(?:\(.*?\))?/g, '');
-                cleanRef = cleanRef.replace(/\s*Citações:\s*\d+(?:\|\d+)?/g, '');
-                cleanRef = this._esc(cleanRef.trim());
-                cleanRef = `<b>${index + 1}.</b> ` + cleanRef;
-                
-                let extraInfo = [];
-                if (state.showPubListJcr !== false && pub.jif > 0) {
-                    let jcrColor = '#555';
-                    const jifVal = parseFloat(pub.jif) || 0;
-                    if (jifVal >= state.highJcr) jcrColor = window.JCRReportUtils.COLORS.highJcr;
-                    else if (jifVal >= state.lowJcr) jcrColor = window.JCRReportUtils.COLORS.midJcr;
-                    else jcrColor = window.JCRReportUtils.COLORS.lowJcr;
-
-                    extraInfo.push(`<strong style="color: ${jcrColor};">JCR: ${jifVal.toFixed(3)}</strong>`);
-                }
-                if (state.showPubListCitations !== false && ((pub.wosCitations || 0) > 0 || (pub.scopusCitations || 0) > 0)) {
-                    const citParts = [];
-                    if (pub.wosCitations > 0) citParts.push(`WoS: ${pub.wosCitations}`);
-                    if (pub.scopusCitations > 0) citParts.push(`Scopus: ${pub.scopusCitations}`);
-                    extraInfo.push(`Citações: ${citParts.join(' / ')}`);
-                }
-                if (state.showPubListDoi !== false && pub.doi) {
-                    const safeDoi = this._esc(pub.doi);
-                    extraInfo.push(`DOI: <a href="https://doi.org/${safeDoi}" target="_blank" style="color: #1565C0; text-decoration: none;">${safeDoi}</a>`);
-                }
-
-                const extraHtml = extraInfo.length > 0 ? `<div style="font-size: 0.9em; margin-top: 4px; color: #555;">${extraInfo.join(' | ')}</div>` : '';
-                
-                html += `<div style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed #ddd; text-align: left;">
-                    <div style="font-size: 0.95em;">${cleanRef}</div>
-                    ${extraHtml}
-                </div>`;
-            });
-            if (currentPubYear !== null) html += `</div></div>`;
-            
-            if (pubsInRange.length === 0) {
-                html = `<div style="padding: 10px; color: #777; text-align: center;">Nenhuma publicação encontrada neste período.</div>`;
+            if (blocosPublicacoes.length === 0) {
+                pubContainer.innerHTML = `<div style="padding: 10px; color: #777; text-align: center;">Nenhuma publicação encontrada neste período.</div>`;
+                isPubListGenerated = true;
+                return;
             }
 
-            pubContainer.innerHTML = html;
-            // Listeners dos cabeçalhos de ano (antes onclick inline, bloqueado pela CSP em db.html)
-            pubContainer.querySelectorAll('.pub-year-header').forEach(header => {
-                header.addEventListener('click', () => {
-                    const content = header.nextElementSibling;
-                    if (!content) return;
-                    const isHidden = content.style.display === 'none';
-                    content.style.display = isHidden ? 'block' : 'none';
-                    const icon = header.querySelector('.y-icon');
-                    if (icon) icon.textContent = isHidden ? '[-]' : '[+]';
-                });
-            });
+            pubContainer.innerHTML = this._listaEmBlocosHTML(blocosPublicacoes, (pub, n) => {
+                const extras = [];
+
+                // O JCR sai colorido pela faixa, como no resto do relatório — é a única
+                // parte da linha que a versão em texto não consegue levar.
+                const jif = parseFloat(pub.jif) || 0;
+                if (state.showPubListJcr !== false && jif > 0) {
+                    const faixa = window.JCRReportUtils.faixaDeJcr(jif, state.highJcr, state.lowJcr);
+                    const cor = window.JCRReportUtils.COLORS[faixa + 'Jcr'] || '#555';
+                    extras.push(`<strong style="color: ${cor};">JCR: ${jif.toFixed(3)}</strong>`);
+                }
+
+                if (state.showPubListCitations !== false && ((pub.wosCitations || 0) > 0 || (pub.scopusCitations || 0) > 0)) {
+                    const partes = [];
+                    if (pub.wosCitations > 0) partes.push(`WoS: ${pub.wosCitations}`);
+                    if (pub.scopusCitations > 0) partes.push(`Scopus: ${pub.scopusCitations}`);
+                    extras.push(`Citações: ${partes.join(' / ')}`);
+                }
+
+                if (state.showPubListDoi !== false && pub.doi) {
+                    const doi = this._esc(pub.doi);
+                    extras.push(`DOI: <a href="https://doi.org/${doi}" target="_blank" style="color: #1565C0; text-decoration: none;">${doi}</a>`);
+                }
+
+                const extraHtml = extras.length > 0
+                    ? `<div style="font-size: 0.9em; margin-top: 4px; color: #555;">${extras.join(' | ')}</div>`
+                    : '';
+                return `<div style="font-size: 0.95em;"><b>${n}.</b> ${this._esc(window.JCRReportUtils._referenciaLimpa(pub))}</div>${extraHtml}`;
+            }, 'publicação(ões)');
+
+            this._ligarBlocosRecolhiveis(pubContainer);
             isPubListGenerated = true;
         };
 
@@ -5865,6 +6003,23 @@ window.JCRDBTools = {
             });
         }
 
+        // Copia a lista em texto puro, com o que as caixas de seleção deixam ver e SEM a
+        // numeração da tela: colada num documento ela viraria texto fixo, e bastaria
+        // inserir ou tirar uma linha para ter de renumerar tudo à mão. Para oferecer as
+        // duas formas, passe { numerar: true }.
+        if (btnPubCopy) {
+            btnPubCopy.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (!isPubListGenerated) generatePubList();
+                const texto = window.JCRReportUtils.publicacoesEmTexto(blocosPublicacoes, {
+                    jcr: state.showPubListJcr !== false,
+                    doi: state.showPubListDoi !== false,
+                    citacoes: state.showPubListCitations !== false
+                });
+                this._avisarCopia(newTab, avisoPubCopy, await this._copiarTexto(newTab, texto));
+            });
+        }
+
         const chkPubShowJcr = doc.getElementById('chk-pub-show-jcr');
         const chkPubShowDoi = doc.getElementById('chk-pub-show-doi');
         const chkPubShowCit = doc.getElementById('chk-pub-show-cit');
@@ -5879,6 +6034,88 @@ window.JCRDBTools = {
                 if (isPubListGenerated) generatePubList();
             });
         });
+
+        // Lista de orientações. Só desenha: quem agrupa, ordena, deduplica e separa os
+        // campos é report_utils.orientacoesAgrupadas.
+        //
+        // É uma lista numerada corrida, como a do próprio CV Lattes, e não uma tabela:
+        // o destino dela é ser colada num documento. A versão em tabela continua no
+        // arquivo, em _orientacoesEmTabelaHTML.
+        const headerSupList = doc.getElementById('header-sup-list');
+        const contentSupList = doc.getElementById('content-sup-list');
+        const supContainer = doc.getElementById('sup-list-container');
+        const inpSupYears = doc.getElementById('inp-sup-list-years');
+        const selSupOrdem = doc.getElementById('sel-sup-list-ordem');
+        const btnSupUpdate = doc.getElementById('btn-sup-list-update');
+        const btnSupCopy = doc.getElementById('btn-sup-list-copy');
+        const avisoSupCopy = doc.getElementById('sup-list-copy-aviso');
+
+        let isSupListGenerated = false;
+        let blocosOrientacoes = [];
+
+        const generateSupList = () => {
+            if (!supContainer) return;
+            const anos = parseInt(inpSupYears.value, 10) || 0;
+            const ordem = selSupOrdem ? selSupOrdem.value : 'ano';
+            state.supListYears = anos;
+            state.supListOrdem = ordem;
+            blocosOrientacoes = window.JCRReportUtils.orientacoesAgrupadas(
+                rawSupervisions, anos, currentYear, ordem);
+
+            if (blocosOrientacoes.length === 0) {
+                supContainer.innerHTML = `<div style="padding: 10px; color: #777; text-align: center;">Nenhuma orientação encontrada neste período.</div>`;
+                isSupListGenerated = true;
+                return;
+            }
+
+            // O bloco recolhível é sempre o primeiro nível — o ano ou a categoria,
+            // conforme o seletor de ordem.
+            supContainer.innerHTML = this._listaEmBlocosHTML(blocosOrientacoes, (o, n) =>
+                `<div style="font-size: 0.95em;"><b>${n}.</b> ${this._esc(window.JCRReportUtils.orientacaoEmLinha(o))}</div>`,
+                'orientação(ões)');
+
+            this._ligarBlocosRecolhiveis(supContainer);
+            isSupListGenerated = true;
+        };
+
+        if (headerSupList) {
+            headerSupList.addEventListener('click', () => {
+                if (!isSupListGenerated) generateSupList();
+            });
+        }
+
+        if (btnSupUpdate) {
+            btnSupUpdate.addEventListener('click', (e) => {
+                e.stopPropagation();
+                generateSupList();
+                contentSupList.style.display = 'block';
+                headerSupList.querySelector('.toggle-icon').textContent = '[-]';
+            });
+        }
+
+        // Trocar a ordem refaz a lista na hora: não é um filtro, é a mesma lista
+        // rearranjada, e esperar pelo Atualizar só confundiria.
+        if (selSupOrdem) {
+            selSupOrdem.addEventListener('change', (e) => {
+                e.stopPropagation();
+                generateSupList();
+                contentSupList.style.display = 'block';
+                headerSupList.querySelector('.toggle-icon').textContent = '[-]';
+            });
+        }
+
+        // Copia as mesmas linhas, na ordem da tela, em texto puro — mas SEM a numeração
+        // que aparece na tela: colada num documento ela viraria texto fixo, e bastaria
+        // inserir ou tirar uma linha para ter de renumerar tudo à mão. Quem numera é o
+        // editor de texto. Para oferecer as duas formas, passe { numerar: true }.
+        if (btnSupCopy) {
+            btnSupCopy.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (!isSupListGenerated) generateSupList();
+                const texto = window.JCRReportUtils.orientacoesEmTexto(blocosOrientacoes);
+                this._avisarCopia(newTab, avisoSupCopy, await this._copiarTexto(newTab, texto));
+            });
+        }
 
         // Journal table
         const headerJournalList = doc.getElementById('header-journal-list');
@@ -5991,6 +6228,7 @@ window.JCRDBTools = {
 
             if (!recolhido) {
                 if (header === headerPubList && !isPubListGenerated) generatePubList();
+                if (header === headerSupList && !isSupListGenerated) generateSupList();
                 if (header === headerJournalList && !isJournalGenerated) generateJournalList();
                 if (header === headerCoautoria && !coautoriaGerada) gerarMatrizCoautoria();
             }

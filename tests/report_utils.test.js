@@ -417,3 +417,638 @@ describe('corpoTabelaContagens', () => {
         assert.strictEqual(R.corpoTabelaContagens(null, 'patents', 'statusCounts'), '');
     });
 });
+
+// A linha de orientacao do CV Lattes traz aluno, titulo, ano e instituicao num texto
+// so. Os casos abaixo sao linhas REAIS dos curriculos de test_pages.
+describe('camposDaOrientacao', () => {
+    const CONCLUIDA = {
+        category: 'Dissertação de mestrado', status: 'Concluída', year: 2023,
+        institution: 'Universidade Federal do Ceará',
+        reference: 'Otávio Peixoto Furtado. Low temperature structural phase transitions of the '
+            + 'lead-free hybrid vacancy-ordered perovskite (DMA)2SnBr6". 2023. Dissertação '
+            + '(Mestrado em Física) - Universidade Federal do Ceará, Coordenação de '
+            + 'Aperfeiçoamento de Pessoal de Nível Superior. Orientador: Alejandro Pedro Ayala.'
+    };
+
+    test('separa os cinco campos de uma orientacao concluida', () => {
+        const c = R.camposDaOrientacao(CONCLUIDA);
+        assert.strictEqual(c.aluno, 'Otávio Peixoto Furtado');
+        assert.ok(c.titulo.startsWith('Low temperature structural phase transitions'));
+        assert.ok(!c.titulo.includes('2023'));
+        assert.strictEqual(c.instituicao, 'Universidade Federal do Ceará');
+        assert.strictEqual(c.ano, 2023);
+        assert.strictEqual(c.tipo, 'Dissertação de mestrado');
+    });
+
+    // "Cláudio de Oliveira A. Castro": cortar no primeiro ponto daria "Cláudio de
+    // Oliveira A" como aluno e jogaria "Castro" para dentro do titulo.
+    test('nome com inicial abreviada nao e cortado no ponto da abreviatura', () => {
+        const c = R.camposDaOrientacao({
+            category: 'Tese de doutorado', status: 'Em andamento', year: NaN, institution: '',
+            reference: 'Cláudio de Oliveira A. Castro. Desenvolvimento de células solares a base '
+                + 'de perovskitas. Início: 2024. Tese (Doutorado em Física) - Universidade Federal '
+                + 'do Ceará, Conselho Nacional de Desenvolvimento Científico e Tecnológico. (Orientador).'
+        });
+        assert.strictEqual(c.aluno, 'Cláudio de Oliveira A. Castro');
+        assert.strictEqual(c.titulo, 'Desenvolvimento de células solares a base de perovskitas');
+        assert.strictEqual(c.ano, 2024);
+    });
+
+    // O ano lido e o de INICIO, e quem separa as em andamento das concluidas e a flag —
+    // o tipo fica com a categoria limpa, porque a secao "Em andamento" ja diz o resto.
+    test('em andamento le o ano de inicio e marca a flag', () => {
+        const c = R.camposDaOrientacao({
+            category: 'Dissertação de mestrado', status: 'Em andamento', year: NaN, institution: '',
+            reference: 'Felipe Alison Costa Alves. Determinação do gap de energia sob condições '
+                + 'extremas. Início: 2025. Dissertação (Mestrado profissional em Física) - '
+                + 'Universidade Federal do Ceará, CAPES. (Orientador).'
+        });
+        assert.strictEqual(c.ano, 2025);
+        assert.strictEqual(c.tipo, 'Dissertação de mestrado');
+        assert.strictEqual(c.emAndamento, true);
+    });
+
+    // A supervisao de pos-doutorado costuma vir sem titulo nenhum.
+    test('sem titulo devolve o campo vazio, e nao parte do nome', () => {
+        const c = R.camposDaOrientacao({
+            category: 'Supervisão de pós-doutorado', status: 'Em andamento', year: NaN, institution: '',
+            reference: 'Laura Maria Teodorio Vidal. Início: 2024. Universidade Federal do Ceará, '
+                + 'Financiadora de Estudos e Projetos.'
+        });
+        assert.strictEqual(c.aluno, 'Laura Maria Teodorio Vidal');
+        assert.strictEqual(c.titulo, '');
+        assert.strictEqual(c.instituicao, 'Universidade Federal do Ceará');
+        assert.strictEqual(c.ano, 2024);
+    });
+
+    // "Início: 2026 - UFJF": o ano nao e seguido de ponto, e a captura devolve
+    // institution vazia. A lista tem de achar a instituicao mesmo assim.
+    test('acha a instituicao quando o ano e seguido de travessao', () => {
+        const c = R.camposDaOrientacao({
+            category: 'Iniciação científica', status: 'Em andamento', year: NaN, institution: '',
+            reference: 'Amanda Soares Porfírio. Síntese e caracterização de pontos de carbono: um '
+                + 'estudo teórico experimental. Início: 2026 - Universidade Federal de Juiz de Fora, '
+                + 'Fundação de Amparo à Pesquisa do Estado de Minas Gerais. (Orientador).'
+        });
+        assert.strictEqual(c.instituicao, 'Universidade Federal de Juiz de Fora');
+        assert.strictEqual(c.ano, 2026);
+    });
+
+    test('o ano do registro tem precedencia sobre o texto', () => {
+        const c = R.camposDaOrientacao(Object.assign({}, CONCLUIDA, { year: 2021 }));
+        assert.strictEqual(c.ano, 2021);
+    });
+
+    test('entrada vazia nao quebra', () => {
+        const c = R.camposDaOrientacao(null);
+        assert.strictEqual(c.aluno, '');
+        assert.strictEqual(c.titulo, '');
+        assert.strictEqual(c.tipo, 'Outras');
+    });
+});
+
+describe('orientacoesAgrupadas', () => {
+    const item = (nome, ano, cat, status) => ({
+        category: cat, status: status || 'Concluída', year: ano, institution: 'UFC',
+        reference: nome + '. Titulo qualquer. ' + ano + '. ' + cat + ' (X em Y) - UFC, CAPES.'
+    });
+    const emCurso = (nome, ano, cat) => item(nome, ano, cat, 'Em andamento');
+    const titulos = (blocos) => blocos.map(b => b.titulo);
+
+    test('por ano: anos em ordem decrescente', () => {
+        const b = R.orientacoesAgrupadas([item('Ana Alves', 2019, 'Tese de doutorado'),
+                                          item('Bruno Braga', 2024, 'Tese de doutorado'),
+                                          item('Carla Costa', 2021, 'Tese de doutorado')], 100, 2026, 'ano');
+        assert.deepStrictEqual(titulos(b), ['2024', '2021', '2019']);
+    });
+
+    // A secao Em andamento vem ANTES do primeiro ano: uma tese que comecou em 2023 e
+    // continua em curso nao e producao de 2023.
+    test('por ano: Em andamento abre a lista, antes do primeiro ano', () => {
+        const b = R.orientacoesAgrupadas([item('Ana Alves', 2024, 'Tese de doutorado'),
+                                          emCurso('Bruno Braga', 2023, 'Tese de doutorado')], 100, 2026, 'ano');
+        assert.deepStrictEqual(titulos(b), ['Em andamento', '2024']);
+        assert.strictEqual(b[0].grupos[0].itens[0].aluno, 'Bruno Braga');
+    });
+
+    test('por ano: dentro do ano as categorias vao da mais graduada para a menos', () => {
+        const b = R.orientacoesAgrupadas([
+            item('Ana Alves', 2024, 'Iniciação científica'),
+            item('Bruno Braga', 2024, 'Tese de doutorado'),
+            item('Carla Costa', 2024, 'Supervisão de pós-doutorado'),
+            item('Diego Dias', 2024, 'Dissertação de mestrado')
+        ], 100, 2026, 'ano');
+        assert.deepStrictEqual(b[0].grupos.map(g => g.titulo), [
+            'Supervisão de pós-doutorado', 'Tese de doutorado',
+            'Dissertação de mestrado', 'Iniciação científica'
+        ]);
+    });
+
+    test('por categoria: categorias no primeiro nivel, anos no segundo', () => {
+        const b = R.orientacoesAgrupadas([
+            item('Ana Alves', 2019, 'Dissertação de mestrado'),
+            item('Bruno Braga', 2024, 'Tese de doutorado'),
+            item('Carla Costa', 2021, 'Tese de doutorado')
+        ], 100, 2026, 'categoria');
+        assert.deepStrictEqual(titulos(b), ['Tese de doutorado', 'Dissertação de mestrado']);
+        assert.deepStrictEqual(b[0].grupos.map(g => g.titulo), ['2024', '2021']);
+    });
+
+    test('por categoria: Em andamento abre cada categoria', () => {
+        const b = R.orientacoesAgrupadas([item('Ana Alves', 2024, 'Tese de doutorado'),
+                                          emCurso('Bruno Braga', 2023, 'Tese de doutorado')], 100, 2026, 'categoria');
+        assert.deepStrictEqual(b[0].grupos.map(g => g.titulo), ['Em andamento', '2024']);
+    });
+
+    test('a ordem padrao e por ano', () => {
+        const itens = [item('Ana Alves', 2024, 'Tese de doutorado')];
+        assert.deepStrictEqual(titulos(R.orientacoesAgrupadas(itens, 100, 2026)),
+                               titulos(R.orientacoesAgrupadas(itens, 100, 2026, 'ano')));
+    });
+
+    test('dentro do grupo os alunos saem em ordem alfabetica', () => {
+        const b = R.orientacoesAgrupadas([item('Zulmira Xavier', 2024, 'Tese de doutorado'),
+                                          item('Ana Yamada', 2024, 'Tese de doutorado')], 100, 2026, 'ano');
+        assert.deepStrictEqual(b[0].grupos[0].itens.map(i => i.aluno), ['Ana Yamada', 'Zulmira Xavier']);
+    });
+
+    test('o filtro de anos corta as concluidas pelo ano atual', () => {
+        const itens = [item('Ana Alves', 2026, 'Tese de doutorado'), item('Bruno Braga', 2018, 'Tese de doutorado')];
+        assert.deepStrictEqual(titulos(R.orientacoesAgrupadas(itens, 3, 2026, 'ano')), ['2026']);
+        assert.deepStrictEqual(titulos(R.orientacoesAgrupadas(itens, 100, 2026, 'ano')), ['2026', '2018']);
+    });
+
+    // Zero nao e atalho para "tudo": zero ano de recuo e o ano corrente sozinho, igual
+    // ao campo "Periodo (anos)" da lista de publicacoes. Para ver tudo poe-se um numero
+    // grande; so o campo vazio (NaN) desliga o corte.
+    test('zero ano de recuo e o ano corrente sozinho', () => {
+        const itens = [item('Ana Alves', 2026, 'Tese de doutorado'), item('Bruno Braga', 2025, 'Tese de doutorado')];
+        assert.deepStrictEqual(titulos(R.orientacoesAgrupadas(itens, 0, 2026, 'ano')), ['2026']);
+        assert.deepStrictEqual(titulos(R.orientacoesAgrupadas(itens, '', 2026, 'ano')), ['2026', '2025']);
+    });
+
+    // Filtrar as em andamento pelo ano de inicio esconderia justamente os doutorados
+    // longos, que sao os que mais interessam num relatorio de equipe.
+    test('o filtro de anos NAO corta as em andamento', () => {
+        const b = R.orientacoesAgrupadas([emCurso('Ana Alves', 2015, 'Tese de doutorado')], 3, 2026, 'ano');
+        assert.deepStrictEqual(titulos(b), ['Em andamento']);
+    });
+
+    // Num relatorio de equipe o orientador e o coorientador listam o mesmo aluno.
+    test('mesmo aluno, ano e titulo entram uma vez so', () => {
+        const a = item('Joao Silva', 2024, 'Tese de doutorado');
+        assert.strictEqual(R.orientacoesAgrupadas([a, Object.assign({}, a)], 100, 2026, 'ano')[0].total, 1);
+    });
+
+    test('a mesma pessoa concluida e em andamento sao registros diferentes', () => {
+        const fim = item('Joao Silva', 2024, 'Tese de doutorado');
+        const curso = emCurso('Joao Silva', 2024, 'Tese de doutorado');
+        assert.deepStrictEqual(titulos(R.orientacoesAgrupadas([fim, curso], 100, 2026, 'ano')),
+                               ['Em andamento', '2024']);
+    });
+
+    test('concluida sem ano legivel fica de fora', () => {
+        const semAno = { category: 'Tese de doutorado', status: 'Concluída', year: NaN,
+                         institution: '', reference: 'Fulano de Tal. Sem ano nenhum aqui.' };
+        assert.deepStrictEqual(R.orientacoesAgrupadas([semAno], 100, 2026, 'ano'), []);
+    });
+
+    test('aceita tanto o array cru quanto o objeto com .raw', () => {
+        const i = item('Ana Alves', 2024, 'Tese de doutorado');
+        assert.strictEqual(R.orientacoesAgrupadas({ raw: [i] }, 100, 2026, 'ano').length, 1);
+        assert.deepStrictEqual(R.orientacoesAgrupadas(null, 100, 2026, 'ano'), []);
+    });
+});
+
+describe('orientacaoEmLinha', () => {
+    test('os cinco campos na ordem pedida, separados por ponto', () => {
+        assert.strictEqual(
+            R.orientacaoEmLinha({ aluno: 'Ana Souza', titulo: 'Um titulo', instituicao: 'UFC',
+                                  ano: 2024, tipo: 'Tese de doutorado', emAndamento: false }),
+            'Ana Souza. Um titulo. UFC. 2024. Tese de doutorado');
+    });
+
+    test('em andamento diz que o ano e o de inicio', () => {
+        assert.ok(R.orientacaoEmLinha({ aluno: 'Ana', titulo: '', instituicao: 'UFC',
+                                        ano: 2023, tipo: 'Tese de doutorado', emAndamento: true })
+            .includes('início 2023'));
+    });
+
+    // O pos-doutorado costuma vir sem titulo; sem o filtro sobraria ".." na frase.
+    test('campo vazio some, em vez de deixar pontos soltos', () => {
+        const l = R.orientacaoEmLinha({ aluno: 'Ana', titulo: '', instituicao: 'UFC',
+                                        ano: 2024, tipo: 'Supervisão de pós-doutorado', emAndamento: false });
+        assert.strictEqual(l, 'Ana. UFC. 2024. Supervisão de pós-doutorado');
+        assert.ok(!l.includes('..'));
+    });
+
+    test('entrada vazia devolve string vazia', () => {
+        assert.strictEqual(R.orientacaoEmLinha(null), '');
+    });
+});
+
+describe('orientacoesEmTexto', () => {
+    const blocos = () => R.orientacoesAgrupadas([
+        { category: 'Tese de doutorado', status: 'Concluída', year: 2024, institution: 'UFC',
+          reference: 'Ana Souza. Um titulo. 2024. Tese (Doutorado em Física) - UFC, CAPES.' },
+        { category: 'Tese de doutorado', status: 'Em andamento', year: 2023, institution: 'UFC',
+          reference: 'Bruno Lima. Outro titulo. Início: 2023. Tese (Doutorado em Física) - UFC, CAPES.' }
+    ], 100, 2026, 'ano');
+
+    test('leva os titulos das secoes, na ordem da tela', () => {
+        const linhas = R.orientacoesEmTexto(blocos()).split('\n').filter(l => l !== '');
+        assert.strictEqual(linhas[0], 'Em andamento');
+        assert.ok(linhas[2].trim().startsWith('Bruno Lima'));
+        assert.strictEqual(linhas[3], '2024');
+        assert.ok(linhas[5].trim().startsWith('Ana Souza'));
+    });
+
+    // Numero colado num documento vira texto fixo: inserir ou tirar uma linha depois
+    // obrigaria a renumerar tudo a mao. Quem numera e o editor de texto.
+    test('por padrao NAO numera', () => {
+        assert.ok(!/^\s*\d+\.\s/m.test(R.orientacoesEmTexto(blocos())));
+    });
+
+    test('a numeracao continua existe, mas so quando pedida', () => {
+        const linhas = R.orientacoesEmTexto(blocos(), { numerar: true }).split('\n').filter(l => l !== '');
+        assert.ok(linhas[2].trim().startsWith('1. Bruno Lima'));
+        assert.ok(linhas[5].trim().startsWith('2. Ana Souza'));
+    });
+
+    test('lista vazia devolve texto vazio', () => {
+        assert.strictEqual(R.orientacoesEmTexto([]), '');
+        assert.strictEqual(R.orientacoesEmTexto(null), '');
+    });
+});
+
+// A planilha de producoes do efomento vem em colunas, entao os campos chegam
+// separados. Quebrar o `reference` dela daria "Titulo. Instituicao. Curso" como
+// titulo — os campos prontos tem de vencer.
+describe('camposDaOrientacao com a planilha de producoes', () => {
+    const DA_PLANILHA = {
+        category: 'Dissertação de mestrado', status: 'Concluída', year: 2022,
+        student: 'Marina Ferreira Lima',
+        title: 'Estudo de perovskitas híbridas',
+        institution: 'Universidade Federal do Ceará',
+        course: 'Física',
+        reference: 'Marina Ferreira Lima. Estudo de perovskitas híbridas. '
+            + 'Universidade Federal do Ceará. Física. 2022'
+    };
+
+    test('usa os campos ja separados em vez de quebrar o texto', () => {
+        const c = R.camposDaOrientacao(DA_PLANILHA);
+        assert.strictEqual(c.aluno, 'Marina Ferreira Lima');
+        assert.strictEqual(c.titulo, 'Estudo de perovskitas híbridas');
+        assert.strictEqual(c.instituicao, 'Universidade Federal do Ceará');
+        assert.strictEqual(c.ano, 2022);
+    });
+
+    test('orientacao sem titulo na planilha nao herda texto do reference', () => {
+        const c = R.camposDaOrientacao(Object.assign({}, DA_PLANILHA, { title: '' }));
+        assert.strictEqual(c.aluno, 'Marina Ferreira Lima');
+        assert.strictEqual(c.titulo, '');
+    });
+});
+
+// A instituicao so e derivada do texto quando a captura nao trouxe o campo. Os quatro
+// casos abaixo sao as formas que aparecem nos CVs de test_pages, e cada um quebrava
+// uma versao anterior da regra.
+describe('_instituicaoDaOrientacao', () => {
+    const semCaptura = (ref) => R.camposDaOrientacao({
+        category: 'X', status: 'Concluída', year: NaN, institution: '', reference: ref
+    }).instituicao;
+
+    test('natureza com area entre parenteses', () => {
+        assert.strictEqual(
+            semCaptura('Ana Souza. Um titulo. 2023. Dissertação (Mestrado em Física) - '
+                + 'Universidade Federal do Ceará, Coordenação de Aperfeiçoamento de Pessoal.'),
+            'Universidade Federal do Ceará');
+    });
+
+    // O travessao tambem aparece DENTRO do nome da financiadora; parar na virgula e o
+    // que impede a lista de exibir "MA" como instituicao.
+    test('travessao dentro do nome da financiadora nao rouba a vaga', () => {
+        assert.strictEqual(
+            semCaptura('Ariel Nonato Almeida de Abreu Silva. 2022. Universidade Federal do Ceará, '
+                + 'Fundação de Amparo à Pesquisa ao Desenv. Científico e Tecnológico - MA. '
+                + 'Alejandro Pedro Ayala.'),
+            'Universidade Federal do Ceará');
+    });
+
+    test('natureza sem parenteses, separada so por travessao', () => {
+        assert.strictEqual(
+            semCaptura('Maria Silmara Alves de Santana. Engenharia de cristais. 2013. '
+                + 'Orientação de outra natureza - Universidade Federal do Ceará, '
+                + 'Fundação Cearense de Apoio ao Desenvolvimento.'),
+            'Universidade Federal do Ceará');
+    });
+
+    // Sem financiadora nao ha virgula, e o texto emenda direto em "Orientador:".
+    test('sem financiadora, corta no ponto antes do orientador', () => {
+        assert.strictEqual(
+            semCaptura('Manoel Florindo Júnior. Resinas odontológicas. Início: 2023. '
+                + 'Tese (Doutorado em Física) - Universidade Federal do Ceará. (Orientador).'),
+            'Universidade Federal do Ceará');
+    });
+
+    test('texto sem ano nenhum nao inventa instituicao', () => {
+        assert.strictEqual(semCaptura('Fulano de Tal. Sem ano aqui.'), '');
+    });
+});
+
+// Muita gente digita nome e titulo no Lattes em CAIXA ALTA. Numa lista para colar num
+// documento isso grita, entao a caixa e normalizada — mas so quando o texto todo esta
+// em maiuscula, para nunca estragar quem escreveu direito.
+describe('_normalizarCaixa', () => {
+    test('nome inteiro em maiuscula vira caixa de titulo', () => {
+        assert.strictEqual(R._normalizarCaixa('MARIA FERNANDA OLIVEIRA MARTÍNEZ'),
+                           'Maria Fernanda Oliveira Martínez');
+    });
+
+    test('conectivo no meio do nome fica em minuscula', () => {
+        assert.strictEqual(R._normalizarCaixa('DIOGO RUBIO SANT ANNA DAS DORES'),
+                           'Diogo Rubio Sant Anna das Dores');
+    });
+
+    test('a primeira palavra nunca e rebaixada, mesmo sendo conectivo', () => {
+        assert.strictEqual(R._normalizarCaixa('DAS NEVES SILVA JUNIOR'), 'Das Neves Silva Junior');
+    });
+
+    // Caixa de TITULO, e nao de frase: em caixa de frase "RAMAN" viraria "raman", que
+    // para quem le e erro visivel.
+    test('sobrenome dentro do titulo mantem a maiuscula', () => {
+        assert.strictEqual(R._normalizarCaixa('ESTUDO POR ESPECTROSCOPIA RAMAN'),
+                           'Estudo por Espectroscopia Raman');
+    });
+
+    test('conectivo em ingles tambem e rebaixado', () => {
+        assert.strictEqual(R._normalizarCaixa('EXPLORING THE PROPERTIES OF HALIDE PEROVSKITES'),
+                           'Exploring the Properties of Halide Perovskites');
+    });
+
+    // Formula quimica: a palavra ja tem minuscula, ou tem digito. Nos dois casos passa
+    // intacta, senao "CsPbBr" viraria "Cspbbr".
+    test('formula quimica no meio do titulo passa intacta', () => {
+        const fora = R._normalizarCaixa('SÍNTESE DE NANOCRISTAIS DE PEROVSKITA CsPbBr 3 VIA LARP');
+        assert.ok(fora.includes('CsPbBr'));
+        assert.ok(fora.startsWith('Síntese de Nanocristais'));
+    });
+
+    test('palavra com digito nao e tocada', () => {
+        assert.ok(R._normalizarCaixa('PROPRIEDADES DE Rb2InCl5 POR RAMAN').includes('Rb2InCl5'));
+    });
+
+    test('texto escrito normalmente nao e tocado', () => {
+        const t = 'Determinação do gap de energia sob condições extremas';
+        assert.strictEqual(R._normalizarCaixa(t), t);
+        const misto = 'Low temperature transitions of the perovskite (DMA)2SnBr6';
+        assert.strictEqual(R._normalizarCaixa(misto), misto);
+    });
+
+    test('sigla curta e texto vazio nao quebram', () => {
+        assert.strictEqual(R._normalizarCaixa('UFC'), 'UFC');   // menos de 4 letras: intacto
+        assert.strictEqual(R._normalizarCaixa(''), '');
+        assert.strictEqual(R._normalizarCaixa(null), '');
+    });
+});
+
+// O orientador sai do dono do CV de onde a linha veio. E a unica fonte que serve para
+// as orientacoes em andamento, cujo texto diz so "(Orientador)." sem nome.
+describe('orientador da orientacao', () => {
+    const base = (extra) => Object.assign({
+        category: 'Tese de doutorado', status: 'Concluída', year: 2020, institution: 'UFC',
+        reference: 'Ana Souza. Um titulo. 2020. Tese (Doutorado em Física) - UFC, CAPES. '
+            + 'Orientador: Carlos Pereira.'
+    }, extra || {});
+
+    test('o dono do CV vence o nome escrito no texto', () => {
+        const c = R.camposDaOrientacao(base({ _orientador: 'Alejandro Pedro Ayala' }));
+        assert.deepStrictEqual(c.orientadores, [{ nome: 'Alejandro Pedro Ayala', coorientador: false }]);
+    });
+
+    test('sem o dono do CV, le o nome do fim da linha', () => {
+        const c = R.camposDaOrientacao(base());
+        assert.deepStrictEqual(c.orientadores, [{ nome: 'Carlos Pereira', coorientador: false }]);
+    });
+
+    test('em andamento nao tem nome no texto, e so o dono do CV resolve', () => {
+        const emCurso = {
+            category: 'Tese de doutorado', status: 'Em andamento', year: NaN, institution: '',
+            reference: 'Ana Souza. Um titulo. Início: 2024. Tese (Doutorado em Física) - UFC. (Orientador).',
+            _orientador: 'Alejandro Pedro Ayala'
+        };
+        assert.deepStrictEqual(R.camposDaOrientacao(emCurso).orientadores,
+                               [{ nome: 'Alejandro Pedro Ayala', coorientador: false }]);
+    });
+
+    test('nome do orientador em caixa alta tambem e normalizado', () => {
+        const c = R.camposDaOrientacao(base({ _orientador: 'ALEJANDRO PEDRO AYALA' }));
+        assert.strictEqual(c.orientadores[0].nome, 'Alejandro Pedro Ayala');
+    });
+
+    // "(Coorientador)" sai da categoria: a coorientacao agora aparece por nome no fim
+    // da linha, e manter a marca ali partiria o mesmo trabalho em duas categorias.
+    test('coorientacao e marcada na pessoa, e nao na categoria', () => {
+        const c = R.camposDaOrientacao({
+            category: 'Tese de doutorado (Coorientador)', status: 'Concluída', year: 2014,
+            institution: 'UFC', _orientador: 'Alejandro Pedro Ayala',
+            reference: 'Ana Souza. Um titulo. 2014. Tese (Doutorado em Física) - UFC, . '
+                + 'Coorientador: Alejandro Pedro Ayala.'
+        });
+        assert.strictEqual(c.tipo, 'Tese de doutorado');
+        assert.deepStrictEqual(c.orientadores, [{ nome: 'Alejandro Pedro Ayala', coorientador: true }]);
+    });
+});
+
+describe('textoDeOrientadores', () => {
+    test('um orientador', () => {
+        assert.strictEqual(R.textoDeOrientadores([{ nome: 'Ana', coorientador: false }]),
+                           'Orientador: Ana');
+    });
+    test('orientador e coorientador saem separados', () => {
+        assert.strictEqual(
+            R.textoDeOrientadores([{ nome: 'Ana', coorientador: false },
+                                   { nome: 'Bruno', coorientador: true }]),
+            'Orientador: Ana; Coorientador: Bruno');
+    });
+    test('mais de um vira plural', () => {
+        assert.strictEqual(
+            R.textoDeOrientadores([{ nome: 'Ana', coorientador: false },
+                                   { nome: 'Bruno', coorientador: false }]),
+            'Orientadores: Ana, Bruno');
+    });
+    test('lista vazia devolve string vazia', () => {
+        assert.strictEqual(R.textoDeOrientadores([]), '');
+        assert.strictEqual(R.textoDeOrientadores(null), '');
+    });
+});
+
+// A coorientacao so aparece quando os DOIS CVs estao no relatorio: a mesma orientacao
+// chega duas vezes, uma por cada CV, e e a juncao das duas que revela o par.
+describe('coorientacao entre CVs da equipe', () => {
+    const linha = (dono, coorientou) => ({
+        category: coorientou ? 'Tese de doutorado (Coorientador)' : 'Tese de doutorado',
+        status: 'Concluída', year: 2020, institution: 'UFC', _orientador: dono,
+        reference: 'Ana Souza. Estudo de perovskitas. 2020. Tese (Doutorado em Física) - UFC, CAPES. '
+            + (coorientou ? 'Coorientador: ' : 'Orientador: ') + dono + '.'
+    });
+
+    test('as duas vias viram uma linha so, com os dois nomes', () => {
+        const b = R.orientacoesAgrupadas([linha('Alejandro Ayala', false),
+                                          linha('Zélia Ludwig', true)], 100, 2026, 'ano');
+        assert.strictEqual(b[0].total, 1);
+        const o = b[0].grupos[0].itens[0];
+        assert.deepStrictEqual(o.orientadores, [
+            { nome: 'Alejandro Ayala', coorientador: false },
+            { nome: 'Zélia Ludwig', coorientador: true }
+        ]);
+        assert.ok(R.orientacaoEmLinha(o).endsWith('Orientador: Alejandro Ayala; Coorientador: Zélia Ludwig'));
+    });
+
+    test('a ordem em que os CVs entram nao muda o resultado', () => {
+        const b = R.orientacoesAgrupadas([linha('Zélia Ludwig', true),
+                                          linha('Alejandro Ayala', false)], 100, 2026, 'ano');
+        assert.strictEqual(R.textoDeOrientadores(b[0].grupos[0].itens[0].orientadores),
+                           'Orientador: Alejandro Ayala; Coorientador: Zélia Ludwig');
+    });
+
+    // O mesmo CV importado duas vezes nao pode virar "Orientadores: Fulano, Fulano".
+    test('a mesma pessoa nao entra duas vezes', () => {
+        const b = R.orientacoesAgrupadas([linha('Alejandro Ayala', false),
+                                          linha('Alejandro Ayala', false)], 100, 2026, 'ano');
+        assert.strictEqual(b[0].grupos[0].itens[0].orientadores.length, 1);
+    });
+
+    // Se a pessoa aparece como orientadora numa via e coorientadora noutra, vale o papel
+    // mais forte — senao ela seria listada como coorientadora do proprio aluno.
+    test('orientador vence coorientador para a mesma pessoa', () => {
+        const b = R.orientacoesAgrupadas([linha('Alejandro Ayala', true),
+                                          linha('Alejandro Ayala', false)], 100, 2026, 'ano');
+        assert.deepStrictEqual(b[0].grupos[0].itens[0].orientadores,
+                               [{ nome: 'Alejandro Ayala', coorientador: false }]);
+    });
+});
+
+// A lista de publicacoes devolve blocos no MESMO formato da de orientacoes
+// ({ titulo, grupos, total }), porque as duas passam pelo mesmo desenhista.
+describe('publicacoesAgrupadas', () => {
+    const pub = (ano, jif, ref) => ({ year: ano, jif: jif, reference: ref || ('Artigo de ' + ano) });
+
+    test('um bloco por ano, do mais recente para o mais antigo', () => {
+        const b = R.publicacoesAgrupadas([pub(2019, 1), pub(2024, 1), pub(2021, 1)], 100, 2026);
+        assert.deepStrictEqual(b.map(x => x.titulo), ['2024', '2021', '2019']);
+    });
+
+    test('dentro do ano, do maior JCR para o menor', () => {
+        const b = R.publicacoesAgrupadas([pub(2024, 2.5, 'baixo'), pub(2024, 9.1, 'alto')], 100, 2026);
+        assert.deepStrictEqual(b[0].grupos[0].itens.map(p => p.reference), ['alto', 'baixo']);
+    });
+
+    // Sem segundo nivel: um grupo unico e sem nome, que o desenhista nao titula.
+    test('cada ano traz um grupo unico e sem titulo', () => {
+        const b = R.publicacoesAgrupadas([pub(2024, 1)], 100, 2026);
+        assert.strictEqual(b[0].grupos.length, 1);
+        assert.strictEqual(b[0].grupos[0].titulo, '');
+        assert.strictEqual(b[0].total, 1);
+    });
+
+    test('o filtro de anos corta pelo ano atual', () => {
+        const itens = [pub(2026, 1), pub(2018, 1)];
+        assert.deepStrictEqual(R.publicacoesAgrupadas(itens, 3, 2026).map(x => x.titulo), ['2026']);
+        assert.deepStrictEqual(R.publicacoesAgrupadas(itens, 100, 2026).map(x => x.titulo), ['2026', '2018']);
+    });
+
+    // Comportamento antigo da lista, preservado: zero ano de recuo e o ano corrente
+    // sozinho, e nao "tudo".
+    test('zero ano de recuo e o ano corrente sozinho', () => {
+        const itens = [pub(2026, 1), pub(2025, 1)];
+        assert.deepStrictEqual(R.publicacoesAgrupadas(itens, 0, 2026).map(x => x.titulo), ['2026']);
+        assert.deepStrictEqual(R.publicacoesAgrupadas(itens, '', 2026).map(x => x.titulo), ['2026', '2025']);
+    });
+
+    test('publicacao sem ano fica de fora, e entrada invalida nao quebra', () => {
+        assert.deepStrictEqual(R.publicacoesAgrupadas([{ jif: 3 }], 100, 2026), []);
+        assert.deepStrictEqual(R.publicacoesAgrupadas(null, 100, 2026), []);
+        assert.deepStrictEqual(R.publicacoesAgrupadas([null], 100, 2026), []);
+    });
+});
+
+describe('_referenciaLimpa', () => {
+    // O relatorio ja mostra JCR e citacoes em separado; repeti-los dentro da referencia
+    // so polui a linha que vai para o documento.
+    test('tira numero da lista, fator de impacto e citacoes', () => {
+        assert.strictEqual(
+            R._referenciaLimpa({ reference: '12. SILVA, A. Titulo do artigo. Revista X, 2024. '
+                + 'Fator de Impacto: 4.510 (2024) Citações: 7|9' }),
+            'SILVA, A. Titulo do artigo. Revista X, 2024.');
+    });
+
+    test('tira tambem o "Não classificado"', () => {
+        assert.strictEqual(R._referenciaLimpa({ reference: 'SILVA, A. Artigo. Não classificado (2 autores)' }),
+                           'SILVA, A. Artigo.');
+    });
+
+    test('sem reference, monta a partir de titulo, periodico e ano', () => {
+        assert.strictEqual(R._referenciaLimpa({ paperTitle: 'Um artigo', journalName: 'Rev X', year: 2024 }),
+                           'Um artigo. Rev X. 2024');
+    });
+
+    test('sem nada devolve o aviso, e entrada vazia nao quebra', () => {
+        assert.strictEqual(R._referenciaLimpa({}), 'Referência indisponível');
+        assert.strictEqual(R._referenciaLimpa(null), '');
+    });
+});
+
+describe('publicacaoEmLinha', () => {
+    const P = { year: 2024, jif: 4.51, wosCitations: 7, scopusCitations: 9, doi: '10.1000/xyz',
+                reference: 'SILVA, A. Titulo. Rev X, 2024.' };
+
+    test('leva os extras que as caixas de selecao deixam ver', () => {
+        assert.strictEqual(R.publicacaoEmLinha(P, {}),
+            'SILVA, A. Titulo. Rev X, 2024. | JCR: 4.510 | Citações: WoS: 7 / Scopus: 9 | DOI: 10.1000/xyz');
+    });
+
+    test('caixa desmarcada tira o extra correspondente', () => {
+        assert.strictEqual(R.publicacaoEmLinha(P, { jcr: false, citacoes: false, doi: false }),
+                           'SILVA, A. Titulo. Rev X, 2024.');
+    });
+
+    test('sem JCR, sem citacoes e sem DOI sobra so a referencia', () => {
+        assert.strictEqual(R.publicacaoEmLinha({ year: 2024, jif: 0, reference: 'SILVA, A. Titulo.' }, {}),
+                           'SILVA, A. Titulo.');
+    });
+
+    test('entrada vazia devolve string vazia', () => {
+        assert.strictEqual(R.publicacaoEmLinha(null, {}), '');
+    });
+});
+
+describe('publicacoesEmTexto', () => {
+    const blocos = () => R.publicacoesAgrupadas([
+        { year: 2024, jif: 0, reference: 'SILVA, A. Artigo de 2024.' },
+        { year: 2023, jif: 0, reference: 'SOUZA, B. Artigo de 2023.' }
+    ], 100, 2026);
+
+    test('leva o ano como titulo de secao', () => {
+        const linhas = R.publicacoesEmTexto(blocos()).split('\n').filter(l => l !== '');
+        assert.strictEqual(linhas[0], '2024');
+        assert.ok(linhas[1].trim().startsWith('SILVA, A.'));
+        assert.strictEqual(linhas[2], '2023');
+    });
+
+    // Mesma regra da lista de orientacoes: numero colado num documento vira texto fixo.
+    test('por padrao NAO numera', () => {
+        assert.ok(!/^\s*\d+\.\s/m.test(R.publicacoesEmTexto(blocos())));
+    });
+
+    test('a numeracao continua existe, mas so quando pedida', () => {
+        const linhas = R.publicacoesEmTexto(blocos(), { numerar: true }).split('\n').filter(l => l !== '');
+        assert.ok(linhas[1].trim().startsWith('1. SILVA'));
+        assert.ok(linhas[3].trim().startsWith('2. SOUZA'));
+    });
+
+    test('lista vazia devolve texto vazio', () => {
+        assert.strictEqual(R.publicacoesEmTexto([]), '');
+        assert.strictEqual(R.publicacoesEmTexto(null), '');
+    });
+});
