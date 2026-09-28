@@ -3383,6 +3383,23 @@ window.JCRDBTools = {
         });
     },
 
+    // Controles de cópia de uma lista: o checkbox da numeração, o botão e o aviso. Ficam
+    // por último no cabeçalho, depois dos filtros — são o que se usa no fim, e é onde o
+    // usuário espera achá-los nas duas listas.
+    //
+    // A numeração começa desligada: colada num documento ela vira texto fixo, e qualquer
+    // linha inserida depois obriga a renumerar tudo à mão. Quem quiser a lista pronta,
+    // com número, marca a caixa. A lista NA TELA é sempre numerada — ali o número serve
+    // para ler e contar, e não vai para lugar nenhum.
+    _opcoesDeCopiaHTML: function (prefixo, numerar) {
+        return `
+            <label class="no-print" style="cursor: pointer; color: #555;" title="Inclui a numeração no texto copiado. A lista na tela é sempre numerada.">
+                <input type="checkbox" id="chk-${prefixo}-list-numerar" ${numerar ? 'checked' : ''}> Numerar ao copiar
+            </label>
+            <button id="btn-${prefixo}-list-copy" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #1565C0; background: #fff; color: #1565C0;">📋 Copiar</button>
+            <span id="${prefixo}-list-copy-aviso" class="no-print" style="font-size: 0.9em; font-weight: bold; color: #2E7D32; visibility: hidden;">✓ Copiado</span>`;
+    },
+
     // Põe um texto na área de transferência da aba do relatório. Sem a API de clipboard
     // (aba sem permissão), cai num campo temporário selecionado e copiado à mão.
     _copiarTexto: async function (janela, texto) {
@@ -4109,8 +4126,10 @@ window.JCRDBTools = {
                 customYears: 1,
                 targetAuthorRank: 1,
                 pubListYears: 5,
+                pubListNumerar: false,
                 supListYears: 5,
                 supListOrdem: 'ano',
+                supListNumerar: false,
                 journalYears: 5,
                 minJournalPapers: 1,
                 showHighJcr: true,
@@ -4615,13 +4634,12 @@ window.JCRDBTools = {
                                 <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                                     <span>Período (anos): <input type="number" id="inp-pub-list-years" value="${state.pubListYears !== undefined ? state.pubListYears : 5}" min="0" style="width: 50px; padding: 2px;"></span>
                                     <button id="btn-pub-list-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
-                                    <button id="btn-pub-list-copy" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #1565C0; background: #fff; color: #1565C0;">📋 Copiar</button>
-                                    <span id="pub-list-copy-aviso" class="no-print" style="font-size: 0.9em; font-weight: bold; color: #2E7D32; visibility: hidden;">✓ Copiado</span>
                                     <span class="no-print" style="display: flex; align-items: center; gap: 10px; color: #555;">
                                         <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-jcr" ${state.showPubListJcr !== false ? 'checked' : ''}> JCR</label>
                                         <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-doi" ${state.showPubListDoi !== false ? 'checked' : ''}> DOI</label>
                                         <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-cit" ${state.showPubListCitations !== false ? 'checked' : ''}> Citações</label>
                                     </span>
+                                    ${this._opcoesDeCopiaHTML('pub', state.pubListNumerar === true)}
                                 </div>
                             </div>
                             <span class="toggle-icon">[+]</span>
@@ -4645,8 +4663,7 @@ window.JCRDBTools = {
                                         <option value="categoria" ${state.supListOrdem === 'categoria' ? 'selected' : ''}>Categoria / Ano</option>
                                     </select></span>
                                     <button id="btn-sup-list-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
-                                    <button id="btn-sup-list-copy" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #1565C0; background: #fff; color: #1565C0;">📋 Copiar</button>
-                                    <span id="sup-list-copy-aviso" class="no-print" style="font-size: 0.9em; font-weight: bold; color: #2E7D32; visibility: hidden;">✓ Copiado</span>
+                                    ${this._opcoesDeCopiaHTML('sup', state.supListNumerar === true)}
                                 </div>
                             </div>
                             <span class="toggle-icon">[+]</span>
@@ -5936,6 +5953,7 @@ window.JCRDBTools = {
         const inpPubYears = doc.getElementById('inp-pub-list-years');
         const btnPubUpdate = doc.getElementById('btn-pub-list-update');
         const btnPubCopy = doc.getElementById('btn-pub-list-copy');
+        const chkPubNumerar = doc.getElementById('chk-pub-list-numerar');
         const avisoPubCopy = doc.getElementById('pub-list-copy-aviso');
 
         let isPubListGenerated = false;
@@ -6003,10 +6021,14 @@ window.JCRDBTools = {
             });
         }
 
-        // Copia a lista em texto puro, com o que as caixas de seleção deixam ver e SEM a
-        // numeração da tela: colada num documento ela viraria texto fixo, e bastaria
-        // inserir ou tirar uma linha para ter de renumerar tudo à mão. Para oferecer as
-        // duas formas, passe { numerar: true }.
+        // Copia a lista em texto puro, com o que as caixas de seleção deixam ver. A
+        // numeração só entra se o checkbox pedir — ver _opcoesDeCopiaHTML.
+        if (chkPubNumerar) {
+            chkPubNumerar.addEventListener('change', () => {
+                state.pubListNumerar = chkPubNumerar.checked;
+            });
+        }
+
         if (btnPubCopy) {
             btnPubCopy.addEventListener('click', async (e) => {
                 e.stopPropagation();
@@ -6014,7 +6036,8 @@ window.JCRDBTools = {
                 const texto = window.JCRReportUtils.publicacoesEmTexto(blocosPublicacoes, {
                     jcr: state.showPubListJcr !== false,
                     doi: state.showPubListDoi !== false,
-                    citacoes: state.showPubListCitations !== false
+                    citacoes: state.showPubListCitations !== false,
+                    numerar: state.pubListNumerar === true
                 });
                 this._avisarCopia(newTab, avisoPubCopy, await this._copiarTexto(newTab, texto));
             });
@@ -6048,6 +6071,7 @@ window.JCRDBTools = {
         const selSupOrdem = doc.getElementById('sel-sup-list-ordem');
         const btnSupUpdate = doc.getElementById('btn-sup-list-update');
         const btnSupCopy = doc.getElementById('btn-sup-list-copy');
+        const chkSupNumerar = doc.getElementById('chk-sup-list-numerar');
         const avisoSupCopy = doc.getElementById('sup-list-copy-aviso');
 
         let isSupListGenerated = false;
@@ -6104,15 +6128,21 @@ window.JCRDBTools = {
             });
         }
 
-        // Copia as mesmas linhas, na ordem da tela, em texto puro — mas SEM a numeração
-        // que aparece na tela: colada num documento ela viraria texto fixo, e bastaria
-        // inserir ou tirar uma linha para ter de renumerar tudo à mão. Quem numera é o
-        // editor de texto. Para oferecer as duas formas, passe { numerar: true }.
+        // Copia as mesmas linhas, na ordem da tela, em texto puro. A numeração só entra
+        // se o checkbox pedir — ver _opcoesDeCopiaHTML.
+        if (chkSupNumerar) {
+            chkSupNumerar.addEventListener('change', () => {
+                state.supListNumerar = chkSupNumerar.checked;
+            });
+        }
+
         if (btnSupCopy) {
             btnSupCopy.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 if (!isSupListGenerated) generateSupList();
-                const texto = window.JCRReportUtils.orientacoesEmTexto(blocosOrientacoes);
+                const texto = window.JCRReportUtils.orientacoesEmTexto(blocosOrientacoes, {
+                    numerar: state.supListNumerar === true
+                });
                 this._avisarCopia(newTab, avisoSupCopy, await this._copiarTexto(newTab, texto));
             });
         }
