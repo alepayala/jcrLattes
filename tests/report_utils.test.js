@@ -1052,3 +1052,134 @@ describe('publicacoesEmTexto', () => {
         assert.strictEqual(R.publicacoesEmTexto(null), '');
     });
 });
+
+// A lista de autores do Lattes costuma vir em CAIXA ALTA, as vezes misturada com nomes
+// ja escritos direito. O corte entre autores e titulo e o MESMO que a captura usa para
+// contar autores (lattes_parser: bruto.indexOf(doCvuri.titulo)), e o titulo esta gravado
+// no registro — entao isto vale para os CVs que ja estao no banco, sem reimportar.
+describe('normalizacao da caixa dos autores', () => {
+    const TITULO = 'About the strain-coupled molecular dynamics in the ferroelastic phase transition';
+    const pub = (autores) => ({
+        paperTitle: TITULO,
+        reference: autores + ' . ' + TITULO + '. JOURNAL OF MOLECULAR STRUCTURE , v. 1349, p. 143739, 2026.'
+    });
+
+    test('autor em caixa alta vira caixa de titulo, e a inicial continua maiuscula', () => {
+        assert.ok(R._referenciaLimpa(pub('NONATO, A. ; PASCHOAL, C.W.A.'))
+            .startsWith('Nonato, A. ; Paschoal, C.W.A.'));
+    });
+
+    // A decisao e por AUTOR, e nao pelo bloco todo: numa lista misturada quem ja esta
+    // certo nao pode ser reescrito.
+    test('autor que ja esta escrito direito fica intacto', () => {
+        assert.ok(R._referenciaLimpa(pub('NONATO, A. ; Silva, R.X. ; Ayala, Alejandro Pedro'))
+            .startsWith('Nonato, A. ; Silva, R.X. ; Ayala, Alejandro Pedro'));
+    });
+
+    test('conectivo no meio do nome cai para minuscula', () => {
+        assert.ok(R._referenciaLimpa(pub('SILVA, ANTONIO C. DE S.'))
+            .startsWith('Silva, Antonio C. de S.'));
+    });
+
+    test('sobrenome composto e hifenizado mantem a acentuacao', () => {
+        assert.ok(R._referenciaLimpa(pub('SENÃRÍS-RODRÍGUEZ, M.A. ; DOS SANTOS, VICTÓRIA MARIA'))
+            .startsWith('Senãrís-Rodríguez, M.A. ; Dos Santos, Victória Maria'));
+    });
+
+    // So a parte dos autores muda. Nome de periodico em caixa alta fica como esta: o
+    // pedido foi sobre os autores.
+    test('nada depois do titulo e tocado', () => {
+        const p = pub('NONATO, A.');
+        const fora = R._referenciaLimpa(p);
+        assert.ok(fora.includes('JOURNAL OF MOLECULAR STRUCTURE , v. 1349, p. 143739, 2026.'));
+        assert.ok(fora.includes(TITULO));
+    });
+
+    test('sem o titulo no registro, a referencia passa inteira', () => {
+        const p = pub('NONATO, A.');
+        assert.strictEqual(R._referenciaLimpa({ reference: p.reference, paperTitle: '' }),
+                           p.reference);
+    });
+
+    // A planilha de producoes do efomento nao traz nomes de autores, e a referencia dela
+    // COMECA pelo titulo — nao ha bloco de autores para mexer.
+    test('referencia que comeca pelo titulo passa inteira', () => {
+        const ref = 'Um titulo qualquer. REVISTA X. 2024. v. 10. p. 1-9';
+        assert.strictEqual(R._referenciaLimpa({ reference: ref, paperTitle: 'Um titulo qualquer' }), ref);
+    });
+
+    test('titulo que nao aparece na referencia nao quebra nada', () => {
+        const ref = 'NONATO, A. . Outro titulo. REVISTA. 2024.';
+        assert.strictEqual(R._referenciaLimpa({ reference: ref, paperTitle: 'Titulo que nao esta la' }), ref);
+    });
+
+    test('o numero da lista continua saindo antes da normalizacao', () => {
+        const p = pub('NONATO, A.');
+        assert.ok(R._referenciaLimpa({ reference: '12. ' + p.reference, paperTitle: TITULO })
+            .startsWith('Nonato, A.'));
+    });
+});
+
+// Letra solta seguida de ponto e inicial de nome, e nao palavra — "a" e "e" estao na
+// lista de conectivos e seriam rebaixados sem esta regra.
+describe('_normalizarCaixa com iniciais', () => {
+    test('inicial nao vira minuscula por ser conectivo', () => {
+        assert.strictEqual(R._normalizarCaixa('NONATO, A.'), 'Nonato, A.');
+        assert.strictEqual(R._normalizarCaixa('SILVA, E. O.'), 'Silva, E. O.');
+    });
+    test('sequencia de iniciais fica intacta', () => {
+        assert.strictEqual(R._normalizarCaixa('PASCHOAL, C.W.A.'), 'Paschoal, C.W.A.');
+    });
+    test('conectivo de verdade continua caindo para minuscula', () => {
+        assert.strictEqual(R._normalizarCaixa('SILVA, ANTONIO C. DE S.'), 'Silva, Antonio C. de S.');
+    });
+});
+
+// O sobrenome — o que vem antes da primeira virgula — sai sempre com so a primeira letra
+// maiuscula. Ele e normalizado por conta propria, sem depender de o autor inteiro estar
+// em caixa alta: os quatro casos abaixo sao reais dos CVs de test_pages e nenhum deles
+// disparava o teste de caixa alta do autor inteiro, porque o prenome ja vinha certo.
+describe('_normalizarAutor: o sobrenome manda', () => {
+    const casos = [
+        ['FREITAS, Gabrielle Cavalcante', 'Freitas, Gabrielle Cavalcante'],
+        ['PERAZZO, P. K. de', 'Perazzo, P. K. de'],
+        ['de la PRESA, P. M', 'de la Presa, P. M'],
+        ['HU, X', 'Hu, X']
+    ];
+    casos.forEach(([antes, depois]) => {
+        test('"' + antes + '" vira "' + depois + '"', () => {
+            assert.strictEqual(R._normalizarAutor(antes), depois);
+        });
+    });
+
+    // Sobrenome de duas letras fica abaixo do piso de quatro letras de _emCaixaAlta;
+    // por isso ele nao passa por ali.
+    test('sobrenome curto tambem e corrigido', () => {
+        assert.strictEqual(R._normalizarAutor('HU, X'), 'Hu, X');
+        assert.strictEqual(R._normalizarAutor('LI, Y. Z.'), 'Li, Y. Z.');
+    });
+
+    // Particula que ja veio em minuscula continua em minuscula: e a grafia correta e
+    // nao cabe "corrigir" o que o autor escreveu.
+    test('particula em minuscula no sobrenome e preservada', () => {
+        assert.strictEqual(R._normalizarAutor('de la PRESA, P. M'), 'de la Presa, P. M');
+        assert.strictEqual(R._normalizarAutor('van der WAALS, J.'), 'van der Waals, J.');
+    });
+
+    // Do outro lado da virgula valem as regras de sempre: prenome que ja veio certo nao
+    // e reescrito, e prenome todo em maiuscula e.
+    test('prenome ja correto nao e mexido; prenome gritando e', () => {
+        assert.strictEqual(R._normalizarAutor('SILVA, Maria José'), 'Silva, Maria José');
+        assert.strictEqual(R._normalizarAutor('SILVA, MARIA JOSÉ'), 'Silva, Maria José');
+    });
+
+    test('autor sem virgula cai na regra geral', () => {
+        assert.strictEqual(R._normalizarAutor('CONSORTIUM COLABORATIVO'), 'Consortium Colaborativo');
+        assert.strictEqual(R._normalizarAutor('Ayala, Alejandro Pedro'), 'Ayala, Alejandro Pedro');
+    });
+
+    test('entrada vazia nao quebra', () => {
+        assert.strictEqual(R._normalizarAutor(''), '');
+        assert.strictEqual(R._normalizarAutor(null), '');
+    });
+});

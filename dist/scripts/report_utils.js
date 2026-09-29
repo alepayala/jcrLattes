@@ -827,6 +827,30 @@ window.JCRReportUtils = {
   //
   // As publicacoes nao tem segundo nivel, entao cada ano traz um grupo unico e sem nome.
 
+  // A lista de autores de uma referencia costuma vir em CAIXA ALTA ("NONATO, A. ;
+  // PASCHOAL, C.W.A."), as vezes misturada com nomes ja escritos direito ("Silva, R.X.").
+  // Aqui a caixa e normalizada AUTOR A AUTOR, e nao no bloco inteiro: assim quem ja esta
+  // certo fica intacto e so os que gritam sao corrigidos.
+  //
+  // O corte entre autores e titulo e o MESMO que a captura usa para contar autores
+  // (lattes_parser: bruto.indexOf(doCvuri.titulo)). Nao e heuristica nova, e o titulo
+  // esta gravado no registro — entao isto vale para os CVs que ja estao no banco, sem
+  // reimportar nada.
+  //
+  // Sem titulo localizado, ou com a referencia comecando por ele — o caso da planilha de
+  // producoes do efomento, que nem traz nomes de autores —, nada e tocado. So a parte
+  // dos autores muda: nome de periodico em caixa alta fica como esta.
+  _normalizarAutoresDaReferencia: function (referencia, titulo) {
+    const ref = String(referencia || '');
+    const alvo = String(titulo || '').trim();
+    if (!alvo) return ref;
+
+    const i = ref.indexOf(alvo);
+    if (i <= 0) return ref;
+
+    return ref.slice(0, i).split(';').map(a => this._normalizarAutor(a)).join(';') + ref.slice(i);
+  },
+
   // A referencia como o Lattes a escreve, sem o que o proprio relatorio ja mostra em
   // separado: o numero da lista original, o fator de impacto e as citacoes.
   _referenciaLimpa: function (pub) {
@@ -834,12 +858,13 @@ window.JCRReportUtils = {
     const bruta = pub.reference
       || [pub.paperTitle || pub.title, pub.journalName, pub.year].filter(Boolean).join('. ')
       || 'Referência indisponível';
-    return String(bruta)
+    const limpa = String(bruta)
       .replace(/^\s*\d+\.\s*/, '')
       .replace(/\s*Fator de Impacto:\s*[\d.]+\s*(?:\(.*?\))?/g, '')
       .replace(/\s*Não classificado\s*(?:\(.*?\))?/g, '')
       .replace(/\s*Citações:\s*\d+(?:\|\d+)?/g, '')
       .trim();
+    return this._normalizarAutoresDaReferencia(limpa, pub.paperTitle || pub.title);
   },
 
   // Publicacoes do periodo, por ano decrescente e, dentro do ano, do maior JCR para o
@@ -957,23 +982,55 @@ window.JCRReportUtils = {
   //
   // Palavra que JA tem minuscula fica como esta — e onde moram as formulas quimicas
   // ("CsPbBr", "Rb2InCl5"). Palavra com digito idem.
+  // Uma palavra em caixa de titulo. Palavra que JA tem minuscula, ou que tem digito,
+  // passa intacta — e onde moram as formulas quimicas ("CsPbBr", "Rb2InCl5") e os nomes
+  // que ja estao escritos direito.
+  _palavraNormalizada: function (palavra, ehPrimeira) {
+    if (/\p{Ll}/u.test(palavra) || /\d/.test(palavra)) return palavra;
+
+    return palavra.replace(/\p{L}[\p{L}’']*/gu, (bloco, pos) => {
+      // Letra solta seguida de ponto e INICIAL, nao palavra: "NONATO, A." tem de virar
+      // "Nonato, A." e nao "Nonato, a." — o "a" esta na lista de conectivos.
+      if (bloco.length === 1 && palavra.charAt(pos + 1) === '.') return bloco.toUpperCase();
+
+      const minuscula = bloco.toLowerCase();
+      if (!(ehPrimeira && pos === 0) && this._CONECTIVOS.indexOf(minuscula) !== -1) return minuscula;
+      return minuscula.charAt(0).toUpperCase() + minuscula.slice(1);
+    });
+  },
+
   _normalizarCaixa: function (texto) {
     const original = String(texto || '');
     if (!this._emCaixaAlta(original)) return original;
 
     let primeira = true;
     return original.replace(/[^\s]+/g, (palavra) => {
-      if (/\p{Ll}/u.test(palavra) || /\d/.test(palavra)) { primeira = false; return palavra; }
-
-      const convertida = palavra.replace(/\p{L}[\p{L}’']*/gu, (bloco, pos) => {
-        const minuscula = bloco.toLowerCase();
-        const ehInicio = primeira && pos === 0;
-        if (!ehInicio && this._CONECTIVOS.indexOf(minuscula) !== -1) return minuscula;
-        return minuscula.charAt(0).toUpperCase() + minuscula.slice(1);
-      });
+      const convertida = this._palavraNormalizada(palavra, primeira);
       primeira = false;
       return convertida;
     });
+  },
+
+  // Um autor da referencia. O SOBRENOME — o que vem antes da primeira virgula — e
+  // normalizado sempre que estiver em caixa alta, palavra a palavra, sem depender de o
+  // autor inteiro estar gritando. O Lattes escreve muito "FREITAS, Gabrielle Cavalcante",
+  // "PERAZZO, P. K. de" e "de la PRESA, P. M": ali o nome ja esta certo e so o sobrenome
+  // grita, de modo que o teste de caixa alta do autor inteiro nunca dispararia.
+  //
+  // Do outro lado da virgula valem as regras de sempre — so mexe se aquele trecho estiver
+  // todo em maiuscula —, para nao reescrever prenome que ja veio certo.
+  _normalizarAutor: function (autor) {
+    const texto = String(autor || '');
+    const i = texto.indexOf(',');
+    if (i < 0) return this._normalizarCaixa(texto);
+
+    let primeira = true;
+    const sobrenome = texto.slice(0, i).replace(/[^\s]+/g, (palavra) => {
+      const convertida = this._palavraNormalizada(palavra, primeira);
+      primeira = false;
+      return convertida;
+    });
+    return sobrenome + this._normalizarCaixa(texto.slice(i));
   },
 
   // Quem orientou. O nome sai do dono do CV de onde a linha veio — quem monta a lista
