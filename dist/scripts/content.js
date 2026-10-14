@@ -996,6 +996,7 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
           <span class="jcr-icon-face">🏷️</span>
         </label>
         <button id="btn-view-cv-report" class="jcr-icon-btn" title="Abrir relatório individual deste CV">📊</button>
+        <button id="btn-save-cv-html" class="jcr-icon-btn" title="Salvar este CV completo num arquivo HTML (Downloads/lattesData/)">💾</button>
       </div>
     </div>
   `;
@@ -1266,6 +1267,12 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
         window.JCRDBTools.viewCurrentReport();
       }
     });
+  }
+
+  // Botão de salvar o CV em HTML: sob demanda, nunca automático
+  const saveCvHtmlBtn = document.getElementById('btn-save-cv-html');
+  if (saveCvHtmlBtn) {
+    saveCvHtmlBtn.addEventListener('click', () => saveCvHtmlFile(nameLink, saveCvHtmlBtn));
   }
 
   const disableGraphsCb = document.getElementById('toggle-disable-graphs');
@@ -1779,6 +1786,58 @@ async function saveCvToProposalFolders(nameLink, tentativa = 0) {
   } finally {
     // libera em qualquer saida, inclusive nos returns do caminho de espera pelos JCR
     window.__jcrCvProposalSaveEmCurso = false;
+  }
+}
+
+// Salva o CV num arquivo HTML autossuficiente, so quando o usuario clica no 💾. E a
+// mesma copia que saveCvToProposalFolders grava nas pastas das propostas
+// (buildStandaloneCvHtml: CV completo, sem os filtros da extensao, com CSS e imagens
+// embutidos), mas vai para Downloads/lattesData/, valha o CV para proposta ou nao.
+async function saveCvHtmlFile(nameLink, btn) {
+  if (btn && btn.disabled) return;
+  const DB = window.JCRDBTools;
+  const lattesId = (DB && DB.currentCvData && DB.currentCvData.lattesId)
+    || ((nameLink && nameLink.link) || '').match(/\b\d{16}\b/)?.[0] || '';
+  const nome = (nameLink && nameLink.name) || '';
+  const avisar = (msg, cor) => {
+    if (DB && typeof DB.showToast === 'function') DB.showToast(msg, cor);
+    else alert(msg);
+  };
+
+  // Com fatores de impacto ainda chegando, a copia sairia com artigos "Nao classificado"
+  const pendentes = contarJcrPendentes();
+  if (pendentes > 0 && !confirm(`Ainda faltam ${pendentes} fator(es) de impacto para carregar. `
+      + 'A cópia sairá com esses artigos sem JCR.\n\nSalvar assim mesmo?')) {
+    return;
+  }
+
+  const rotulo = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    const html = await buildStandaloneCvHtml();
+    const nomeSeguro = (DB && typeof DB._nomeSeguro === 'function') ? DB._nomeSeguro(nome) : '';
+    const partes = [nomeSeguro, lattesId ? `curriculo_lattes_${lattesId}` : 'curriculo_lattes'].filter(Boolean);
+    const filename = `lattesData/${partes.join(' - ')}.html`;
+
+    const res = await new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ action: 'download_data', data: html, filename }, (r) => {
+          if (chrome.runtime.lastError) resolve({ success: false, error: chrome.runtime.lastError.message });
+          else resolve(r || { success: false, error: 'sem resposta do serviço da extensão' });
+        });
+      } catch (e) { resolve({ success: false, error: e.message }); }
+    });
+
+    if (res.success) {
+      avisar(`CV salvo em Downloads/${filename}`, '#4CAF50');
+    } else {
+      avisar(`Não foi possível salvar o CV: ${res.error || 'erro desconhecido'}`, '#e53935');
+    }
+  } catch (e) {
+    console.warn('JCRLattes: falha ao montar a cópia do CV', e);
+    avisar(`Não foi possível montar a cópia do CV: ${e.message}`, '#e53935');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = rotulo || '💾'; }
   }
 }
 
