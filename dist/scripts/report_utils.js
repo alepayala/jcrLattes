@@ -2425,8 +2425,9 @@ ${htmlText}`;
   // "formato e extensao nao correspondem" que o truque do HTML-com-extensao-.xls da.
   //
   // linhas: array de arrays. Numero vira celula numerica; Date vira data (dd/mm/aaaa
-  // no Excel em portugues); texto vira texto; null, undefined e '' viram celula vazia. As primeiras `cabecalho` linhas saem em
-  // negrito e ficam congeladas no topo. Devolve um Uint8Array.
+  // no Excel em portugues); { texto, link } vira texto com hiperlink (so http/https);
+  // outro texto vira texto; null, undefined e '' viram celula vazia. As primeiras
+  // `cabecalho` linhas saem em negrito e ficam congeladas no topo. Devolve um Uint8Array.
   planilhaXlsx: function (linhas, opcoes = {}) {
     const nomeAba = String(opcoes.nomeAba || 'Planilha')
       .replace(/[\\\/\?\*\[\]:]/g, ' ').slice(0, 31) || 'Planilha';
@@ -2444,6 +2445,8 @@ ${htmlText}`;
       return s;
     };
 
+    // hiperlinks: a celula so aponta para um rId; o endereco fica no .rels da aba
+    const links = [];
     const linhasXml = (Array.isArray(linhas) ? linhas : []).map((linha, r) => {
       const estilo = r < nCabecalho ? ' s="1"' : '';
       const celulas = (Array.isArray(linha) ? linha : []).map((v, c) => {
@@ -2453,6 +2456,14 @@ ${htmlText}`;
           // numero de serie do Excel: dias desde 1899-12-30, pela data local
           const serie = Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()) / 86400000 + 25569;
           return `<c r="${ref}" s="2"><v>${serie}</v></c>`;
+        }
+        if (v && typeof v === 'object' && 'texto' in v) {
+          const texto = v.texto === null || v.texto === undefined ? '' : String(v.texto);
+          if (!/^https?:\/\//i.test(String(v.link || ''))) {
+            return texto ? `<c r="${ref}" t="inlineStr"${estilo}><is><t xml:space="preserve">${xml(texto)}</t></is></c>` : '';
+          }
+          links.push({ ref, link: String(v.link) });
+          return `<c r="${ref}" t="inlineStr" s="3"><is><t xml:space="preserve">${xml(texto || v.link)}</t></is></c>`;
         }
         if (v === null || v === undefined || v === '') return estilo ? `<c r="${ref}"${estilo}/>` : '';
         return `<c r="${ref}" t="inlineStr"${estilo}><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
@@ -2468,6 +2479,9 @@ ${htmlText}`;
       : '';
     const merge = mesclas.length > 0
       ? `<mergeCells count="${mesclas.length}">` + mesclas.map(m => `<mergeCell ref="${xml(m)}"/>`).join('') + '</mergeCells>'
+      : '';
+    const hiperlinks = links.length > 0
+      ? '<hyperlinks>' + links.map((h, i) => `<hyperlink ref="${h.ref}" r:id="rId${i + 1}"/>`).join('') + '</hyperlinks>'
       : '';
 
     const arquivos = [
@@ -2499,21 +2513,29 @@ ${htmlText}`;
       ['xl/styles.xml',
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-        '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>' +
+        '<fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><u/><sz val="11"/><color rgb="FF0563C1"/><name val="Calibri"/></font></fonts>' +
         '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
         '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-        '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+        '<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
         '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>' +
-        '<xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>' +
+        '<xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+        '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>' +
         '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
         '</styleSheet>'],
       ['xl/worksheets/sheet1.xml',
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-        congelar + cols + `<sheetData>${linhasXml}</sheetData>` + merge +
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+        congelar + cols + `<sheetData>${linhasXml}</sheetData>` + merge + hiperlinks +
         '</worksheet>']
     ];
+    if (links.length > 0) {
+      arquivos.push(['xl/worksheets/_rels/sheet1.xml.rels',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        links.map((h, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xml(h.link)}" TargetMode="External"/>`).join('') +
+        '</Relationships>']);
+    }
     return this._zipSemCompressao(arquivos);
   },
 

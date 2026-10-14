@@ -1249,3 +1249,21 @@ describe('planilhaXlsx: datas', () => {
         assert.ok(texto.includes('<xf numFmtId="14"'));
     });
 });
+
+describe('planilhaXlsx: hiperlinks', () => {
+    const texto = (b) => Buffer.from(b).toString('utf8');
+
+    test('{ texto, link } vira celula com hiperlink externo', () => {
+        const t = texto(R.planilhaXlsx([[{ texto: 'Ana', link: 'http://lattes.cnpq.br/1?a=1&b=2' }]]));
+        assert.ok(t.includes('<c r="A1" t="inlineStr" s="3"><is><t xml:space="preserve">Ana</t></is></c>'));
+        assert.ok(t.includes('<hyperlink ref="A1" r:id="rId1"/>'));
+        assert.ok(t.includes('xl/worksheets/_rels/sheet1.xml.rels'));
+        assert.ok(t.includes('Target="http://lattes.cnpq.br/1?a=1&amp;b=2" TargetMode="External"'));
+    });
+    test('link que nao e http/https vira texto simples', () => {
+        const t = texto(R.planilhaXlsx([[{ texto: 'x', link: 'javascript:alert(1)' }]]));
+        assert.ok(!t.includes('<hyperlink'));
+        assert.ok(!t.includes('sheet1.xml.rels'));
+        assert.ok(t.includes('>x</t>'));
+    });
+});

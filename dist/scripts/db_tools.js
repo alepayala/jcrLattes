@@ -527,15 +527,30 @@ window.JCRDBTools = {
 
     // Mesma tabela como linhas de planilha, na mesma ordem da tela: duas linhas de
     // cabecalho (o grupo e o nome da coluna), depois um membro por linha. A data vai
-    // como Date para a planilha grava-la como data de verdade.
+    // como Date para a planilha grava-la como data de verdade. Alem das colunas da
+    // tela, a planilha leva o endereco do CV Lattes numa coluna propria no fim, e o
+    // nome tambem vira link para ele.
     _planilhaMembros: function (membros, anos, anoAtual, alto, baixo, ordem) {
         const cols = this._colunasMembros(alto, baixo);
         const grupo = cols.map(() => '');
         this._gruposColunasMembros(cols, anos, anoAtual).forEach(f => { grupo[f.inicio] = f.rotulo; });
-        const cabecalho = cols.map(c => c.rotulo);
-        const corpo = this._linhasMembros(membros, anos, anoAtual, alto, baixo, ordem).map(({ ind }) =>
-            cols.map(c => c.decimais ? Math.round(ind[c.chave] * 100) / 100 : ind[c.chave]));
+        grupo.push('');
+        const cabecalho = cols.map(c => c.rotulo).concat(['CV Lattes']);
+        const corpo = this._linhasMembros(membros, anos, anoAtual, alto, baixo, ordem).map(({ cv, ind }) => {
+            const link = this._linkLattes(cv);
+            return cols.map(c => {
+                if (c.chave === 'nome' && link) return { texto: ind.nome, link };
+                return c.decimais ? Math.round(ind[c.chave] * 100) / 100 : ind[c.chave];
+            }).concat([link ? { texto: link, link } : '']);
+        });
         return [grupo, cabecalho].concat(corpo);
+    },
+
+    // Endereco do CV no Lattes, ou '' sem lattesId. O id e so digitos; qualquer outra
+    // coisa no campo nao vira link.
+    _linkLattes: function (cv) {
+        const id = String((cv && cv.lattesId) || '').trim();
+        return /^\d+$/.test(id) ? `http://lattes.cnpq.br/${id}` : '';
     },
 
     // Tabela "Membros do Grupo" em HTML (so o <table>; o cabecalho da secao, com o
@@ -5645,7 +5660,7 @@ window.JCRDBTools = {
                 const bytes = window.JCRReportUtils.planilhaXlsx(linhas, {
                     nomeAba: 'Membros',
                     cabecalho: 2,
-                    larguras: cols.map(c => c.chave === 'nome' ? 40 : 12),
+                    larguras: cols.map(c => c.chave === 'nome' ? 40 : 12).concat([32]),
                     mesclas: this._gruposColunasMembros(cols, anos, currentYear)
                         .filter(g => g.span > 1 && g.rotulo)
                         .map(g => `${col(g.inicio)}1:${col(g.inicio + g.span - 1)}1`)

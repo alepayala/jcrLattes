@@ -939,7 +939,8 @@ describe('_planilhaMembros', () => {
         assert.strictEqual(L.length, 4);
         assert.strictEqual(L[0][2], 'Últimos 5 anos (2020–2025)');
         assert.ok(L[0].includes('Carreira toda'));
-        assert.strictEqual(L[1].length, 15);
+        assert.strictEqual(L[1].length, 16);
+        assert.strictEqual(L[1][15], 'CV Lattes');
         assert.strictEqual(L[1][14], 'Atualizado');
         assert.deepStrictEqual(L[1].slice(0, 3), ['Nome', 'Bolsa', 'Artigos']);
         assert.deepStrictEqual(L[2].slice(0, 2), ['Ana', '']);
@@ -999,5 +1000,21 @@ describe('_explicacaoPeriodoMembros', () => {
     });
     test('0 e a carreira toda', () => {
         assert.ok(B._explicacaoPeriodoMembros(0, 2026).startsWith('Toda a carreira'));
+    });
+});
+
+describe('_planilhaMembros: link do CV Lattes', () => {
+    test('nome com link e coluna CV Lattes no fim', () => {
+        const L = B._planilhaMembros([{ name: 'Ana', lattesId: '1234567890123456' }], 0, 2026, 7, 1.5);
+        const url = 'http://lattes.cnpq.br/1234567890123456';
+        assert.deepStrictEqual(L[2][0], { texto: 'Ana', link: url });
+        assert.deepStrictEqual(L[2][15], { texto: url, link: url });
+    });
+    test('sem lattesId (ou com lixo no campo) fica sem link', () => {
+        const L = B._planilhaMembros([{ name: 'Ana' }, { name: 'Bia', lattesId: 'javascript:x' }], 0, 2026, 7, 1.5);
+        assert.strictEqual(L[2][0], 'Ana');
+        assert.strictEqual(L[2][15], '');
+        assert.strictEqual(L[3][0], 'Bia');
+        assert.strictEqual(L[3][15], '');
     });
 });
