@@ -460,6 +460,18 @@ window.JCRDBTools = {
         return `Últimos ${janela} ${janela === 1 ? 'ano' : 'anos'} (${atual - janela}–${atual})`;
     },
 
+    // Texto do tooltip que explica a conta do periodo: N anos completos mais o ano
+    // em curso, que e a mesma janela das outras listas do relatorio.
+    _explicacaoPeriodoMembros: function (anos, anoAtual) {
+        const janela = Number(anos) || 0;
+        const fixo = 'Índice H e citações WoS não dependem do período: são sempre da carreira toda.';
+        if (janela <= 0) return `Toda a carreira: entram todos os artigos, orientações e patentes, inclusive os sem ano. ${fixo}`;
+        const atual = Number(anoAtual) || new Date().getFullYear();
+        const inicio = atual - janela;
+        const completos = janela === 1 ? `1 ano completo (${inicio})` : `${janela} anos completos (${inicio}–${atual - 1})`;
+        return `${completos} mais o ano em curso (${atual}): entram os itens com ano ≥ ${inicio}. Itens sem ano ficam de fora. ${fixo}`;
+    },
+
     // Faixas do cabecalho de cima: colunas consecutivas do mesmo grupo viram uma celula.
     _gruposColunasMembros: function (cols, anos, anoAtual) {
         const rotulos = { periodo: this._rotuloPeriodoMembros(anos, anoAtual), carreira: 'Carreira toda', registro: '', '': '' };
@@ -553,7 +565,7 @@ window.JCRDBTools = {
         let html = `<table style="width: 100%; border-collapse: collapse; text-align: left; font-family: inherit; font-size: 0.9em;">
             <thead style="position: sticky; top: 0; z-index: 1;">
                 <tr>
-                    ${faixas.map(f => `<th colspan="${f.span}" style="${th}${divisao(f.inicio)} background-color: ${fundoGrupo(f.grupo)}; color: ${corGrupo[f.grupo] || 'inherit'};"${f.grupo === 'carreira' ? ' title="Não muda com o período"' : ''}>${this._esc(f.rotulo)}</th>`).join('')}
+                    ${faixas.map(f => `<th colspan="${f.span}" style="${th}${divisao(f.inicio)} background-color: ${fundoGrupo(f.grupo)}; color: ${corGrupo[f.grupo] || 'inherit'};"${f.grupo === 'carreira' ? ' title="Não muda com o período"' : (f.grupo === 'periodo' ? ` title="${this._esc(this._explicacaoPeriodoMembros(anos, anoAtual))}"` : '')}>${this._esc(f.rotulo)}</th>`).join('')}
                     <th style="${th} background-color: ${COLORS.backgroundHeader};"></th>
                 </tr>
                 <tr style="border-bottom: 2px solid ${COLORS.border};">
@@ -4578,7 +4590,7 @@ window.JCRDBTools = {
                         <div style="display: flex; align-items: center; gap: 15px;">
                             <h3 style="margin: 0;">Membros do Grupo</h3>
                             <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                                <span>Período (anos): <input type="number" id="inp-membros-anos" value="${state.membrosAnos !== undefined ? state.membrosAnos : 5}" min="0" style="width: 50px; padding: 2px;" title="0 considera toda a carreira"></span>
+                                <span>Período (anos): <input type="number" id="inp-membros-anos" value="${state.membrosAnos !== undefined ? state.membrosAnos : 5}" min="0" style="width: 50px; padding: 2px;" title="N anos completos mais o ano em curso (ex.: 5 em ${currentYear} = ${currentYear - 5} a ${currentYear}). 0 considera toda a carreira."></span>
                                 <button id="btn-membros-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
                                 <button id="btn-membros-xlsx" class="no-print" title="Exportar a tabela para Excel (.xlsx)" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #A5D6A7; background: #E8F5E9; color: #1B5E20;">📥 Excel</button>
                             </div>

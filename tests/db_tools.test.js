@@ -987,3 +987,17 @@ describe('_linhasMembros: ordenacao', () => {
         assert.strictEqual(B._direcaoPadraoMembros('data'), -1);
     });
 });
+
+describe('_explicacaoPeriodoMembros', () => {
+    test('N anos completos mais o ano em curso', () => {
+        const t = B._explicacaoPeriodoMembros(5, 2026);
+        assert.ok(t.startsWith('5 anos completos (2021–2025) mais o ano em curso (2026)'));
+        assert.ok(t.includes('ano ≥ 2021'));
+    });
+    test('singular com 1 ano', () => {
+        assert.ok(B._explicacaoPeriodoMembros(1, 2026).startsWith('1 ano completo (2025) mais o ano em curso (2026)'));
+    });
+    test('0 e a carreira toda', () => {
+        assert.ok(B._explicacaoPeriodoMembros(0, 2026).startsWith('Toda a carreira'));
+    });
+});
