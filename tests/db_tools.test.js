@@ -1018,3 +1018,45 @@ describe('_planilhaMembros: link do CV Lattes', () => {
         assert.strictEqual(L[3][15], '');
     });
 });
+
+// Acoes de uma linha da tabela do banco (editar/limpar ID, excluir, prioridade)
+// precisam do registro exato. cvMatches aceita nomes parecidos e fazia a acao cair
+// no primeiro CV parecido do banco.
+describe('_mesmoRegistro', () => {
+    const banco = [
+        { name: 'Maria José da Silva', lattesId: '1111111111111111' },
+        { name: 'Maria Silva', lattesId: '2222222222222222' },
+        { name: 'Joao Souza' },
+        { name: 'Joao Souza Lima' }
+    ];
+    const achar = (name, lattesId, processId) =>
+        banco.findIndex(cv => B._mesmoRegistro(cv, name, lattesId, processId));
+
+    test('o caso do bug: nome parecido antes no banco nao e escolhido', () => {
+        assert.strictEqual(B.cvMatches(banco[0], 'Maria Silva', '2222222222222222'), true);   // por isso caia na linha errada
+        assert.strictEqual(achar('Maria Silva', '2222222222222222'), 1);
+    });
+    test('lattesId manda, mesmo com o nome escrito de outro jeito', () => {
+        assert.strictEqual(achar('MARIA JOSE DA SILVA', '1111111111111111'), 0);
+        assert.strictEqual(achar('Maria Silva', '9999999999999999'), -1);
+    });
+    test('sem lattesId: so nome identico, ignorando caixa e acentos', () => {
+        assert.strictEqual(achar('joão souza', ''), 2);
+        assert.strictEqual(achar('Joao Souza Lima', null), 3);
+        assert.strictEqual(achar('Souza', ''), -1);
+    });
+    test('sem lattesId na linha nao casa registro que tem lattesId', () => {
+        assert.strictEqual(achar('Maria Silva', ''), -1);
+    });
+    test('processId separa propostas do mesmo proponente', () => {
+        const procs = [
+            { processId: '401/2025-1', lattesId: '1111111111111111', name: 'Maria' },
+            { processId: '402/2025-7', lattesId: '1111111111111111', name: 'Maria' }
+        ];
+        assert.strictEqual(procs.findIndex(p => B._mesmoRegistro(p, 'Maria', '1111111111111111', '402/2025-7')), 1);
+    });
+    test('linha sem nome nem ids (botoes de grupo) nao casa nada', () => {
+        assert.strictEqual(achar(null, null, null), -1);
+        assert.strictEqual(achar('', '', ''), -1);
+    });
+});

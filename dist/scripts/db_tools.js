@@ -875,6 +875,23 @@ window.JCRDBTools = {
         return false;
     },
 
+    // Identifica UMA linha da tabela do banco: o mesmo registro, e nao um parecido.
+    // cvMatches aceita nomes aproximados ("Maria Silva" = "Maria José da Silva") e e
+    // feito para casar membros de propostas com CVs; usado para editar, limpar ou
+    // excluir uma linha, o findIndex pegava o primeiro CV de nome parecido no banco e
+    // a acao caia em outra linha. Aqui: processId, senao lattesId, senao nome identico
+    // (ignorando caixa e acentos) entre registros sem lattesId.
+    _mesmoRegistro: function (cv, name, lattesId, processId) {
+        if (!cv) return false;
+        const proc = String(processId || '').trim();
+        if (proc) return String(cv.processId || '').trim() === proc;
+        const id = String(lattesId || '').trim();
+        if (id) return String(cv.lattesId || '').trim() === id;
+        if (String(cv.lattesId || '').trim()) return false;
+        const n = this.normalizeName(name);
+        return n !== '' && this.normalizeName(cv.name) === n;
+    },
+
     // Chave de armazenamento individual do CV (preferindo o ID Lattes).
     // Registros de Processo (piccTools) usam a chave jcr_proc:proc:<processId>
     _cvStorageKey: function (cv) {
@@ -2596,8 +2613,8 @@ window.JCRDBTools = {
                     } else if (m.key === 'customId') {
                         tbodyHtml += `<td${classAttr}>
                             <div style="display: flex; gap: 2px;">
-                                <input type="text" class="custom-id-input" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" value="${this._esc(String(val))}" placeholder="ID..." style="width: 100%; min-width: 100px; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;">
-                                <select class="custom-id-select" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" style="width: 24px; border: 1px solid #ccc; border-radius: 3px; background: white;" title="Adicionar ID Existente">${dropdownOptionsHtml}</select>
+                                <input type="text" class="custom-id-input" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" value="${this._esc(String(val))}" placeholder="ID..." style="width: 100%; min-width: 100px; padding: 2px 4px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;">
+                                <select class="custom-id-select" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" style="width: 24px; border: 1px solid #ccc; border-radius: 3px; background: white;" title="Adicionar ID Existente">${dropdownOptionsHtml}</select>
                             </div>
                         </td>`;
                     } else {
@@ -2607,7 +2624,7 @@ window.JCRDBTools = {
                 const isProc = isProcessoOnly || cv.isProcesso || cv.processId;
                 tbodyHtml += `<td class="division-left" style="white-space: nowrap;${isProcessoOnly ? ' text-align: center;' : ''}">
                     <button class="btn btn-view-report" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" title="${isProc ? 'Relatório da Proposta' : 'Relatório do CV'}">📊</button>
-                    ${isProc ? '' : `<button class="btn btn-clear-id" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Limpar ID">🧹</button>`}
+                    ${isProc ? '' : `<button class="btn btn-clear-id" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" title="Limpar ID">🧹</button>`}
                     <button class="btn btn-delete-row" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" data-processid="${this._esc(cv.processId || '')}" title="Excluir">🗑️</button>
                     ${cv.lattesId ? `<button class="btn btn-open-cv" data-lattesid="${this._esc(cv.lattesId || '')}" title="Abrir Lattes do Proponente">🔄</button>` : ''}
                 </td></tr>`;
@@ -2743,11 +2760,17 @@ window.JCRDBTools = {
             }
         };
 
-        const findCvIndex = (dbArr, name, lattesId) => dbArr.findIndex(cv => this.cvMatches(cv, name, lattesId));
+        // Acoes sobre UMA linha usam a identidade exata do registro (_mesmoRegistro), e
+        // nao a comparacao aproximada de nomes de cvMatches: com ela a acao caia no
+        // primeiro CV de nome parecido do banco, que podia ser outra linha.
+        const findCvIndex = (dbArr, name, lattesId, processId) =>
+            dbArr.findIndex(cv => this._mesmoRegistro(cv, name, lattesId, processId));
+        const linhaSelecionada = (cv, selected) =>
+            selected.some(s => this._mesmoRegistro(cv, s.name, s.lattesId, s.processId));
 
-        const updateCustomId = async (name, lattesId, newValue, inputEl) => {
+        const updateCustomId = async (name, lattesId, processId, newValue, inputEl) => {
             const freshDb = await this.getDB(isProcessoOnly);
-            const cvIndex = findCvIndex(freshDb, name, lattesId);
+            const cvIndex = findCvIndex(freshDb, name, lattesId, processId);
             if (cvIndex >= 0) {
                 let finalIds = newValue.split(',').map(s => s.trim()).filter(s => s !== '');
                 const finalValue = finalIds.join(', ');
@@ -2756,7 +2779,7 @@ window.JCRDBTools = {
                 await this.saveCVs([freshDb[cvIndex]]);
                 updateAllDropdowns(freshDb);
 
-                const localIndex = findCvIndex(db, name, lattesId);
+                const localIndex = findCvIndex(db, name, lattesId, processId);
                 if (localIndex >= 0) db[localIndex].customId = finalValue;
 
                 if (inputEl) inputEl.value = finalValue;
@@ -2767,8 +2790,9 @@ window.JCRDBTools = {
             input.addEventListener('change', async (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
                 const lattesId = e.currentTarget.getAttribute('data-lattesid');
+                const processId = e.currentTarget.getAttribute('data-processid');
                 const newValue = e.currentTarget.value;
-                await updateCustomId(name, lattesId, newValue, e.currentTarget);
+                await updateCustomId(name, lattesId, processId, newValue, e.currentTarget);
             });
         });
 
@@ -2780,8 +2804,11 @@ window.JCRDBTools = {
 
                 const name = e.currentTarget.getAttribute('data-name');
                 const lattesId = e.currentTarget.getAttribute('data-lattesid');
-                const inputEl = (lattesId ? newTab.document.querySelector(`.custom-id-input[data-lattesid="${this._cssAttr(lattesId)}"]`) : null) ||
-                                newTab.document.querySelector(`.custom-id-input[data-name="${this._cssAttr(name)}"]`);
+                const processId = e.currentTarget.getAttribute('data-processid');
+                // o campo de texto da MESMA linha (buscar no documento pegava o primeiro
+                // com o mesmo lattesId ou nome)
+                const linha = e.currentTarget.closest('tr');
+                const inputEl = linha ? linha.querySelector('.custom-id-input') : null;
 
                 if (inputEl) {
                     let currentVal = inputEl.value;
@@ -2791,7 +2818,7 @@ window.JCRDBTools = {
                         existingIds.push(selectedVal);
                         const finalValue = existingIds.join(', ');
                         inputEl.value = finalValue;
-                        await updateCustomId(name, lattesId, finalValue, inputEl);
+                        await updateCustomId(name, lattesId, processId, finalValue, inputEl);
                     }
                 }
             });
@@ -2806,12 +2833,12 @@ window.JCRDBTools = {
                 const procId = e.currentTarget.getAttribute('data-processid');
 
                 const freshDb = await this.getDB(isProcessoOnly);
-                const cvIndex = freshDb.findIndex(cv => this.cvMatches(cv, name, lattesId, procId));
+                const cvIndex = findCvIndex(freshDb, name, lattesId, procId);
                 if (cvIndex >= 0) {
                     freshDb[cvIndex].prioridade = newPrio;
                     await this.saveCVs([freshDb[cvIndex]]);
 
-                    const localIndex = db.findIndex(cv => this.cvMatches(cv, name, lattesId, procId));
+                    const localIndex = findCvIndex(db, name, lattesId, procId);
                     if (localIndex >= 0) db[localIndex].prioridade = newPrio;
 
                     this.showToast(`Prioridade de "${name || procId}" alterada para "${newPrio}"`, '#2E7D32');
@@ -2874,8 +2901,8 @@ window.JCRDBTools = {
             const freshDb = await this.getDB(isProcessoOnly);
             const modifiedCvs = [];
 
-            selected.forEach(({ name, lattesId }) => {
-                const cvIndex = findCvIndex(freshDb, name, lattesId);
+            selected.forEach(({ name, lattesId, processId }) => {
+                const cvIndex = findCvIndex(freshDb, name, lattesId, processId);
                 if (cvIndex >= 0) {
                     let existingIds = (freshDb[cvIndex].customId || '').split(',').map(s => s.trim()).filter(s => s !== '');
                     let modified = false;
@@ -2938,7 +2965,7 @@ window.JCRDBTools = {
                     newTab.alert("Selecione pelo menos um CV na tabela.");
                     return;
                 }
-                const selectedDb = db.filter(cv => selected.some(s => this.cvMatches(cv, s.name, s.lattesId)));
+                const selectedDb = db.filter(cv => linhaSelecionada(cv, selected));
                 this.renderCVReport(selectedDb[0], newTab, selectedDb);
             });
         }
@@ -2952,8 +2979,8 @@ window.JCRDBTools = {
                 if (newTab.confirm(`Tem certeza que deseja limpar o ID de ${selected.length} CV(s)?`)) {
                     const freshDb = await this.getDB(isProcessoOnly);
                     const modifiedCvs = [];
-                    selected.forEach(({ name, lattesId }) => {
-                        const cvIndex = findCvIndex(freshDb, name, lattesId);
+                    selected.forEach(({ name, lattesId, processId }) => {
+                        const cvIndex = findCvIndex(freshDb, name, lattesId, processId);
                         if (cvIndex >= 0) {
                             freshDb[cvIndex].customId = '';
                             modifiedCvs.push(freshDb[cvIndex]);
@@ -2996,7 +3023,7 @@ window.JCRDBTools = {
 
                 if (newTab.confirm(`Tem certeza que deseja EXCLUIR ${selected.length} CV(s) do banco de dados? Esta ação não pode ser desfeita.`)) {
                     const freshDb = await this.getDB(isProcessoOnly);
-                    const toRemove = freshDb.filter(cv => selected.some(s => this.cvMatches(cv, s.name, s.lattesId)));
+                    const toRemove = freshDb.filter(cv => linhaSelecionada(cv, selected));
                     await this.removeCVs(toRemove);
                     this.viewDB(newTab, { processOnly: isProcessoOnly });
                 }
@@ -3033,8 +3060,9 @@ window.JCRDBTools = {
             btn.addEventListener('click', async (e) => {
                 const name = e.currentTarget.getAttribute('data-name');
                 const lattesId = e.currentTarget.getAttribute('data-lattesid');
+                const processId = e.currentTarget.getAttribute('data-processid');
                 const freshDb = await this.getDB(isProcessoOnly);
-                const cvIndex = findCvIndex(freshDb, name, lattesId);
+                const cvIndex = findCvIndex(freshDb, name, lattesId, processId);
                 if (cvIndex >= 0) {
                     freshDb[cvIndex].customId = '';
                     await this.saveCVs([freshDb[cvIndex]]);
@@ -3053,7 +3081,7 @@ window.JCRDBTools = {
 
                 if (newTab.confirm(`Tem certeza que deseja EXCLUIR "${itemLabel}" do banco de dados?`)) {
                     const freshDb = await this.getDB(isProcessoOnly);
-                    const target = freshDb.find(cv => (processId && cv.processId === processId) || this.cvMatches(cv, name, lattesId, processId));
+                    const target = freshDb.find(cv => this._mesmoRegistro(cv, name, lattesId, processId));
                     if (target) {
                         await this.removeCVs([target]);
                         this.viewDB(newTab, { processOnly: isProcessoOnly });
@@ -3067,10 +3095,7 @@ window.JCRDBTools = {
             const lattesId = btn.getAttribute('data-lattesid');
             const processId = btn.getAttribute('data-processid');
             
-            const target = db.find(cv => 
-                (processId && cv.processId === processId) || 
-                this.cvMatches(cv, name, lattesId, processId)
-            );
+            const target = db.find(cv => this._mesmoRegistro(cv, name, lattesId, processId));
 
             if (target) {
                 if (isProcessoOnly || target.isProcesso || target.processId) {
@@ -3155,7 +3180,7 @@ window.JCRDBTools = {
             let groupCvs;
             if (isSelectionGroup) {
                 const selected = selectedCheckboxData();
-                groupCvs = db.filter(cv => selected.some(s => this.cvMatches(cv, s.name, s.lattesId)));
+                groupCvs = db.filter(cv => linhaSelecionada(cv, selected));
                 if (groupCvs.length === 0) {
                     newTab.alert('Selecione pelo menos um CV nos checkboxes da tabela.');
                     groupActions.style.display = 'none';
