@@ -1,4 +1,4 @@
-JCRLattes - Versão 1.8.2
+JCRLattes - Versão 1.8.3
 
 Resumo:
 Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes, autoria e orientações em segundos.
@@ -29,6 +29,7 @@ Principais Funcionalidades:
 * Relatório de Seleção: Gere o resumo e o relatório consolidado apenas dos currículos marcados na tabela, sem precisar criar um ID de grupo — ideal para análises pontuais.
 * Salvamento Simultâneo Confiável: Cada currículo é armazenado individualmente no banco local. Atualize vários CVs em abas paralelas sem risco de um sobrescrever o outro.
 * Deduplicação Inteligente: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria/colaboração repetidos entre os membros, gerando métricas reais e não infladas da produção coletiva.
+* Tabela de Membros do Grupo: Indicadores de cada membro num período escolhido (artigos por faixa de JCR, soma e média do JCR, orientações, patentes), com índice H e citações WoS da carreira toda. Ordenável por qualquer coluna e exportável para Excel (.xlsx).
 * Acesso Direto Integrado: Atalho flutuante injetado na tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
 * Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status na coluna de ações, com botão direto para abrir o Lattes.
 * Atualização Simplificada (Update): Um botão de atualização rápida permite abrir o currículo Lattes em uma nova aba para reprocessar e sincronizar os dados mais recentes.

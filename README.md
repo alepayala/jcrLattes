@@ -1,6 +1,6 @@
 # JCRLattes
 
-**Versão 1.8.2**
+**Versão 1.8.3**
 
 O JCRLattes é a ferramenta definitiva para pesquisadores, acadêmicos, coordenadores de pós-graduação e avaliadores que buscam eficiência na análise da Plataforma Lattes. 
 
@@ -28,6 +28,7 @@ O repositório inclui:
 * **Banco de Dados de Currículos**: Salve múltiplos currículos Lattes localmente no seu navegador para consultas futuras e análises comparativas.
 * **Consolidação Instantânea de Grupos**: Atribua IDs customizados (ex: siglas de laboratórios) aos currículos para compilar métricas integradas em tempo real. 
 * **Deduplicação Inteligente**: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria repetidos entre os membros, gerando métricas reais da produção coletiva.
+* **Tabela de Membros do Grupo**: Indicadores de cada membro num período escolhido (artigos por faixa de JCR, soma e média do JCR, orientações de doutorado e mestrado, patentes), com índice H e citações WoS da carreira toda. Ordenável por qualquer coluna e exportável para Excel (.xlsx).
 * **Backup e Portabilidade**: Exporte todo o seu banco de dados em formato JSON ou exporte os dados tabulados em CSV para análise.
 
 ### 3. Análise Acadêmica Avançada
