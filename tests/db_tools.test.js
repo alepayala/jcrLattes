@@ -853,3 +853,137 @@ describe('gravacao de CV emprestado do piccTools', () => {
         assert.strictEqual(store[chave].customId, 'GRUPO-1');
     });
 });
+
+// Tabela "Membros do Grupo": o periodo afeta artigos, faixas, JCR, orientacoes e
+// patentes; indice H e citacoes WoS sao sempre da carreira inteira.
+describe('_indicadoresMembro', () => {
+    const cv = {
+        name: 'Ana Souza',
+        publications: [
+            { year: 2024, jif: 8, wosCitations: 10 },   // alto
+            { year: 2023, jif: 3, wosCitations: 5 },    // medio
+            { year: 2022, jif: 1, wosCitations: 1 },    // baixo
+            { year: 2015, jif: 0, wosCitations: 30 },   // sem JCR, fora de 5 anos
+            { year: 2010, jif: 7, wosCitations: 2 }     // alto no limiar, fora de 5 anos
+        ],
+        supervisions: { concluded: {
+            'Tese de doutorado': [2024, 2012],
+            'Dissertação de mestrado': [2021, 2023, 2005]
+        } },
+        rawPatents: [{ year: 2022 }, { year: 2008 }],
+        wosHIndex: 3,
+        wosCitations: 48
+    };
+
+    test('carreira toda (anos = 0)', () => {
+        const r = B._indicadoresMembro(cv, 0, 2025, 7, 1.5);
+        assert.strictEqual(r.artigos, 5);
+        assert.deepStrictEqual([r.high, r.mid, r.low, r.noJcr], [2, 1, 1, 1]);
+        assert.strictEqual(r.somaJcr, 19);
+        assert.strictEqual(r.mediaJcr, 19 / 4);
+        assert.deepStrictEqual([r.doutorados, r.mestrados, r.patentes], [2, 3, 2]);
+    });
+
+    test('ultimos 5 anos: corte em anoAtual - 5, inclusive', () => {
+        const r = B._indicadoresMembro(cv, 5, 2025, 7, 1.5);
+        assert.strictEqual(r.artigos, 3);
+        assert.deepStrictEqual([r.high, r.mid, r.low, r.noJcr], [1, 1, 1, 0]);
+        assert.strictEqual(r.somaJcr, 12);
+        assert.strictEqual(r.mediaJcr, 4);
+        assert.deepStrictEqual([r.doutorados, r.mestrados, r.patentes], [1, 2, 1]);
+    });
+
+    test('indice H e citacoes WoS nao mudam com o periodo', () => {
+        const r = B._indicadoresMembro(cv, 1, 2030, 7, 1.5);
+        assert.strictEqual(r.artigos, 0);
+        assert.strictEqual(r.hWos, 3);
+        assert.strictEqual(r.citacoesWos, 48);
+    });
+
+    test('registro antigo sem wosHIndex recalcula das citacoes por artigo', () => {
+        const antigo = { publications: cv.publications };
+        const r = B._indicadoresMembro(antigo, 0, 2025, 7, 1.5);
+        assert.strictEqual(r.hWos, 3);   // 30, 10, 5, 2, 1
+        assert.strictEqual(r.citacoesWos, 48);
+    });
+
+    test('sem os anos das orientacoes, usa o total guardado so na carreira toda', () => {
+        const semAnos = { totalPhdOrientations: 4, totalMscOrientations: 2, totalPatents: 1 };
+        const toda = B._indicadoresMembro(semAnos, 0, 2025, 7, 1.5);
+        assert.deepStrictEqual([toda.doutorados, toda.mestrados, toda.patentes], [4, 2, 1]);
+        const periodo = B._indicadoresMembro(semAnos, 5, 2025, 7, 1.5);
+        assert.deepStrictEqual([periodo.doutorados, periodo.mestrados, periodo.patentes], [0, 0, 0]);
+    });
+
+    test('item sem ano so entra na carreira toda; media sem JCR e zero', () => {
+        const c = { publications: [{ jif: 0 }, { year: 'x', jif: 0 }] };
+        assert.strictEqual(B._indicadoresMembro(c, 0, 2025, 7, 1.5).artigos, 2);
+        assert.strictEqual(B._indicadoresMembro(c, 5, 2025, 7, 1.5).artigos, 0);
+        assert.strictEqual(B._indicadoresMembro(c, 0, 2025, 7, 1.5).mediaJcr, 0);
+    });
+
+    test('CV vazio nao quebra', () => {
+        const r = B._indicadoresMembro(null, 5, 2025, 7, 1.5);
+        assert.strictEqual(r.artigos, 0);
+        assert.strictEqual(r.hWos, 0);
+    });
+});
+
+describe('_planilhaMembros', () => {
+    test('duas linhas de cabecalho, membros por nome, JCR com 2 casas', () => {
+        const membros = [
+            { name: 'Bruno', fellowshipString: 'PQ 2', publications: [{ year: 2024, jif: 2.345 }] },
+            { name: 'Ana', fellowshipString: '-', publications: [] }
+        ];
+        const L = B._planilhaMembros(membros, 5, 2025, 7, 1.5);
+        assert.strictEqual(L.length, 4);
+        assert.strictEqual(L[0][2], 'Últimos 5 anos (2020–2025)');
+        assert.ok(L[0].includes('Carreira toda'));
+        assert.strictEqual(L[1].length, 15);
+        assert.strictEqual(L[1][14], 'Atualizado');
+        assert.deepStrictEqual(L[1].slice(0, 3), ['Nome', 'Bolsa', 'Artigos']);
+        assert.deepStrictEqual(L[2].slice(0, 2), ['Ana', '']);
+        assert.deepStrictEqual(L[3].slice(0, 3), ['Bruno', 'PQ 2', 1]);
+        assert.strictEqual(L[3][7], 2.35);   // soma JCR
+    });
+});
+
+describe('_linhasMembros: ordenacao', () => {
+    const membros = [
+        { name: 'Carla', fellowshipString: 'PQ 1A', dateAdded: '2026-03-01T12:00:00Z', publications: [{ year: 2024, jif: 2 }], wosHIndex: 10 },
+        { name: 'ana', fellowshipString: '-', dateAdded: '2026-05-01T12:00:00Z', publications: [{ year: 2024, jif: 9 }, { year: 2023, jif: 1 }], wosHIndex: 5 },
+        { name: 'Bruno', fellowshipString: 'PQ 2', publications: [{ year: 2024, jif: 2 }], wosHIndex: 5 }
+    ];
+    const nomes = (ordem) => B._linhasMembros(membros, 0, 2026, 7, 1.5, ordem).map(l => l.cv.name);
+
+    test('sem ordem sai por nome, ignorando caixa', () => {
+        assert.deepStrictEqual(nomes(), ['ana', 'Bruno', 'Carla']);
+    });
+    test('numero decrescente, empate por nome', () => {
+        assert.deepStrictEqual(nomes({ chave: 'hWos', dir: -1 }), ['Carla', 'ana', 'Bruno']);
+        assert.deepStrictEqual(nomes({ chave: 'artigos', dir: -1 }), ['ana', 'Bruno', 'Carla']);
+    });
+    test('numero crescente', () => {
+        assert.deepStrictEqual(nomes({ chave: 'mediaJcr', dir: 1 }), ['Bruno', 'Carla', 'ana']);
+    });
+    test('vazio vai para o fim nas duas direcoes', () => {
+        assert.deepStrictEqual(nomes({ chave: 'bolsa', dir: 1 }), ['Carla', 'Bruno', 'ana']);
+        assert.deepStrictEqual(nomes({ chave: 'bolsa', dir: -1 }), ['Bruno', 'Carla', 'ana']);
+        assert.deepStrictEqual(nomes({ chave: 'atualizado', dir: -1 }), ['ana', 'Carla', 'Bruno']);
+        assert.deepStrictEqual(nomes({ chave: 'atualizado', dir: 1 }), ['Carla', 'ana', 'Bruno']);
+    });
+    test('chave desconhecida cai na ordem por nome', () => {
+        assert.deepStrictEqual(nomes({ chave: 'xyz', dir: -1 }), ['ana', 'Bruno', 'Carla']);
+    });
+    test('planilha segue a mesma ordem e leva a data como Date', () => {
+        const L = B._planilhaMembros(membros, 0, 2026, 7, 1.5, { chave: 'hWos', dir: -1 });
+        assert.deepStrictEqual(L.slice(2).map(r => r[0]), ['Carla', 'ana', 'Bruno']);
+        assert.ok(L[2][14] instanceof Date);
+        assert.strictEqual(L[4][14], '');
+    });
+    test('direcao padrao: texto sobe, numero e data descem', () => {
+        assert.strictEqual(B._direcaoPadraoMembros('texto'), 1);
+        assert.strictEqual(B._direcaoPadraoMembros('num'), -1);
+        assert.strictEqual(B._direcaoPadraoMembros('data'), -1);
+    });
+});

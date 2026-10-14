@@ -363,6 +363,235 @@ window.JCRDBTools = {
         return 5;
     },
 
+    // Indicadores de um membro para a tabela "Membros do Grupo". Tudo que depende do
+    // periodo e contado a partir dos itens com ano (artigos, orientacoes concluidas,
+    // patentes); indice H e citacoes WoS sao SEMPRE da carreira inteira, como estao
+    // no CV — um indice H "do periodo" nao seria o numero que o revisor conhece.
+    //
+    // anos = 0 (ou vazio) considera toda a carreira, como na Matriz de Coautoria.
+    // Com periodo, entram os anos >= anoAtual - anos: a mesma janela das outras listas.
+    // Item sem ano so entra quando o periodo e a carreira toda.
+    _indicadoresMembro: function (cv, anos, anoAtual, alto, baixo) {
+        const c = cv || {};
+        const janela = Number(anos) || 0;
+        const corte = janela > 0 ? ((Number(anoAtual) || new Date().getFullYear()) - janela) : null;
+        const noPeriodo = (ano) => {
+            if (corte === null) return true;
+            const y = parseInt(ano, 10);
+            return !isNaN(y) && y >= corte;
+        };
+        const RU = window.JCRReportUtils;
+
+        const r = { artigos: 0, high: 0, mid: 0, low: 0, noJcr: 0, somaJcr: 0, mediaJcr: 0,
+                    doutorados: 0, mestrados: 0, patentes: 0, hWos: 0, citacoesWos: 0 };
+
+        const pubs = Array.isArray(c.publications) ? c.publications : [];
+        let comJcr = 0;
+        pubs.forEach(p => {
+            if (!p || !noPeriodo(p.year)) return;
+            r.artigos++;
+            const valor = RU.valorJcr(p);
+            const faixa = RU.faixaDeJcr(valor, alto, baixo);
+            r[faixa]++;
+            if (faixa !== 'noJcr') { r.somaJcr += parseFloat(valor); comJcr++; }
+        });
+        r.mediaJcr = comJcr > 0 ? r.somaJcr / comJcr : 0;
+
+        // concluded guarda, por categoria, a lista dos anos de conclusao
+        const concluidas = (c.supervisions && c.supervisions.concluded) || null;
+        const contarOrientacoes = (categoria, totalGuardado) => {
+            const anosLista = concluidas && concluidas[categoria];
+            if (Array.isArray(anosLista)) return anosLista.filter(noPeriodo).length;
+            return corte === null ? (Number(totalGuardado) || 0) : 0;
+        };
+        r.doutorados = contarOrientacoes('Tese de doutorado', c.totalPhdOrientations);
+        r.mestrados = contarOrientacoes('Dissertação de mestrado', c.totalMscOrientations);
+
+        if (Array.isArray(c.rawPatents)) {
+            r.patentes = c.rawPatents.filter(p => p && noPeriodo(p.year)).length;
+        } else if (corte === null) {
+            r.patentes = Number(c.totalPatents) || 0;
+        }
+
+        // Os valores guardados vem do mesmo calculo (citacoes por artigo no Lattes);
+        // so registros antigos sem o campo precisam do recalculo.
+        const citacoes = pubs.map(p => Number(p && p.wosCitations) || 0).filter(n => n > 0);
+        if (c.wosHIndex !== undefined && c.wosHIndex !== '' && !isNaN(Number(c.wosHIndex))) {
+            r.hWos = Number(c.wosHIndex);
+        } else {
+            citacoes.slice().sort((a, b) => b - a).forEach((n, i) => { if (n >= i + 1) r.hWos = i + 1; });
+        }
+        if (c.wosCitations !== undefined && c.wosCitations !== '' && !isNaN(Number(c.wosCitations))) {
+            r.citacoesWos = Number(c.wosCitations);
+        } else {
+            r.citacoesWos = citacoes.reduce((s, n) => s + n, 0);
+        }
+        return r;
+    },
+
+    // Colunas da tabela "Membros do Grupo", na ordem em que aparecem. Compartilhado
+    // pela tela, pela planilha e pela ordenacao. `grupo` separa o que muda com o
+    // filtro de anos ('periodo') do que e sempre da carreira inteira ('carreira') e
+    // do dado do registro ('registro'); `tipo` decide como a coluna e ordenada.
+    _colunasMembros: function (alto, baixo) {
+        return [
+            { chave: 'nome', rotulo: 'Nome', titulo: 'Nome do Pesquisador (link para o Lattes)', grupo: '', tipo: 'texto' },
+            { chave: 'bolsa', rotulo: 'Bolsa', titulo: 'Bolsa e Nível', grupo: '', tipo: 'texto' },
+            { chave: 'artigos', rotulo: 'Artigos', titulo: 'Artigos completos publicados no período', grupo: 'periodo', tipo: 'num' },
+            { chave: 'high', rotulo: `Alto (≥${alto})`, titulo: `Artigos com JCR ≥ ${alto}`, grupo: 'periodo', tipo: 'num', faixa: 'high' },
+            { chave: 'mid', rotulo: `Médio (${baixo}–${alto})`, titulo: `Artigos com ${baixo} ≤ JCR < ${alto}`, grupo: 'periodo', tipo: 'num', faixa: 'mid' },
+            { chave: 'low', rotulo: `Baixo (<${baixo})`, titulo: `Artigos com JCR < ${baixo}`, grupo: 'periodo', tipo: 'num', faixa: 'low' },
+            { chave: 'noJcr', rotulo: 'Sem JCR', titulo: 'Artigos sem fator de impacto conhecido', grupo: 'periodo', tipo: 'num', faixa: 'noJcr' },
+            { chave: 'somaJcr', rotulo: 'Soma JCR', titulo: 'Soma dos fatores de impacto dos artigos do período', grupo: 'periodo', tipo: 'num', decimais: true },
+            { chave: 'mediaJcr', rotulo: 'Média JCR', titulo: 'Média dos fatores de impacto (só artigos com JCR)', grupo: 'periodo', tipo: 'num', decimais: true },
+            { chave: 'doutorados', rotulo: 'Doutorado', titulo: 'Orientações de doutorado concluídas no período', grupo: 'periodo', tipo: 'num' },
+            { chave: 'mestrados', rotulo: 'Mestrado', titulo: 'Orientações de mestrado concluídas no período', grupo: 'periodo', tipo: 'num' },
+            { chave: 'patentes', rotulo: 'Patentes', titulo: 'Patentes e registros no período', grupo: 'periodo', tipo: 'num' },
+            { chave: 'hWos', rotulo: 'Índice H WoS', titulo: 'Índice H calculado das citações WoS declaradas no CV Lattes (carreira toda)', grupo: 'carreira', tipo: 'num' },
+            { chave: 'citacoesWos', rotulo: 'Citações WoS', titulo: 'Total de citações WoS declaradas no CV Lattes (carreira toda)', grupo: 'carreira', tipo: 'num' },
+            { chave: 'atualizado', rotulo: 'Atualizado', titulo: 'Data da última atualização do CV no banco de dados', grupo: 'registro', tipo: 'data' }
+        ];
+    },
+
+    _rotuloPeriodoMembros: function (anos, anoAtual) {
+        const janela = Number(anos) || 0;
+        if (janela <= 0) return 'Toda a carreira';
+        const atual = Number(anoAtual) || new Date().getFullYear();
+        return `Últimos ${janela} ${janela === 1 ? 'ano' : 'anos'} (${atual - janela}–${atual})`;
+    },
+
+    // Faixas do cabecalho de cima: colunas consecutivas do mesmo grupo viram uma celula.
+    _gruposColunasMembros: function (cols, anos, anoAtual) {
+        const rotulos = { periodo: this._rotuloPeriodoMembros(anos, anoAtual), carreira: 'Carreira toda', registro: '', '': '' };
+        const faixas = [];
+        cols.forEach((c, i) => {
+            const ult = faixas[faixas.length - 1];
+            if (ult && ult.grupo === c.grupo) ult.span++;
+            else faixas.push({ grupo: c.grupo, rotulo: rotulos[c.grupo] || '', inicio: i, span: 1 });
+        });
+        return faixas;
+    },
+
+    // Ordem padrao ao clicar numa coluna nova: texto em ordem alfabetica, numeros e
+    // datas do maior para o menor (quem mais publicou / o mais recente primeiro).
+    _direcaoPadraoMembros: function (tipo) {
+        return tipo === 'texto' ? 1 : -1;
+    },
+
+    // Linhas da tabela: cada uma leva o CV (para o link e o botao de relatorio) e os
+    // valores de todas as colunas. `ordem` = { chave, dir } com dir 1 (crescente) ou
+    // -1 (decrescente); sem ordem, ou com chave desconhecida, sai por nome. Valores
+    // vazios (bolsa ou data ausente) vao sempre para o fim, e o empate e por nome.
+    _linhasMembros: function (membros, anos, anoAtual, alto, baixo, ordem) {
+        const cols = this._colunasMembros(alto, baixo);
+        const col = cols.find(c => ordem && c.chave === ordem.chave) || cols[0];
+        const dir = ordem && col.chave === ordem.chave && Number(ordem.dir) === -1 ? -1 : 1;
+        const porNome = (a, b) => a.ind.nome.localeCompare(b.ind.nome, 'pt', { sensitivity: 'base' });
+        const vazio = (v) => v === '' || v === null || v === undefined;
+
+        const linhas = (Array.isArray(membros) ? membros : []).map(cv => {
+            const c = cv || {};
+            const ind = this._indicadoresMembro(c, anos, anoAtual, alto, baixo);
+            ind.nome = String(c.name || '');
+            ind.bolsa = c.fellowshipString && c.fellowshipString !== '-' ? String(c.fellowshipString) : '';
+            const d = c.dateAdded ? new Date(c.dateAdded) : null;
+            ind.atualizado = d && !isNaN(d.getTime()) ? d : '';
+            return { cv: c, ind };
+        });
+
+        return linhas.sort((a, b) => {
+            const va = a.ind[col.chave], vb = b.ind[col.chave];
+            if (vazio(va) || vazio(vb)) {
+                if (vazio(va) && vazio(vb)) return porNome(a, b);
+                return vazio(va) ? 1 : -1;
+            }
+            let cmp;
+            if (col.tipo === 'texto') cmp = String(va).localeCompare(String(vb), 'pt', { sensitivity: 'base', numeric: true });
+            else if (col.tipo === 'data') cmp = va.getTime() - vb.getTime();
+            else cmp = va - vb;
+            return (cmp * dir) || porNome(a, b);
+        });
+    },
+
+    // Mesma tabela como linhas de planilha, na mesma ordem da tela: duas linhas de
+    // cabecalho (o grupo e o nome da coluna), depois um membro por linha. A data vai
+    // como Date para a planilha grava-la como data de verdade.
+    _planilhaMembros: function (membros, anos, anoAtual, alto, baixo, ordem) {
+        const cols = this._colunasMembros(alto, baixo);
+        const grupo = cols.map(() => '');
+        this._gruposColunasMembros(cols, anos, anoAtual).forEach(f => { grupo[f.inicio] = f.rotulo; });
+        const cabecalho = cols.map(c => c.rotulo);
+        const corpo = this._linhasMembros(membros, anos, anoAtual, alto, baixo, ordem).map(({ ind }) =>
+            cols.map(c => c.decimais ? Math.round(ind[c.chave] * 100) / 100 : ind[c.chave]));
+        return [grupo, cabecalho].concat(corpo);
+    },
+
+    // Tabela "Membros do Grupo" em HTML (so o <table>; o cabecalho da secao, com o
+    // periodo e o botao de exportar, fica em renderCVReport). Os <th> da segunda
+    // linha levam data-membros-ordem: o clique e tratado no listener do relatorio.
+    _tabelaMembrosHTML: function (membros, anos, anoAtual, alto, baixo, ordem) {
+        const RU = window.JCRReportUtils;
+        const COLORS = RU.COLORS;
+        const cols = this._colunasMembros(alto, baixo);
+        const faixas = this._gruposColunasMembros(cols, anos, anoAtual);
+        const fundoFaixa = {
+            high: RU.getSoftColor(COLORS.highJcr, 0.85),
+            mid: RU.getSoftColor(COLORS.midJcr, 0.85),
+            low: RU.getSoftColor(COLORS.lowJcr, 0.85),
+            noJcr: '#f5f5f5'
+        };
+        const FUNDO_CARREIRA = '#FFF8E1';
+        const fundoGrupo = (g) => g === 'carreira' ? FUNDO_CARREIRA : COLORS.backgroundHeader;
+        const corGrupo = { periodo: '#1565C0', carreira: '#E65100' };
+        // linha vertical onde comeca cada grupo, menos no primeiro
+        const inicioDeGrupo = new Set(faixas.slice(1).map(f => f.inicio));
+        const divisao = (i) => inicioDeGrupo.has(i) ? ' border-left: 1px solid #bbb;' : '';
+        const th = 'padding: 6px 8px; font-weight: bold; text-align: center;';
+        const ativa = ordem && cols.some(c => c.chave === ordem.chave) ? ordem.chave : 'nome';
+        const seta = ativa === (ordem && ordem.chave) && Number(ordem.dir) === -1 ? '▼' : '▲';
+
+        let html = `<table style="width: 100%; border-collapse: collapse; text-align: left; font-family: inherit; font-size: 0.9em;">
+            <thead style="position: sticky; top: 0; z-index: 1;">
+                <tr>
+                    ${faixas.map(f => `<th colspan="${f.span}" style="${th}${divisao(f.inicio)} background-color: ${fundoGrupo(f.grupo)}; color: ${corGrupo[f.grupo] || 'inherit'};"${f.grupo === 'carreira' ? ' title="Não muda com o período"' : ''}>${this._esc(f.rotulo)}</th>`).join('')}
+                    <th style="${th} background-color: ${COLORS.backgroundHeader};"></th>
+                </tr>
+                <tr style="border-bottom: 2px solid ${COLORS.border};">
+                    ${cols.map((c, i) => {
+                        const fundo = c.faixa ? fundoFaixa[c.faixa] : fundoGrupo(c.grupo);
+                        const alinhar = c.chave === 'nome' ? ' text-align: left;' : '';
+                        const marca = c.chave === ativa ? ` <span style="font-size: 0.8em;">${seta}</span>` : '';
+                        return `<th data-membros-ordem="${c.chave}" title="${this._esc(c.titulo)} — clique para ordenar" style="${th}${alinhar} cursor: pointer; user-select: none; border-bottom: 2px solid #ccc;${divisao(i)} background-color: ${fundo};${c.chave === ativa ? ' text-decoration: underline;' : ''}">${this._esc(c.rotulo)}${marca}</th>`;
+                    }).join('')}
+                    <th style="${th} border-bottom: 2px solid #ccc; background-color: ${COLORS.backgroundHeader};">Ações</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+        this._linhasMembros(membros, anos, anoAtual, alto, baixo, ordem).forEach(({ cv, ind }) => {
+            const td = 'padding: 6px 8px; border-bottom: 1px solid #eee;';
+            const celulas = cols.map((c, i) => {
+                const v = ind[c.chave];
+                if (c.chave === 'nome') {
+                    const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
+                    return `<td style="${td}"><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(v)}</a></strong></td>`;
+                }
+                if (c.tipo === 'texto' || c.tipo === 'data') {
+                    const texto = c.tipo === 'data' && v ? v.toLocaleDateString('pt-BR') : v;
+                    return `<td style="${td} text-align: center; white-space: nowrap;${divisao(i)}">${texto ? this._esc(texto) : '<span style="color: #bbb;">-</span>'}</td>`;
+                }
+                const texto = c.decimais ? RU.formatNum(v) : String(v);
+                return `<td style="${td} text-align: center;${divisao(i)}${!v ? ' color: #bbb;' : ''}">${texto}</td>`;
+            }).join('');
+            html += `<tr>${celulas}
+                <td style="${td} text-align: center;">
+                    <button class="btn btn-view-member-report" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Relatório Individual" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;">📊</button>
+                </td>
+            </tr>`;
+        });
+        return html + '</tbody></table>';
+    },
+
     _matrizCoautoria: function (cvs, fichas, anos, anoAtual) {
         const lista = Array.isArray(cvs) ? cvs : [];
         const fichasArr = Array.isArray(fichas) ? fichas : [];
@@ -4337,70 +4566,28 @@ window.JCRDBTools = {
         const authorRankHistogramHTML = window.JCRReportUtils.generateAuthorRankHistogramHTML(filteredPublications, state.highJcr, state.lowJcr, state.showAuthorLast, state.showAuthorGc);
         const supervisionsPerYearHTML = window.JCRReportUtils.generateSupervisionsPerYearGraphHTML(supervisions);
 
+        // ---- Membros do Grupo ----
+        // Aqui vai so o esqueleto: o corpo e montado pelo listener (_tabelaMembrosHTML),
+        // como a Matriz de Coautoria, para o filtro de anos refazer a conta sem remontar
+        // o relatorio inteiro.
         let membersTableHTML = '';
         if (cvData.groupMembers && cvData.groupMembers.length > 0) {
-            let theadHtml = `<tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border};">`;
-            this.METRICS_CONFIG.forEach(m => {
-                if (['prioridade', 'faixa', 'instituicaoExecutora', 'teamCount', 'reviewCount', 'ridPublications', 'customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
-                const titleAttr = m.title ? ` title="${m.title}"` : '';
-                let style = 'padding: 8px; font-weight: bold; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #ccc;';
-                if (m.division) style += ' border-left: 1px solid #bbb;';
-                if (m.numeric || m.key === 'researcherIdLink') style += ' text-align: center;';
-                theadHtml += `<th${titleAttr} style="${style}">${m.label}</th>`;
-            });
-            theadHtml += `<th style="padding: 8px; font-weight: bold; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid #ccc; text-align: center;">Ações</th>`;
-            theadHtml += `</tr>`;
-
-            let tbodyHtml = ``;
-            const sortedMembers = [...cvData.groupMembers].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-            sortedMembers.forEach(cv => {
-                tbodyHtml += `<tr>`;
-                this.METRICS_CONFIG.forEach(m => {
-                    if (['prioridade', 'faixa', 'instituicaoExecutora', 'teamCount', 'reviewCount', 'ridPublications', 'customId', 'researcherIdLink', 'firstAuthorCount', 'lastAuthorCount', 'gcCount'].includes(m.key)) return;
-                    const val = cv[m.key] !== undefined ? cv[m.key] : '';
-                    let style = 'padding: 6px 8px; border-bottom: 1px solid #eee;';
-                    if (m.division) style += ' border-left: 1px solid #bbb;';
-                    if (m.numeric || m.key === 'researcherIdLink') style += ' text-align: center;';
-
-                    if (m.key === 'name') {
-                        const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
-                        tbodyHtml += `<td style="${style}"><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong></td>`;
-                    } else if (m.key === 'researcherIdLink') {
-                        const safeRid = this._safeUrl(val);
-                        if (safeRid) {
-                            tbodyHtml += `<td style="${style}"><a href="${safeRid}" target="_blank" title="ResearcherID" style="text-decoration:none; font-size:1.2em;">🔗</a></td>`;
-                        } else {
-                            tbodyHtml += `<td style="${style}"></td>`;
-                        }
-                    } else if (m.key === 'dateAdded') {
-                        const dateStr = val ? new Date(val).toLocaleDateString() : '';
-                        tbodyHtml += `<td style="${style}">${dateStr}</td>`;
-                    } else {
-                        tbodyHtml += `<td style="${style}">${this._esc(String(val))}</td>`;
-                    }
-                });
-                tbodyHtml += `<td style="padding: 6px 8px; border-bottom: 1px solid #eee; text-align: center;">
-                    <button class="btn btn-view-member-report" data-name="${this._esc(cv.name || '')}" data-lattesid="${this._esc(cv.lattesId || '')}" title="Relatório Individual" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;">📊</button>
-                </td>`;
-                tbodyHtml += `</tr>`;
-            });
-
             membersTableHTML = `
                 <div class="collapsible-section" id="sec-members">
                     <div class="collapsible-header">
-                        <h3>Membros do Grupo</h3>
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <h3 style="margin: 0;">Membros do Grupo</h3>
+                            <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <span>Período (anos): <input type="number" id="inp-membros-anos" value="${state.membrosAnos !== undefined ? state.membrosAnos : 5}" min="0" style="width: 50px; padding: 2px;" title="0 considera toda a carreira"></span>
+                                <button id="btn-membros-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                <button id="btn-membros-xlsx" class="no-print" title="Exportar a tabela para Excel (.xlsx)" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #A5D6A7; background: #E8F5E9; color: #1B5E20;">📥 Excel</button>
+                            </div>
+                        </div>
                         <span class="toggle-icon">[-]</span>
                     </div>
                     <div class="collapsible-content" style="padding: 0;">
-                        <div style="overflow-x: auto; max-height: 500px;">
-                            <table style="width: 100%; border-collapse: collapse; text-align: left; font-family: inherit; font-size: 0.9em;">
-                                <thead>
-                                    ${theadHtml}
-                                </thead>
-                                <tbody>
-                                    ${tbodyHtml}
-                                </tbody>
-                            </table>
+                        <div id="membros-container" style="overflow-x: auto; max-height: 500px;">
+                            <div style="color: #777; text-align: center; padding: 10px;">Carregando...</div>
                         </div>
                     </div>
                 </div>
@@ -5413,18 +5600,82 @@ window.JCRDBTools = {
             });
         }
 
-        const viewMemberReportBtns = doc.querySelectorAll('.btn-view-member-report');
-        if (viewMemberReportBtns.length > 0 && cvData.groupMembers) {
-            const sortedGroupMembers = [...cvData.groupMembers].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-            viewMemberReportBtns.forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const name = e.currentTarget.getAttribute('data-name');
-                    if (!name) return;
-                    const memberData = sortedGroupMembers.find(cv => cv.name === name);
-                    if (memberData) {
-                        this.renderCVReport(memberData, newTab, sortedGroupMembers, cvData);
-                    }
+        // Membros do Grupo: o corpo da tabela e refeito ao mudar o periodo, sem
+        // remontar o relatorio. O clique no 📊 e delegado ao container porque os
+        // botoes sao recriados a cada atualizacao.
+        const membrosContainer = doc.getElementById('membros-container');
+        if (membrosContainer && cvData.groupMembers) {
+            const inpMembrosAnos = doc.getElementById('inp-membros-anos');
+            const anosMembros = () => {
+                const v = parseInt(inpMembrosAnos && inpMembrosAnos.value, 10);
+                return isNaN(v) || v < 0 ? 0 : v;
+            };
+            const gerarTabelaMembros = () => {
+                state.membrosAnos = anosMembros();
+                membrosContainer.innerHTML = this._tabelaMembrosHTML(
+                    cvData.groupMembers, state.membrosAnos, currentYear, state.highJcr, state.lowJcr, state.membrosOrdem);
+            };
+            gerarTabelaMembros();
+
+            const btnMembrosUpdate = doc.getElementById('btn-membros-update');
+            if (btnMembrosUpdate) btnMembrosUpdate.addEventListener('click', gerarTabelaMembros);
+            if (inpMembrosAnos) {
+                inpMembrosAnos.addEventListener('change', gerarTabelaMembros);
+                inpMembrosAnos.addEventListener('keydown', (e) => { if (e.key === 'Enter') gerarTabelaMembros(); });
+            }
+
+            const btnMembrosXlsx = doc.getElementById('btn-membros-xlsx');
+            if (btnMembrosXlsx) btnMembrosXlsx.addEventListener('click', () => {
+                const anos = anosMembros();
+                const linhas = this._planilhaMembros(cvData.groupMembers, anos, currentYear, state.highJcr, state.lowJcr, state.membrosOrdem);
+                const cols = this._colunasMembros(state.highJcr, state.lowJcr);
+                const col = (i) => String.fromCharCode(65 + i); // a tabela tem menos de 26 colunas
+                const bytes = window.JCRReportUtils.planilhaXlsx(linhas, {
+                    nomeAba: 'Membros',
+                    cabecalho: 2,
+                    larguras: cols.map(c => c.chave === 'nome' ? 40 : 12),
+                    mesclas: this._gruposColunasMembros(cols, anos, currentYear)
+                        .filter(g => g.span > 1 && g.rotulo)
+                        .map(g => `${col(g.inicio)}1:${col(g.inicio + g.span - 1)}1`)
                 });
+                const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                const url = URL.createObjectURL(blob);
+                const nomeGrupo = String(cvData.name || 'grupo')
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+                const a = doc.createElement('a');
+                a.href = url;
+                a.download = `membros_${nomeGrupo || 'grupo'}_${anos > 0 ? anos + 'anos' : 'carreira'}.xlsx`;
+                doc.body.appendChild(a);
+                a.click();
+                doc.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            });
+
+            const sortedGroupMembers = [...cvData.groupMembers].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            membrosContainer.addEventListener('click', (e) => {
+                // clique num cabecalho: mesma coluna inverte, coluna nova usa a ordem padrao
+                const cab = e.target.closest && e.target.closest('th[data-membros-ordem]');
+                if (cab) {
+                    const chave = cab.getAttribute('data-membros-ordem');
+                    const atual = state.membrosOrdem || { chave: 'nome', dir: 1 };
+                    if (atual.chave === chave) {
+                        state.membrosOrdem = { chave, dir: -atual.dir };
+                    } else {
+                        const c = this._colunasMembros(state.highJcr, state.lowJcr).find(x => x.chave === chave);
+                        state.membrosOrdem = { chave, dir: this._direcaoPadraoMembros(c && c.tipo) };
+                    }
+                    gerarTabelaMembros();
+                    return;
+                }
+                const btn = e.target.closest && e.target.closest('.btn-view-member-report');
+                if (!btn) return;
+                const name = btn.getAttribute('data-name');
+                if (!name) return;
+                const memberData = sortedGroupMembers.find(cv => cv.name === name);
+                if (memberData) {
+                    this.renderCVReport(memberData, newTab, sortedGroupMembers, cvData);
+                }
             });
         }
 

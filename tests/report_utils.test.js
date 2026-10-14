@@ -1183,3 +1183,69 @@ describe('_normalizarAutor: o sobrenome manda', () => {
         assert.strictEqual(R._normalizarAutor(null), '');
     });
 });
+
+// .xlsx feito a mao: zip sem compressao com os XMLs do SpreadsheetML.
+describe('planilhaXlsx', () => {
+    // le as entradas do zip pelos cabecalhos locais
+    const entradas = (bytes) => {
+        const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const r = {};
+        let p = 0;
+        while (dv.getUint32(p, true) === 0x04034B50) {
+            const tam = dv.getUint32(p + 18, true);
+            const nNome = dv.getUint16(p + 26, true);
+            const nome = Buffer.from(bytes.slice(p + 30, p + 30 + nNome)).toString('utf8');
+            const dados = bytes.slice(p + 30 + nNome, p + 30 + nNome + tam);
+            r[nome] = { texto: Buffer.from(dados).toString('utf8'), crc: dv.getUint32(p + 14, true) };
+            p += 30 + nNome + tam;
+        }
+        return r;
+    };
+
+    test('tem as partes do pacote e termina no fim do diretorio central', () => {
+        const b = R.planilhaXlsx([['a']]);
+        const e = entradas(b);
+        assert.deepStrictEqual(Object.keys(e).sort(), [
+            '[Content_Types].xml', '_rels/.rels', 'xl/_rels/workbook.xml.rels',
+            'xl/styles.xml', 'xl/workbook.xml', 'xl/worksheets/sheet1.xml']);
+        const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+        assert.strictEqual(dv.getUint32(b.length - 22, true), 0x06054B50);
+        assert.strictEqual(dv.getUint16(b.length - 22 + 10, true), 6);
+    });
+
+    test('CRC32 confere (valor conhecido de "123456789")', () => {
+        const b = R._zipSemCompressao([['x', '123456789']]);
+        assert.strictEqual(entradas(b).x.crc, 0xCBF43926);
+    });
+
+    test('numero vira celula numerica, texto e escapado, vazio some', () => {
+        const folha = entradas(R.planilhaXlsx([['Nome', 'N'], ['A & <B>', 2.5, '', null]], { cabecalho: 1 }))['xl/worksheets/sheet1.xml'].texto;
+        assert.ok(folha.includes('<c r="B2"><v>2.5</v></c>'));
+        assert.ok(folha.includes('A &amp; &lt;B&gt;'));
+        assert.ok(!folha.includes('r="C2"'));
+        assert.ok(folha.includes('<c r="A1" t="inlineStr" s="1">'));
+        assert.ok(folha.includes('state="frozen"'));
+    });
+
+    test('caractere de controle e removido e nome da aba e saneado', () => {
+        const e = entradas(R.planilhaXlsx([['a\u0001b']], { nomeAba: 'x/y:z' }));
+        assert.ok(e['xl/worksheets/sheet1.xml'].texto.includes('>ab<'));
+        assert.ok(e['xl/workbook.xml'].texto.includes('name="x y z"'));
+    });
+
+    test('mesclas e larguras entram na folha', () => {
+        const folha = entradas(R.planilhaXlsx([['a', 'b']], { mesclas: ['A1:B1'], larguras: [40, 12] }))['xl/worksheets/sheet1.xml'].texto;
+        assert.ok(folha.includes('<mergeCell ref="A1:B1"/>'));
+        assert.ok(folha.includes('<col min="1" max="1" width="40" customWidth="1"/>'));
+    });
+});
+
+describe('planilhaXlsx: datas', () => {
+    test('Date vira numero de serie com formato de data', () => {
+        const b = R.planilhaXlsx([[new Date(2026, 9, 14)]]);
+        const texto = Buffer.from(b).toString('utf8');
+        // 2026-10-14 = 46309 no sistema de datas do Excel
+        assert.ok(texto.includes('<c r="A1" s="2"><v>46309</v></c>'));
+        assert.ok(texto.includes('<xf numFmtId="14"'));
+    });
+});
