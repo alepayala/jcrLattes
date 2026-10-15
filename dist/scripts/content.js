@@ -387,7 +387,8 @@ async function checkAndUpdateProponenteLattesId(nameLink, finalStats = null, sup
         // 1. Proponente match
         if (entry.proponente && entry.proponente.name) {
           if (window.JCRDBTools.cvMatches({ name: targetName, lattesId }, entry.proponente.name, entry.proponente.lattesId)) {
-            if (lattesId && (!entry.proponente.lattesId || entry.proponente.lattesId !== lattesId)) {
+            // cvMatches so casa IDs iguais quando os dois tem: aqui basta preencher o que falta
+            if (lattesId && !entry.proponente.lattesId) {
               entry.proponente.lattesId = lattesId;
               if (!entry.lattesId) entry.lattesId = lattesId;
               modified = true;
@@ -400,21 +401,21 @@ async function checkAndUpdateProponenteLattesId(nameLink, finalStats = null, sup
         }
 
         // 2. Team Members match
+        // UM membro por proposta: o do mesmo ID ou, sem ID, o unico de nome compativel.
+        // Com o teste membro a membro, dois membros sem ID de nomes parecidos ("Maria
+        // Silva" e "Maria J. Silva") recebiam os dois o ID e a bolsa deste CV.
         if (Array.isArray(entry.teamMembers)) {
-          entry.teamMembers.forEach(member => {
-            if (member && member.name) {
-              if (window.JCRDBTools.cvMatches({ name: targetName, lattesId }, member.name, member.lattesId)) {
-                if (lattesId && (!member.lattesId || member.lattesId !== lattesId)) {
-                  member.lattesId = lattesId;
-                  modified = true;
-                }
-                if (cvBolsa && member.bolsa !== cvBolsa) {
-                  member.bolsa = cvBolsa;
-                  modified = true;
-                }
-              }
+          const member = window.JCRDBTools._acharPesquisador(entry.teamMembers, targetName, lattesId, m => !!m.name);
+          if (member) {
+            if (lattesId && !member.lattesId) {
+              member.lattesId = lattesId;
+              modified = true;
             }
-          });
+            if (cvBolsa && member.bolsa !== cvBolsa) {
+              member.bolsa = cvBolsa;
+              modified = true;
+            }
+          }
         }
 
         if (modified) updatedEntries.push(entry);

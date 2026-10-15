@@ -55,42 +55,162 @@ window.JCRDBTools = {
     // equipe deixa marcas no registro e a extracao as respeita:
     //   manual: true   -> membro acrescentado a mao (a extracao nunca o traz)
     //   editado: true  -> membro corrigido a mao (a versao do usuario vence)
-    //   removedMembers -> nomes apagados a mao (a extracao nao os traz de volta)
+    //   removedMembers -> membros apagados a mao (a extracao nao os traz de volta);
+    //                     guarda o nome e, se o membro tinha, o ID Lattes
+    //
+    // O ID Lattes e o identificador principal do membro: com ID dos dois lados, so ele
+    // decide quem e quem. O nome so vale quando falta o ID de um dos lados.
     // ---------------------------------------------------------------------------
     _chaveMembro: function (nome) {
         return String(nome || '').trim().toLowerCase();
+    },
+
+    _idLattesValido: function (v) {
+        const id = String(v || '').trim();
+        return /^\d{16}$/.test(id) ? id : '';
     },
 
     // Junta a equipe recem-extraida com a que ja estava no banco.
     mesclarEquipe: function (extraidos, existentes, removidos) {
         const novos = Array.isArray(extraidos) ? extraidos.filter(m => m && m.name) : [];
         const antigos = Array.isArray(existentes) ? existentes.filter(m => m && m.name) : [];
+        // removedMembers mistura nomes e IDs Lattes (16 digitos): um nunca e o outro
         const apagados = new Set((Array.isArray(removidos) ? removidos : []).map(n => this._chaveMembro(n)));
+        const idDe = (m) => this._idLattesValido(m.lattesId);
+        const apagado = (m) => apagados.has(this._chaveMembro(m.name)) || (idDe(m) !== '' && apagados.has(idDe(m)));
 
-        const porChave = new Map();
-        antigos.forEach(m => porChave.set(this._chaveMembro(m.name), m));
+        // O membro ja conhecido que corresponde a um extraido: o do mesmo ID; senao o
+        // do mesmo nome, desde que os IDs nao se contradigam. A versao corrigida a mao
+        // vale mesmo com ID diferente: quem corrigiu o ID foi o usuario.
+        const antigoDe = (m) => {
+            const id = idDe(m);
+            if (id) {
+                const porId = antigos.find(a => idDe(a) === id);
+                if (porId) return porId;
+            }
+            const k = this._chaveMembro(m.name);
+            return antigos.find(a => this._chaveMembro(a.name) === k &&
+                (!id || !idDe(a) || a.editado)) || null;
+        };
 
         const resultado = [];
-        const usados = new Set();
+        const usados = new Set();   // antigos ja colocados
+        const vistos = new Set();   // extraidos repetidos (mesmo ID, ou mesmo nome sem ID)
 
         novos.forEach(m => {
-            const k = this._chaveMembro(m.name);
-            if (apagados.has(k)) return;              // o usuario apagou: nao volta
-            if (usados.has(k)) return;                // nome repetido na extracao entra uma vez
-            usados.add(k);
-            const antigo = porChave.get(k);
+            if (apagado(m)) return;                   // o usuario apagou: nao volta
+            const marca = idDe(m) ? 'id:' + idDe(m) : 'nm:' + this._chaveMembro(m.name);
+            if (vistos.has(marca)) return;            // repetido na extracao entra uma vez
+            vistos.add(marca);
+            const antigo = antigoDe(m);
+            if (antigo && usados.has(antigo)) return; // outro extraido ja ocupou esse membro
+            if (antigo) usados.add(antigo);
+            if (antigo && apagado(antigo)) return;
             // corrigido a mao vence a extracao; senao entra o dado novo
             resultado.push((antigo && antigo.editado) ? antigo : m);
         });
 
         // acrescentados ou corrigidos a mao que a extracao nao trouxe continuam na lista
         antigos.forEach(m => {
-            const k = this._chaveMembro(m.name);
-            if (usados.has(k) || apagados.has(k)) return;
-            if (m.manual || m.editado) { usados.add(k); resultado.push(m); }
+            if (usados.has(m) || apagado(m)) return;
+            if (m.manual || m.editado) { usados.add(m); resultado.push(m); }
         });
 
         return resultado;
+    },
+
+    // Junta as copias de CV da mesma pessoa numa so. Vence a versao mais nova
+    // (dateAdded), exceto que um CV completo sempre vence o esqueleto que a importacao
+    // da proposta cria (so nome, bolsa e formacao): senao um esqueleto recente apagaria
+    // as publicacoes. Do perdedor so entram os campos que o vencedor nao tem, e os IDs
+    // de grupo (customId) se somam.
+    _mesclarVersoesCv: function (registros) {
+        const lista = (Array.isArray(registros) ? registros : []).filter(cv => cv && typeof cv === 'object');
+        if (lista.length === 0) return null;
+        const data = (cv) => { const t = Date.parse(cv.dateAdded || ''); return isNaN(t) ? 0 : t; };
+        const completo = (cv) => this.isFullCv(cv) ? 1 : 0;
+        const ordem = lista.slice().sort((a, b) => (completo(b) - completo(a)) || (data(b) - data(a)));
+        const vazio = (v) => v === undefined || v === null || v === '' || v === '-' || (Array.isArray(v) && v.length === 0);
+
+        const r = Object.assign({}, ordem[0]);
+        ordem.slice(1).forEach(cv => {
+            Object.keys(cv).forEach(k => { if (vazio(r[k]) && !vazio(cv[k])) r[k] = cv[k]; });
+        });
+        const grupos = [];
+        ordem.forEach(cv => String(cv.customId || '').split(',').map(s => s.trim()).filter(Boolean)
+            .forEach(g => { if (grupos.indexOf(g) === -1) grupos.push(g); }));
+        r.customId = grupos.join(', ');
+        if (ordem.some(cv => cv.inGeneralDb === true)) r.inGeneralDb = true;
+        return r;
+    },
+
+    // Ajuste manual: um membro recebeu o ID Lattes `lattesId`. O ID passa a ser o
+    // identificador dele, e as copias de CV da pessoa viram uma so:
+    //   - o CV que ja existe com esse ID (banco geral ou base do piccTools);
+    //   - os registros SEM ID com o nome do membro (identico, ignorando caixa e
+    //     acentos), como o esqueleto que a importacao da proposta cria.
+    // Registros com OUTRO ID nao entram: sao de outra pessoa. O resultado mora em
+    // jcr_picc_cv:id:<ID>, a casa dos CVs de membros de propostas (o mesmo que
+    // saveCurrentCV faz), e continua no banco geral se uma das copias estava la.
+    unificarCvPorLattesId: async function (nomes, lattesId) {
+        const id = this._idLattesValido(lattesId);
+        if (!id || !chrome.runtime?.id) return null;
+        const nomesNorm = (Array.isArray(nomes) ? nomes : [nomes]).map(n => this.normalizeName(n)).filter(Boolean);
+
+        const items = await new Promise(res => chrome.storage.local.get(null, r => res(r || {})));
+        const piccPrefix = this.piccCvPrefix || 'jcr_picc_cv:';
+        const cvPrefix = this.cvKeyPrefix || 'jcr_cv:';
+        const fontes = [];
+        Object.keys(items).forEach(k => {
+            if (!k.startsWith(piccPrefix) && !k.startsWith(cvPrefix)) return;
+            const cv = items[k];
+            if (!cv || typeof cv !== 'object' || cv.isProcesso || cv.processId) return;
+            const idCv = String(cv.lattesId || '').trim();
+            if (idCv === id || (!idCv && nomesNorm.indexOf(this.normalizeName(cv.name)) !== -1)) {
+                fontes.push({ k, cv });
+            }
+        });
+        if (fontes.length === 0) return null;
+
+        const unico = this._mesclarVersoesCv(fontes.map(f => f.cv));
+        unico.lattesId = id;
+        if (!unico.cvLink) unico.cvLink = 'http://lattes.cnpq.br/' + id;
+        if (fontes.some(f => f.k.startsWith(cvPrefix))) unico.inGeneralDb = true;
+        const destino = this._piccCvStorageKey(unico);
+        const remover = fontes.map(f => f.k).filter(k => k !== destino);
+
+        await new Promise((resolve, reject) => chrome.storage.local.set({ [destino]: unico }, () =>
+            chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve()));
+        if (remover.length > 0) {
+            await new Promise(resolve => chrome.storage.local.remove(remover, () => resolve()));
+        }
+        return { destino, copias: fontes.length };
+    },
+
+    // O mesmo ajuste dentro da proposta: o HTML do CV do membro guardado pelo nome
+    // passa para a chave do ID (sem sobrescrever um que ja esteja la), e a marca de
+    // "desconsiderado no consolidado" feita pelo nome ou pelo ID antigo passa ao ID novo.
+    _migrarMembroParaLattesId: async function (proc, nomes, idAntigo, lattesId) {
+        const id = this._idLattesValido(lattesId);
+        if (!proc || !id) return;
+        const listaNomes = (Array.isArray(nomes) ? nomes : [nomes]).filter(Boolean);
+
+        if (Array.isArray(proc.excludedCvKeys)) {
+            const antigas = listaNomes.concat(idAntigo ? [String(idAntigo)] : []);
+            if (proc.excludedCvKeys.some(k => antigas.indexOf(k) !== -1)) {
+                proc.excludedCvKeys = proc.excludedCvKeys.filter(k => antigas.indexOf(k) === -1);
+                if (proc.excludedCvKeys.indexOf(id) === -1) proc.excludedCvKeys.push(id);
+            }
+        }
+
+        if (!proc.processId || !chrome.runtime?.id) return;
+        const blobs = await this.getProcBlobs(proc.processId);
+        const chaveId = this._memberCvBlobKey(id, '');
+        const chavesNome = listaNomes.map(n => this._memberCvBlobKey('', n)).filter(k => blobs[k] !== undefined);
+        if (chavesNome.length === 0) return;
+        if (blobs[chaveId] === undefined) blobs[chaveId] = blobs[chavesNome[0]];
+        chavesNome.forEach(k => { delete blobs[k]; });
+        await new Promise(resolve => chrome.storage.local.set({ [this._procBlobKey(proc.processId)]: blobs }, () => resolve()));
     },
 
     // O proponente corrigido a mao tambem nao e sobrescrito pela extracao.
@@ -852,27 +972,83 @@ window.JCRDBTools = {
             .trim();
     },
 
-    // True se o CV do banco corresponde ao par (name, lattesId).
-    // Quando ambos os lados têm ID Lattes, só o ID decide (evita colisão de homônimos);
-    // o nome é usado apenas quando um dos lados não tem ID.
+    // Palavras de um nome que servem para comparar pessoas: sem acentos, caixa e
+    // pontuacao, sem as particulas (da, de, dos...) e sem o sufixo de geracao no fim
+    // (Junior, Filho, Neto...). Iniciais abreviadas ("J.") ficam como uma letra.
+    _tokensNome: function (nome) {
+        const PARTICULAS = ['da', 'de', 'do', 'das', 'dos', 'e', 'd', 'del', 'della', 'di', 'du', 'van', 'von'];
+        const SUFIXOS = ['junior', 'jr', 'filho', 'filha', 'neto', 'neta', 'sobrinho', 'sobrinha'];
+        const t = this.normalizeName(nome).split(' ').filter(p => p && PARTICULAS.indexOf(p) === -1);
+        while (t.length > 2 && SUFIXOS.indexOf(t[t.length - 1]) !== -1) t.pop();
+        return t;
+    },
+
+    // Dois nomes podem ser da mesma pessoa? Usado SO quando falta o ID Lattes de um dos
+    // lados (equipe lida do PDF, proponente de uma proposta). Aceita o nome identico e
+    // o nome com os do meio omitidos ou abreviados: mesmo primeiro e mesmo ultimo nome,
+    // com ao menos dois nomes de cada lado ("Maria Silva" ~ "Maria José da Silva").
+    //
+    // Antes a regra incluia "um nome contem o outro" comparando LETRAS: "ana silva"
+    // esta dentro de "luciana silva", e "silva" dentro de qualquer Silva.
+    _nomesCompativeis: function (nomeA, nomeB) {
+        const n1 = this.normalizeName(nomeA);
+        const n2 = this.normalizeName(nomeB);
+        if (!n1 || !n2) return false;
+        if (n1 === n2) return true;
+        const t1 = this._tokensNome(nomeA);
+        const t2 = this._tokensNome(nomeB);
+        if (t1.length < 2 || t2.length < 2) return false;
+        if (t1.join(' ') === t2.join(' ')) return true;
+        return t1[0] === t2[0] && t1[t1.length - 1] === t2[t2.length - 1];
+    },
+
+    // True se o registro corresponde ao pesquisador (name, lattesId).
+    // Quando os dois lados tem ID Lattes, SO o ID decide, nos dois sentidos: IDs
+    // diferentes sao pessoas diferentes, por mais parecidos que sejam os nomes. O nome
+    // so e usado quando um dos lados nao tem ID, e com a regra de _nomesCompativeis.
+    //
+    // Para achar UM registro numa lista, use _acharPesquisador, que tambem recusa
+    // resultado ambiguo. Para a linha da tabela do banco, use _mesmoRegistro.
     cvMatches: function (cv, name, lattesId, processId = '') {
         if (!cv) return false;
         if (processId && cv.processId && cv.processId === processId) return true;
-        if (lattesId && cv.lattesId && String(cv.lattesId).trim() === String(lattesId).trim()) return true;
-        if (name && cv.name) {
-            const n1 = this.normalizeName(cv.name);
-            const n2 = this.normalizeName(name);
-            if (n1 && n2) {
-                if (n1 === n2 || n1.includes(n2) || n2.includes(n1)) return true;
-                const tokens1 = n1.split(' ').filter(t => t.length > 2);
-                const tokens2 = n2.split(' ').filter(t => t.length > 2);
-                if (tokens1.length >= 2 && tokens2.length >= 2) {
-                    if (tokens1[0] === tokens2[0] && tokens1[tokens1.length - 1] === tokens2[tokens2.length - 1]) return true;
-                }
-            }
-        }
+        const idCv = String(cv.lattesId || '').trim();
+        const id = String(lattesId || '').trim();
+        if (idCv && id) return idCv === id;
+        if (name && cv.name && this._nomesCompativeis(cv.name, name)) return true;
         if (name && cv.processId && String(cv.processId).trim() === String(name).trim()) return true;
         return false;
+    },
+
+    // Acha numa lista o registro do pesquisador. O ID Lattes igual vence. Sem ele,
+    // aceita o nome compativel (cvMatches) so se houver UM candidato; com varios, fica
+    // o unico de nome identico, ou nenhum. Melhor nao achar do que achar a pessoa
+    // errada: quem chama isto grava, mescla ou apaga o registro achado.
+    // `filtro` restringe a lista antes (ex.: cv => !cv.isProcesso).
+    _acharPesquisador: function (lista, name, lattesId, filtro) {
+        const arr = (Array.isArray(lista) ? lista : []).filter(cv => cv && (!filtro || filtro(cv)));
+        const id = String(lattesId || '').trim();
+        if (id) {
+            const porId = arr.find(cv => String(cv.lattesId || '').trim() === id);
+            if (porId) return porId;
+        }
+        const candidatos = arr.filter(cv => this.cvMatches(cv, name, lattesId));
+        if (candidatos.length <= 1) return candidatos[0] || null;
+        const n = this.normalizeName(name);
+        const identicos = candidatos.filter(cv => this.normalizeName(cv.name) === n);
+        return identicos.length === 1 ? identicos[0] : null;
+    },
+
+    // Dois membros da mesma equipe sao a mesma pessoa? Para tirar repetidos de uma
+    // lista ja conhecida: IDs decidem quando os dois tem; senao, so nome identico (sem
+    // a regra aproximada, que juntaria dois membros diferentes da mesma lista).
+    _mesmoMembro: function (a, b) {
+        if (!a || !b) return false;
+        const ia = String(a.lattesId || '').trim();
+        const ib = String(b.lattesId || '').trim();
+        if (ia && ib) return ia === ib;
+        const na = this.normalizeName(a.name);
+        return na !== '' && na === this.normalizeName(b.name);
     },
 
     // Identifica UMA linha da tabela do banco: o mesmo registro, e nao um parecido.
@@ -1202,10 +1378,14 @@ window.JCRDBTools = {
             const people = [];
             if (proc.proponente) people.push(proc.proponente);
             if (Array.isArray(proc.teamMembers)) people.push(...proc.teamMembers);
-            return people.some(p => p && (
-                (id && p.lattesId && String(p.lattesId).trim() === id) ||
-                (nm && p.name && String(p.name).trim().toLowerCase() === nm)
-            ));
+            // Com ID dos dois lados, so o ID decide: o nome identico de um homonimo
+            // gravaria o CV na pasta da proposta de outra pessoa.
+            return people.some(p => {
+                if (!p) return false;
+                const pid = String(p.lattesId || '').trim();
+                if (id && pid) return pid === id;
+                return !!(nm && p.name && String(p.name).trim().toLowerCase() === nm);
+            });
         });
     },
 
@@ -1320,9 +1500,8 @@ window.JCRDBTools = {
         if (this.isUnlocked) {
             try {
                 const db = await this.getDB(false);
-                const isAlreadyInDb = db.some(cv =>
-                    !cv.isProcesso && this.cvMatches(cv, this.currentCvData.name, this.currentCvData.lattesId)
-                );
+                const isAlreadyInDb = !!this._acharPesquisador(db,
+                    this.currentCvData.name, this.currentCvData.lattesId, cv => !cv.isProcesso);
 
                 // Existing CVs: always auto-save immediately — the save protection logic preserves
                 // existing RID fields, so we don't need to wait for RID stats to arrive.
@@ -1674,38 +1853,15 @@ window.JCRDBTools = {
     isPiccProposalMember: async function (name, lattesId = '') {
         const proposals = await this.getDB(true);
         if (!Array.isArray(proposals) || proposals.length === 0) return false;
-        
-        const normName = this.normalizeName(name);
-        const cleanId = String(lattesId || '').trim();
-
+        // Mesma regra de identidade de cvMatches (ID decide; sem ID, nome compativel).
+        // Havia aqui uma comparacao propria em que "ana silva" casava com "luciana silva".
         return proposals.some(proc => {
             if (!proc || (!proc.isProcesso && !proc.processId)) return false;
-
-            // Check proponente
-            if (proc.proponente) {
-                if (cleanId && proc.proponente.lattesId && String(proc.proponente.lattesId).trim() === cleanId) return true;
-                if (normName && proc.proponente.name) {
-                    const normProp = this.normalizeName(proc.proponente.name);
-                    if (normProp && (normProp === normName || normProp.includes(normName) || normName.includes(normProp))) return true;
-                }
-            }
-
-            // Check team members
-            if (Array.isArray(proc.teamMembers)) {
-                return proc.teamMembers.some(tm => {
-                    if (!tm) return false;
-                    if (cleanId && tm.lattesId && String(tm.lattesId).trim() === cleanId) return true;
-                    if (normName && tm.name) {
-                        const normTm = this.normalizeName(tm.name);
-                        return normTm && (normTm === normName || normTm.includes(normName) || normName.includes(normTm));
-                    }
-                    return false;
-                });
-            }
-
-            return false;
+            if (proc.proponente && this.cvMatches(proc.proponente, name, lattesId)) return true;
+            return Array.isArray(proc.teamMembers) && proc.teamMembers.some(tm => this.cvMatches(tm, name, lattesId));
         });
     },
+
 
     saveCurrentCV: async function (silent = false) {
         // Ensure we have the latest data before saving
@@ -1729,9 +1885,9 @@ window.JCRDBTools = {
             await this.savePiccCV(this.currentCvData);
             // Se havia uma cópia em jcr_cv: (CV analisado antes de a pessoa entrar numa
             // proposta), ela sai: o registro do picc passa a ser o único.
-            const copiaAntiga = (await this.getDB(false)).find(cv =>
-                !cv.isProcesso && !cv._piccOnlyKey &&
-                this.cvMatches(cv, this.currentCvData.name, this.currentCvData.lattesId));
+            const copiaAntiga = this._acharPesquisador(await this.getDB(false),
+                this.currentCvData.name, this.currentCvData.lattesId,
+                cv => !cv.isProcesso && !cv._piccOnlyKey);
             if (copiaAntiga) await this.removeCVs([copiaAntiga]);
             if (!silent) this.showToast('CV do piccTools Salvo na Base Dedicada!');
             return;
@@ -1740,9 +1896,10 @@ window.JCRDBTools = {
         const db = await this.getDB(false);
         // Ignora registros de Processo (piccTools): o save de um CV do Lattes
         // nunca deve substituir/remover um Processo do mesmo proponente.
-        const existing = db.find(cv =>
-            !cv.isProcesso && this.cvMatches(cv, this.currentCvData.name, this.currentCvData.lattesId)
-        ) || null;
+        // existing e mesclado no CV novo (ID de grupo, RID) e, se a chave mudar, APAGADO
+        // por upsertCV: tem de ser a mesma pessoa, nunca um nome parecido.
+        const existing = this._acharPesquisador(db,
+            this.currentCvData.name, this.currentCvData.lattesId, cv => !cv.isProcesso);
         if (existing) {
 
             // Define RID-related fields that we want to protect from being overwritten by null/empty values
@@ -2020,14 +2177,6 @@ window.JCRDBTools = {
             return;
         }
         this.renderCVReport(this.currentCvData, newTab);
-    },
-
-    deleteSingleCV: async function (name, lattesId = '', isProcessoOnly = false) {
-        const db = await this.getDB(isProcessoOnly);
-        const existing = db.find(cv => this.cvMatches(cv, name, lattesId));
-        if (existing) {
-            await this.removeCVs([existing]);
-        }
     },
 
     clearDB: async function (silent = false, isProcessoOnly = false, targetTab = null) {
@@ -2711,21 +2860,6 @@ window.JCRDBTools = {
             });
         }
 
-        const deleteBtns = newTab.document.querySelectorAll('.btn-delete-row');
-        deleteBtns.forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const name = e.currentTarget.getAttribute('data-name');
-                const lattesId = e.currentTarget.getAttribute('data-lattesid');
-                const confirmMsg = isProcessoOnly 
-                    ? `Tem certeza que deseja apagar a proposta de ${name}?` 
-                    : `Tem certeza que deseja apagar o CV de ${name}?`;
-                if (newTab.confirm(confirmMsg)) {
-                    this.deleteSingleCV(name, lattesId, isProcessoOnly).then(() => {
-                        this.viewDB(newTab, { processOnly: isProcessoOnly });
-                    });
-                }
-            });
-        });
 
         const customIdInputs = newTab.document.querySelectorAll('.custom-id-input');
         const customIdSelects = newTab.document.querySelectorAll('.custom-id-select');
@@ -3473,7 +3607,7 @@ window.JCRDBTools = {
 
         if (Array.isArray(processData.teamMembers)) {
             processData.teamMembers.forEach(tm => {
-                if (tm && tm.name && !teamMembers.some(m => m.name.toLowerCase() === tm.name.toLowerCase())) {
+                if (tm && tm.name && !teamMembers.some(m => this._mesmoMembro(m, tm))) {
                     teamMembers.push({
                         name: tm.name,
                         role: tm.categoria || tm.role || 'Membro da Equipe',
@@ -3494,7 +3628,7 @@ window.JCRDBTools = {
         // Apenas seleciona os CVs que entram no consolidado. A tabela da equipe é montada
         // em renderCVReport(); a versão que existia aqui era atribuída e nunca usada.
         teamMembers.forEach((member) => {
-            const memberCv = combinedCvs.find(cv => !cv.isProcesso && this.cvMatches(cv, member.name, member.lattesId));
+            const memberCv = this._acharPesquisador(combinedCvs, member.name, member.lattesId, cv => !cv.isProcesso);
             const hasFullCvData = !!(memberCv && this.isFullCv(memberCv));
             
             const memberKey = member.lattesId || member.name;
@@ -4031,7 +4165,7 @@ window.JCRDBTools = {
 
             if (Array.isArray(proc.teamMembers)) {
                 proc.teamMembers.forEach((tm, srcIdx) => {
-                    if (tm && tm.name && !teamMembers.some(m => m.name.toLowerCase() === tm.name.toLowerCase())) {
+                    if (tm && tm.name && !teamMembers.some(m => this._mesmoMembro(m, tm))) {
                         teamMembers.push({
                             name: tm.name,
                             role: tm.categoria || tm.role || 'Membro da Equipe',
@@ -4049,7 +4183,7 @@ window.JCRDBTools = {
             const excludedCvKeys = Array.isArray(proc.excludedCvKeys) ? proc.excludedCvKeys : [];
             let teamRows = '';
             teamMembers.forEach((member, idx) => {
-                const memberCv = (cvData.allTeamCvs || cvData.groupMembers || []).find(cv => this.cvMatches(cv, member.name, member.lattesId));
+                const memberCv = this._acharPesquisador(cvData.allTeamCvs || cvData.groupMembers || [], member.name, member.lattesId);
                 const hasFullCvData = !!(memberCv && this.isFullCv(memberCv));
                 
                 const memberKey = member.lattesId || member.name;
@@ -4465,7 +4599,9 @@ window.JCRDBTools = {
         let navButtonsHTML = '';
         const ehRelatorioDeProposta = !!(parentGroupData && (parentGroupData.processId || parentGroupData.isProcesso));
         if (sortedDb && sortedDb.length > 1 && !cvData.name.startsWith('Grupo:') && !ehRelatorioDeProposta) {
-            const currentIndex = sortedDb.findIndex(cv => cv.name === cvData.name);
+            // o proprio objeto; senao o mesmo registro (nunca so o nome: homonimos)
+            let currentIndex = sortedDb.indexOf(cvData);
+            if (currentIndex === -1) currentIndex = sortedDb.findIndex(cv => this._mesmoRegistro(cv, cvData.name, cvData.lattesId, cvData.processId));
             if (currentIndex !== -1) {
                 const prevIndex = currentIndex > 0 ? currentIndex - 1 : sortedDb.length - 1;
                 const nextIndex = currentIndex < sortedDb.length - 1 ? currentIndex + 1 : 0;
@@ -4473,8 +4609,8 @@ window.JCRDBTools = {
                 const nextCv = sortedDb[nextIndex];
                 
                 navButtonsHTML = `
-                    <button id="btn-prev-cv" data-name="${this._esc(prevCv.name)}" style="padding: 8px 15px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="CV Anterior: ${this._esc(prevCv.name)}">⬅️ Anterior</button>
-                    <button id="btn-next-cv" data-name="${this._esc(nextCv.name)}" style="padding: 8px 15px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="Próximo CV: ${this._esc(nextCv.name)}">Próximo ➡️</button>
+                    <button id="btn-prev-cv" data-idx="${prevIndex}" style="padding: 8px 15px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="CV Anterior: ${this._esc(prevCv.name)}">⬅️ Anterior</button>
+                    <button id="btn-next-cv" data-idx="${nextIndex}" style="padding: 8px 15px; background: #95a5a6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="Próximo CV: ${this._esc(nextCv.name)}">Próximo ➡️</button>
                 `;
             }
         }
@@ -5637,8 +5773,7 @@ window.JCRDBTools = {
         const btnPrev = doc.getElementById('btn-prev-cv');
         if (btnPrev) {
             btnPrev.addEventListener('click', () => {
-                const name = btnPrev.getAttribute('data-name');
-                const nextCvData = sortedDb.find(cv => cv.name === name);
+                const nextCvData = sortedDb[parseInt(btnPrev.getAttribute('data-idx'), 10)];
                 if (nextCvData) this.renderCVReport(nextCvData, newTab, sortedDb, parentGroupData);
             });
         }
@@ -5646,8 +5781,7 @@ window.JCRDBTools = {
         const btnNext = doc.getElementById('btn-next-cv');
         if (btnNext) {
             btnNext.addEventListener('click', () => {
-                const name = btnNext.getAttribute('data-name');
-                const nextCvData = sortedDb.find(cv => cv.name === name);
+                const nextCvData = sortedDb[parseInt(btnNext.getAttribute('data-idx'), 10)];
                 if (nextCvData) this.renderCVReport(nextCvData, newTab, sortedDb, parentGroupData);
             });
         }
@@ -5724,7 +5858,8 @@ window.JCRDBTools = {
                 if (!btn) return;
                 const name = btn.getAttribute('data-name');
                 if (!name) return;
-                const memberData = sortedGroupMembers.find(cv => cv.name === name);
+                const memberData = sortedGroupMembers.find(cv =>
+                    this._mesmoRegistro(cv, name, btn.getAttribute('data-lattesid'), ''));
                 if (memberData) {
                     this.renderCVReport(memberData, newTab, sortedGroupMembers, cvData);
                 }
@@ -5925,6 +6060,25 @@ window.JCRDBTools = {
                     erroEl.style.display = 'block';
                     return;
                 }
+                // O ID Lattes identifica o membro: dois membros da equipe com o mesmo ID
+                // seriam a mesma pessoa duas vezes. Melhor recusar do que juntar sem
+                // perguntar. O proponente fica de fora: o PDF costuma lista-lo tambem na
+                // tabela da equipe, com o mesmo ID, e isso e esperado.
+                if (lattes && srcIdxAtual !== -1) {
+                    const outro = ((parentGroupData.teamMembers || []).find((m, i) =>
+                        i !== srcIdxAtual && m && this._idLattesValido(m.lattesId) === lattes) || {}).name;
+                    if (outro) {
+                        erroEl.textContent = `Este ID Lattes já é de "${outro}" nesta proposta. Remova um dos dois membros.`;
+                        erroEl.style.display = 'block';
+                        return;
+                    }
+                }
+
+                // como o membro estava antes da edicao (null numa inclusao)
+                const anterior = srcIdxAtual === -1 ? (parentGroupData.proponente || {})
+                    : (srcIdxAtual === null ? null : (parentGroupData.teamMembers || [])[srcIdxAtual]);
+                const idAnterior = anterior ? this._idLattesValido(anterior.lattesId || (srcIdxAtual === -1 ? parentGroupData.lattesId : '')) : '';
+                const nomeAnterior = anterior ? (anterior.name || '') : '';
 
                 const formacao = campo('formacao').value.trim();
                 const bolsa = campo('bolsa').value.trim() || '-';
@@ -5961,6 +6115,22 @@ window.JCRDBTools = {
                         // editado: true faz esta versao vencer numa reimportacao
                         parentGroupData.teamMembers[srcIdxAtual] =
                             Object.assign({}, parentGroupData.teamMembers[srcIdxAtual], dados, { editado: true });
+                    }
+                }
+
+                // ID Lattes novo: passa a ser o identificador do membro. As copias de CV
+                // dele (a que ja existe com esse ID e as sem ID com o nome dele) viram uma
+                // so, a versao mais nova; o CV guardado na proposta e a marca de "fora do
+                // consolidado" acompanham.
+                if (lattes && lattes !== idAnterior) {
+                    const nomes = [nomeAnterior, nome].filter(Boolean);
+                    try {
+                        const r = await this.unificarCvPorLattesId(nomes, lattes);
+                        await this._migrarMembroParaLattesId(parentGroupData, nomes, idAnterior, lattes);
+                        if (r && r.copias > 1) this.showToast(`${r.copias} cópias do CV de ${nome} foram unificadas pelo ID Lattes.`);
+                    } catch (e) {
+                        console.warn('[JCRLattes] Falha ao unificar o CV pelo ID Lattes:', e);
+                        this.showToast('O membro foi salvo, mas não foi possível unificar as cópias do CV: ' + e.message, '#e53935');
                     }
                 }
                 await persistir();
@@ -6013,6 +6183,11 @@ window.JCRDBTools = {
                         if (!Array.isArray(parentGroupData.removedMembers)) parentGroupData.removedMembers = [];
                         if (!parentGroupData.removedMembers.some(n => this._chaveMembro(n) === this._chaveMembro(removido.name))) {
                             parentGroupData.removedMembers.push(removido.name);
+                        }
+                        // e o ID: a extracao pode trazer o mesmo membro com o nome escrito de outro jeito
+                        const idRemovido = this._idLattesValido(removido.lattesId);
+                        if (idRemovido && parentGroupData.removedMembers.indexOf(idRemovido) === -1) {
+                            parentGroupData.removedMembers.push(idRemovido);
                         }
                     }
                     // limpa a marca de "desconsiderado no consolidado" do membro removido

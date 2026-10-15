@@ -521,14 +521,18 @@
         let propBolsa = '-'; // Do NOT extract proponente bolsa from PDF
         let propFormacao = page1PropFormacao || '';
 
-        // Match proponent against team members table strictly by normalized name match
+        // Acha o proponente na tabela da equipe pelo nome (o PDF nao traz o ID dele). Usa
+        // a regra de nomes do banco (_nomesCompativeis); a comparacao que havia aqui, por
+        // letras, casava "Ana Silva" com "Luciana Silva" e herdava o ID Lattes errado.
+        const DBn = window.JCRDBTools;
         const normPropName = normalizeName(propName);
         if (normPropName) {
-            const matchingTeamMember = teamMembers.find(m => {
-                if (!m.name) return false;
-                const normMName = normalizeName(m.name);
-                return normMName && (normMName === normPropName || normMName.includes(normPropName) || normPropName.includes(normMName));
-            });
+            const compativeis = (a, b) => (DBn && typeof DBn._nomesCompativeis === 'function')
+                ? DBn._nomesCompativeis(a, b) : normalizeName(a) === normalizeName(b);
+            const candidatos = teamMembers.filter(m => m.name && compativeis(m.name, propName));
+            const identico = candidatos.filter(m => normalizeName(m.name) === normPropName);
+            const matchingTeamMember = candidatos.length === 1 ? candidatos[0]
+                : (identico.length === 1 ? identico[0] : null);
 
             if (matchingTeamMember) {
                 if (matchingTeamMember.cvLink) propCvLink = matchingTeamMember.cvLink;

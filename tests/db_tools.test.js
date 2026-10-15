@@ -1033,7 +1033,8 @@ describe('_mesmoRegistro', () => {
         banco.findIndex(cv => B._mesmoRegistro(cv, name, lattesId, processId));
 
     test('o caso do bug: nome parecido antes no banco nao e escolhido', () => {
-        assert.strictEqual(B.cvMatches(banco[0], 'Maria Silva', '2222222222222222'), true);   // por isso caia na linha errada
+        // cvMatches aceitava (IDs diferentes, nomes parecidos): por isso caia na linha errada
+        assert.strictEqual(B.cvMatches(banco[0], 'Maria Silva', '2222222222222222'), false);
         assert.strictEqual(achar('Maria Silva', '2222222222222222'), 1);
     });
     test('lattesId manda, mesmo com o nome escrito de outro jeito', () => {
@@ -1058,5 +1059,248 @@ describe('_mesmoRegistro', () => {
     test('linha sem nome nem ids (botoes de grupo) nao casa nada', () => {
         assert.strictEqual(achar(null, null, null), -1);
         assert.strictEqual(achar('', '', ''), -1);
+    });
+});
+
+// Identidade de pesquisador. Regra: ID Lattes decide quando os dois lados tem; sem
+// ID, nome compativel por palavras (nunca por letras); numa lista, ambiguo = nada.
+describe('_nomesCompativeis', () => {
+    test('identico, ignorando caixa, acentos e pontuacao', () => {
+        assert.strictEqual(B._nomesCompativeis('José da Silva', 'JOSE DA SILVA'), true);
+    });
+    test('nomes do meio omitidos ou abreviados', () => {
+        assert.strictEqual(B._nomesCompativeis('Maria Silva', 'Maria José da Silva'), true);
+        assert.strictEqual(B._nomesCompativeis('Maria J. Silva', 'Maria José da Silva'), true);
+    });
+    test('sufixo de geracao nao atrapalha', () => {
+        assert.strictEqual(B._nomesCompativeis('João Souza Filho', 'João Souza'), true);
+        assert.strictEqual(B._nomesCompativeis('Carlos Lima Júnior', 'Carlos A. Lima'), true);
+    });
+    test('trecho de letras dentro de outro nome NAO e a mesma pessoa', () => {
+        assert.strictEqual(B._nomesCompativeis('Ana Silva', 'Luciana Silva'), false);
+        assert.strictEqual(B._nomesCompativeis('Silva', 'Maria Silva'), false);
+    });
+    test('nome a mais no comeco e outra pessoa', () => {
+        assert.strictEqual(B._nomesCompativeis('Maria Silva', 'Ana Maria Silva'), false);
+    });
+    test('sobrenome diferente e outra pessoa', () => {
+        assert.strictEqual(B._nomesCompativeis('Maria Silva', 'Maria Souza'), false);
+    });
+    test('vazio nao casa', () => {
+        assert.strictEqual(B._nomesCompativeis('', ''), false);
+        assert.strictEqual(B._nomesCompativeis(null, 'Ana Silva'), false);
+    });
+});
+
+describe('cvMatches: ID decide', () => {
+    test('IDs diferentes nunca casam, mesmo com nome identico', () => {
+        assert.strictEqual(B.cvMatches({ name: 'Ana Silva', lattesId: '1111111111111111' }, 'Ana Silva', '2222222222222222'), false);
+    });
+    test('IDs iguais casam, mesmo com nome escrito de outro jeito', () => {
+        assert.strictEqual(B.cvMatches({ name: 'A. Silva', lattesId: '1111111111111111' }, 'Ana Maria Silva', '1111111111111111'), true);
+    });
+    test('sem ID de um lado, vale o nome compativel', () => {
+        assert.strictEqual(B.cvMatches({ name: 'Maria José da Silva', lattesId: '1111111111111111' }, 'Maria Silva', ''), true);
+        assert.strictEqual(B.cvMatches({ name: 'Luciana Silva' }, 'Ana Silva', ''), false);
+    });
+});
+
+describe('_acharPesquisador', () => {
+    const lista = [
+        { name: 'Maria José da Silva', lattesId: '1111111111111111' },
+        { name: 'Maria Silva', lattesId: '2222222222222222' },
+        { name: 'Pedro Alves' },
+        { name: 'Pedro Henrique Alves' },
+        { name: 'Joana Lima', isProcesso: true, lattesId: '3333333333333333' }
+    ];
+
+    test('ID igual vence', () => {
+        assert.strictEqual(B._acharPesquisador(lista, 'qualquer', '2222222222222222'), lista[1]);
+    });
+    test('ID novo nao herda o registro de um nome parecido com outro ID', () => {
+        // o cenario em que salvar "Maria Silva" (id novo) apagava a "Maria José da Silva"
+        assert.strictEqual(B._acharPesquisador(lista, 'Maria Silva', '9999999999999999'), null);
+    });
+    test('sem ID e varios compativeis: fica o de nome identico', () => {
+        assert.strictEqual(B._acharPesquisador(lista, 'Pedro Alves', ''), lista[2]);
+    });
+    test('sem ID e varios compativeis sem nome identico: nenhum', () => {
+        assert.strictEqual(B._acharPesquisador(lista, 'Pedro H. Alves', ''), null);    // casa os dois Pedros
+        assert.strictEqual(B._acharPesquisador(lista, 'Maria S. Silva', ''), null);        // dois Marias
+    });
+    test('filtro e aplicado antes', () => {
+        assert.strictEqual(B._acharPesquisador(lista, 'Joana Lima', '3333333333333333', cv => !cv.isProcesso), null);
+    });
+    test('lista vazia ou ausente', () => {
+        assert.strictEqual(B._acharPesquisador(null, 'Ana', ''), null);
+    });
+});
+
+describe('_mesmoMembro', () => {
+    test('IDs decidem quando os dois tem', () => {
+        assert.strictEqual(B._mesmoMembro({ name: 'Ana', lattesId: '1' }, { name: 'Ana', lattesId: '2' }), false);
+        assert.strictEqual(B._mesmoMembro({ name: 'Ana', lattesId: '1' }, { name: 'A. B.', lattesId: '1' }), true);
+    });
+    test('sem ID, so nome identico (sem a regra aproximada)', () => {
+        assert.strictEqual(B._mesmoMembro({ name: 'Maria Silva' }, { name: 'MARIA SILVA', lattesId: '1' }), true);
+        assert.strictEqual(B._mesmoMembro({ name: 'Maria Silva' }, { name: 'Maria J. Silva' }), false);
+    });
+});
+
+// Ajuste manual com ID Lattes: o ID passa a ser o identificador principal do membro.
+describe('mesclarEquipe: ID Lattes como identificador', () => {
+    const ID = '1234567890123456';
+
+    test('membro corrigido a mao com ID casa com a extracao de mesmo ID e nome diferente', () => {
+        const r = B.mesclarEquipe(
+            [{ name: 'M. Silva', lattesId: ID }],
+            [{ name: 'Maria da Silva', lattesId: ID, editado: true }],
+            []);
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].name, 'Maria da Silva');
+    });
+
+    test('mesmo nome com IDs diferentes sao duas pessoas', () => {
+        const r = B.mesclarEquipe(
+            [{ name: 'Ana Souza', lattesId: '1111111111111111' }, { name: 'Ana Souza', lattesId: '2222222222222222' }],
+            [], []);
+        assert.strictEqual(r.length, 2);
+    });
+
+    test('a extracao sem ID ainda casa pelo nome com o membro que recebeu ID a mao', () => {
+        const r = B.mesclarEquipe(
+            [{ name: 'Maria da Silva' }],
+            [{ name: 'Maria da Silva', lattesId: ID, editado: true }],
+            []);
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].lattesId, ID);
+    });
+
+    test('ID corrigido a mao vence a extracao com o ID antigo do mesmo nome', () => {
+        const r = B.mesclarEquipe(
+            [{ name: 'Maria da Silva', lattesId: '9999999999999999' }],
+            [{ name: 'Maria da Silva', lattesId: ID, editado: true }],
+            []);
+        assert.strictEqual(r.length, 1);
+        assert.strictEqual(r[0].lattesId, ID);
+    });
+
+    test('removido a mao pelo ID nao volta, mesmo com o nome escrito de outro jeito', () => {
+        const r = B.mesclarEquipe([{ name: 'M. da Silva', lattesId: ID }], [], ['Maria da Silva', ID]);
+        assert.strictEqual(r.length, 0);
+    });
+
+    test('o mesmo ID repetido na extracao entra uma vez', () => {
+        const r = B.mesclarEquipe([{ name: 'Maria', lattesId: ID }, { name: 'Maria S.', lattesId: ID }], [], []);
+        assert.strictEqual(r.length, 1);
+    });
+});
+
+describe('_mesclarVersoesCv', () => {
+    test('vence a versao mais nova, e a mais velha so completa o que falta', () => {
+        const r = B._mesclarVersoesCv([
+            { name: 'Ana', hasFullCv: true, totalPapers: 10, formacao: 'Doutorado', dateAdded: '2025-01-01' },
+            { name: 'Ana Souza', hasFullCv: true, totalPapers: 12, dateAdded: '2026-05-01' }
+        ]);
+        assert.strictEqual(r.name, 'Ana Souza');
+        assert.strictEqual(r.totalPapers, 12);
+        assert.strictEqual(r.formacao, 'Doutorado');
+    });
+
+    test('CV completo vence esqueleto mais novo da importacao', () => {
+        const r = B._mesclarVersoesCv([
+            { name: 'Ana', hasFullCv: true, publications: [{ year: 2024 }], dateAdded: '2025-01-01' },
+            { name: 'Ana', hasFullCv: false, publications: [], bolsa: 'PQ 2', dateAdded: '2026-05-01' }
+        ]);
+        assert.strictEqual(r.publications.length, 1);
+        assert.strictEqual(r.bolsa, 'PQ 2');
+    });
+
+    test('IDs de grupo se somam sem repetir', () => {
+        const r = B._mesclarVersoesCv([
+            { name: 'A', customId: 'LAB1, LAB2', dateAdded: '2026-01-01' },
+            { name: 'A', customId: 'LAB2, PPG', dateAdded: '2025-01-01' }
+        ]);
+        assert.strictEqual(r.customId, 'LAB1, LAB2, PPG');
+    });
+
+    test('lista vazia', () => {
+        assert.strictEqual(B._mesclarVersoesCv([]), null);
+    });
+});
+
+describe('unificarCvPorLattesId', () => {
+    function comStorage(dados) {
+        const store = Object.assign({}, dados);
+        globalThis.chrome = {
+            runtime: { id: 'teste', lastError: null },
+            storage: { local: {
+                get: (_c, cb) => cb(Object.assign({}, store)),
+                set: (obj, cb) => { Object.assign(store, obj); cb(); },
+                remove: (c, cb) => { (Array.isArray(c) ? c : [c]).forEach(k => { delete store[k]; }); cb(); }
+            } }
+        };
+        return store;
+    }
+    const ID = '1234567890123456';
+
+    test('esqueleto sem ID e CV ja existente com o ID viram um so, na chave do ID', async () => {
+        const store = comStorage({
+            'jcr_picc_cv:nm:maria da silva': { name: 'Maria da Silva', hasFullCv: false, bolsa: 'PQ 1A', dateAdded: '2026-06-01' },
+            ['jcr_cv:id:' + ID]: { name: 'Maria da Silva', lattesId: ID, hasFullCv: true, publications: [{ year: 2024 }], customId: 'LAB', dateAdded: '2026-01-01' },
+            'jcr_cv:id:9999999999999999': { name: 'Maria da Silva', lattesId: '9999999999999999', hasFullCv: true }
+        });
+        const r = await B.unificarCvPorLattesId(['Maria da Silva'], ID);
+        assert.strictEqual(r.copias, 2);
+        const unico = store['jcr_picc_cv:id:' + ID];
+        assert.ok(unico);
+        assert.strictEqual(unico.lattesId, ID);
+        assert.strictEqual(unico.publications.length, 1);
+        assert.strictEqual(unico.bolsa, 'PQ 1A');
+        assert.strictEqual(unico.customId, 'LAB');
+        assert.strictEqual(unico.inGeneralDb, true);
+        assert.strictEqual(store['jcr_picc_cv:nm:maria da silva'], undefined);
+        assert.strictEqual(store['jcr_cv:id:' + ID], undefined);
+        // homonimo com outro ID nao e tocado
+        assert.ok(store['jcr_cv:id:9999999999999999']);
+    });
+
+    test('o nome antigo do membro tambem e procurado; nome so parecido nao', async () => {
+        const store = comStorage({
+            'jcr_picc_cv:nm:m silva': { name: 'M Silva', hasFullCv: false },
+            'jcr_picc_cv:nm:maria silva santos': { name: 'Maria Silva Santos', hasFullCv: false }
+        });
+        await B.unificarCvPorLattesId(['M Silva', 'Maria Silva'], ID);
+        assert.ok(store['jcr_picc_cv:id:' + ID]);
+        assert.strictEqual(store['jcr_picc_cv:nm:m silva'], undefined);
+        assert.ok(store['jcr_picc_cv:nm:maria silva santos']);
+    });
+
+    test('ID invalido nao faz nada', async () => {
+        const store = comStorage({ 'jcr_picc_cv:nm:ana': { name: 'Ana' } });
+        assert.strictEqual(await B.unificarCvPorLattesId(['Ana'], '123'), null);
+        assert.ok(store['jcr_picc_cv:nm:ana']);
+    });
+});
+
+describe('_migrarMembroParaLattesId', () => {
+    const ID = '1234567890123456';
+    test('HTML guardado pelo nome passa ao ID e a exclusao do consolidado acompanha', async () => {
+        const store = {
+            'jcr_proc_blob:P1': { 'memberCv_nm:maria silva': '<html>cv</html>', pdf: 'x' }
+        };
+        globalThis.chrome = {
+            runtime: { id: 'teste', lastError: null },
+            storage: { local: {
+                get: (_c, cb) => cb(Object.assign({}, store)),
+                set: (obj, cb) => { Object.assign(store, obj); cb(); }
+            } }
+        };
+        const proc = { processId: 'P1', excludedCvKeys: ['Maria Silva', 'Outro'] };
+        await B._migrarMembroParaLattesId(proc, ['Maria Silva'], '', ID);
+        assert.deepStrictEqual(proc.excludedCvKeys, ['Outro', ID]);
+        assert.strictEqual(store['jcr_proc_blob:P1']['memberCv_id:' + ID], '<html>cv</html>');
+        assert.strictEqual(store['jcr_proc_blob:P1']['memberCv_nm:maria silva'], undefined);
+        assert.strictEqual(store['jcr_proc_blob:P1'].pdf, 'x');
     });
 });
