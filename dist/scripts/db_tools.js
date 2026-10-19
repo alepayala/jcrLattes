@@ -2195,22 +2195,30 @@ window.JCRDBTools = {
             const cvPrefix = this.cvKeyPrefix || 'jcr_cv:';
             const procPrefix = this.procKeyPrefix || 'jcr_proc:';
             const piccCvPrefix = this.piccCvPrefix || 'jcr_picc_cv:';
+            const blobPrefix = this.procBlobPrefix || 'jcr_proc_blob:';
             const keysToRemove = new Set();
 
             Object.keys(allItems).forEach(k => {
                 const val = allItems[k];
+                // ATENCAO: 'jcr_proc_blob:' NAO comeca com 'jcr_proc:' — o separador do
+                // primeiro e '_', nao ':'. Por isso o blob precisa do seu proprio teste;
+                // sem ele sobrevivia aos dois botoes de limpar, e e justamente o que mais
+                // pesa no storage (PDF da proposta em base64, HTML dos pareceres, CV
+                // congelado e os CVs dos membros). Excluir uma proposta sozinha ja levava
+                // o blob junto (removeCVs); so a limpeza geral o esquecia.
                 const isProcKey = k.startsWith(procPrefix) || k.startsWith(cvPrefix + 'proc:');
+                const isBlobKey = k.startsWith(blobPrefix);
                 const isPiccCvKey = k.startsWith(piccCvPrefix);
                 const isCvKey = k.startsWith(cvPrefix);
 
                 if (isProcessoOnly) {
-                    if (isProcKey || isPiccCvKey) {
+                    if (isProcKey || isBlobKey || isPiccCvKey) {
                         keysToRemove.add(k);
                     } else if (val && typeof val === 'object') {
                         if (val.isProcesso || val.processId) keysToRemove.add(k);
                     }
                 } else {
-                    if (isProcKey || isPiccCvKey || isCvKey) {
+                    if (isProcKey || isBlobKey || isPiccCvKey || isCvKey) {
                         keysToRemove.add(k);
                     } else if (val && typeof val === 'object') {
                         if (val.isProcesso || val.processId || val.lattesId || val.publications) keysToRemove.add(k);

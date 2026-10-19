@@ -1319,3 +1319,56 @@ describe('_migrarMembroParaLattesId', () => {
         assert.strictEqual(store['jcr_proc_blob:P1'].pdf, 'x');
     });
 });
+
+// O conteudo pesado das propostas mora fora do registro, em jcr_proc_blob:<processId>:
+// PDF em base64, HTML dos pareceres, CV congelado e os CVs dos membros. Essa chave NAO
+// comeca com 'jcr_proc:' (o separador e '_', nao ':'), entao escapava dos dois botoes de
+// limpar e ficava no storage sem nenhuma forma de apagar.
+describe('clearDB apaga tambem os blobs das propostas', () => {
+    function comStorage() {
+        const store = {
+            'jcr_cv:id:1111111111111111': { name: 'CV pessoal', lattesId: '1111111111111111', publications: [] },
+            'jcr_picc_cv:id:2222222222222222': { name: 'CV de membro', lattesId: '2222222222222222' },
+            'jcr_proc:proc:404040': { name: 'Proposta', isProcesso: true, processId: '404040' },
+            'jcr_proc_blob:404040': { cvHtml: '<html>pesado</html>', pdfData: 'JVBERi0...' },
+            'jcr_lattes_settings': { highJcr: 7 }
+        };
+        globalThis.chrome = {
+            runtime: { id: 'teste', lastError: null },
+            storage: { local: {
+                get: (_c, cb) => cb(Object.assign({}, store)),
+                set: (o, cb) => { Object.assign(store, o); cb && cb(); },
+                remove: (c, cb) => { (Array.isArray(c) ? c : [c]).forEach(k => { delete store[k]; }); cb && cb(); }
+            } }
+        };
+        return store;
+    }
+
+    test('limpar as propostas leva o blob junto', async () => {
+        const store = comStorage();
+        await B.clearDB(true, true);            // silencioso, so propostas
+        assert.ok(!store['jcr_proc_blob:404040'], 'o blob tem de sair com a proposta');
+        assert.ok(!store['jcr_proc:proc:404040']);
+        assert.ok(!store['jcr_picc_cv:id:2222222222222222']);
+        // o banco pessoal nao e tocado por esse botao
+        assert.ok(store['jcr_cv:id:1111111111111111']);
+    });
+
+    test('limpar tudo leva o blob junto', async () => {
+        const store = comStorage();
+        await B.clearDB(true, false);           // silencioso, tudo
+        assert.ok(!store['jcr_proc_blob:404040'], 'o blob tem de sair na limpeza geral');
+        assert.ok(!store['jcr_cv:id:1111111111111111']);
+        assert.ok(!store['jcr_proc:proc:404040']);
+    });
+
+    // As configuracoes nao sao dados: limpar o banco nao pode zerar os limiares de JCR.
+    test('as configuracoes sobrevivem aos dois botoes', async () => {
+        const a = comStorage();
+        await B.clearDB(true, true);
+        assert.ok(a['jcr_lattes_settings']);
+        const b = comStorage();
+        await B.clearDB(true, false);
+        assert.ok(b['jcr_lattes_settings']);
+    });
+});
