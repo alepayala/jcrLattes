@@ -369,11 +369,13 @@ async function checkAndUpdateProponenteLattesId(nameLink, finalStats = null, sup
       piccCvData.cvCongelado = frozenUrl;
     }
 
-    // O CV completo vai para a base dedicada do piccTools (jcr_picc_cv:) e, por
-    // inGeneralDb, conta também como CV do banco geral — é uma cópia só, lida dos dois
-    // lados. Havia aqui uma segunda chamada, a saveCurrentCv (com v minúsculo), que
-    // pretendia gravar no banco geral: esse método não existe, então nunca rodou.
-    piccCvData.inGeneralDb = true;
+    // O CV completo vai para a base dedicada do piccTools (jcr_picc_cv:), e SÓ para ela.
+    //
+    // Esta função roda sozinha, toda vez que se abre no Lattes o CV de alguém que está
+    // numa proposta — tipicamente para alimentar a proposta, não para colecionar o CV.
+    // Por isso ela não marca inGeneralDb: quem decide que um CV entra na lista pessoal é
+    // saveCurrentCV, que só roda quando o usuário manda salvar (ou ligou o salvamento
+    // automático). Marcar aqui enchia o banco geral de membros de equipe.
     if (window.JCRDBTools.savePiccCV) {
       await window.JCRDBTools.savePiccCV(piccCvData);
     }

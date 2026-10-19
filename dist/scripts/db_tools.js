@@ -1696,13 +1696,19 @@ window.JCRDBTools = {
         }
 
         // Um pesquisador pode ser membro de uma proposta do piccTools e, ao mesmo tempo,
-        // ter o CV analisado no Lattes pelo usuario. O registro mora numa chave so
-        // (jcr_picc_cv:), para nao existirem duas copias que divergem, e aparece tambem
-        // aqui quando o campo inGeneralDb permite.
+        // ter o CV salvo pelo usuario. O registro mora numa chave so (jcr_picc_cv:), para
+        // nao existirem duas copias que divergem, e aparece tambem aqui quando foi salvo
+        // DE PROPOSITO — e so entao.
         //
-        // A ausencia do campo nao esconde nada: registros gravados antes dele entram se
-        // forem CVs de verdade. Ficam de fora apenas os esqueletos que a importacao da
-        // proposta cria (so nome, bolsa e formacao), que nunca estiveram no banco geral.
+        // `inGeneralDb === true` e a marca de "o usuario mandou salvar", posta apenas por
+        // saveCurrentCV. Ter o CV analisado nao basta: abrir no Lattes o CV de um membro
+        // de equipe analisa o curriculo para alimentar a proposta, e isso enchia a lista
+        // pessoal de gente que o usuario nunca pediu para colecionar.
+        //
+        // A ausencia do campo, portanto, esconde. Nao ha migracao a fazer: antes desta
+        // marca existir, um CV da base do piccTools NUNCA aparecia no banco geral — o
+        // saveCurrentCV apagava a copia de la —, entao exigir a marca devolve exatamente
+        // o que havia antes.
         if (!isProcessoOnly) {
             const jaNoGeral = new Set(db.map(cv => this._cvStorageKey(cv)));
             const piccPrefix = this.piccCvPrefix || 'jcr_picc_cv:';
@@ -1710,8 +1716,7 @@ window.JCRDBTools = {
                 if (!k.startsWith(piccPrefix)) return;
                 const cv = items[k];
                 if (!cv || cv.isProcesso || cv.processId) return;
-                if (cv.inGeneralDb === false) return;
-                if (cv.inGeneralDb !== true && !this.isFullCv(cv)) return;
+                if (cv.inGeneralDb !== true) return;
                 if (jaNoGeral.has(this._cvStorageKey(cv))) return;
                 // A chave real fica marcada fora da serializacao: quem gravar ou exportar
                 // o registro depois nao leva a marca junto.

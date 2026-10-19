@@ -735,9 +735,13 @@ describe('_filtrarPublicacoes', () => {
     });
 });
 
-// Um pesquisador pode ser membro de uma proposta do piccTools e ter o CV analisado
-// no Lattes. O registro fica numa chave so (jcr_picc_cv:) e aparece no banco geral
-// pelo campo inGeneralDb. Antes, ele sumia do geral.
+// Um pesquisador pode ser membro de uma proposta do piccTools e ter o CV salvo pelo
+// usuario. O registro fica numa chave so (jcr_picc_cv:) e aparece no banco geral
+// SOMENTE com inGeneralDb === true, a marca de "o usuario mandou salvar".
+//
+// Ter o CV analisado nao basta: abrir no Lattes o CV de um membro de equipe analisa o
+// curriculo para alimentar a proposta, e isso enchia a lista pessoal de gente que o
+// usuario nunca pediu para colecionar.
 describe('CV do piccTools visivel no banco geral', () => {
     // Stub minimo de chrome.storage.local sobre um objeto em memoria.
     function comStorage(dados) {
@@ -758,15 +762,26 @@ describe('CV do piccTools visivel no banco geral', () => {
         return store;
     }
 
-    const cvCompleto = (nome, id) => ({
+    // Salvo de proposito pelo usuario: leva a marca que saveCurrentCV poe.
+    const salvoDeProposito = (nome, id) => ({
+        name: nome, lattesId: id, hasFullCv: true, publications: [{ year: 2024 }], inGeneralDb: true
+    });
+    // Analisado so para alimentar a proposta: CV completo, mas sem a marca.
+    const soAnalisado = (nome, id) => ({
         name: nome, lattesId: id, hasFullCv: true, publications: [{ year: 2024 }]
     });
     const esqueleto = (nome, id) => ({
         name: nome, lattesId: id, hasFullCv: false, totalPapers: 0, papersWithJcr: 0
     });
 
-    test('CV completo que so existe no banco do picc aparece no geral', async () => {
-        comStorage({ 'jcr_picc_cv:id:1111111111111111': cvCompleto('Maria', '1111111111111111') });
+    // O caso que motivou a regra: membro de equipe com o CV analisado para a proposta.
+    test('CV analisado para a proposta NAO entra na lista pessoal', async () => {
+        comStorage({ 'jcr_picc_cv:id:1111111111111111': soAnalisado('Maria', '1111111111111111') });
+        assert.deepStrictEqual(await B.getDB(false), []);
+    });
+
+    test('CV salvo de proposito entra na lista pessoal', async () => {
+        comStorage({ 'jcr_picc_cv:id:1111111111111111': salvoDeProposito('Maria', '1111111111111111') });
         const db = await B.getDB(false);
         assert.strictEqual(db.length, 1);
         assert.strictEqual(db[0].name, 'Maria');
@@ -778,7 +793,7 @@ describe('CV do piccTools visivel no banco geral', () => {
     });
 
     test('inGeneralDb:false esconde o registro do banco geral', async () => {
-        const cv = cvCompleto('Ana', '3333333333333333');
+        const cv = salvoDeProposito('Ana', '3333333333333333');
         cv.inGeneralDb = false;
         comStorage({ 'jcr_picc_cv:id:3333333333333333': cv });
         assert.deepStrictEqual(await B.getDB(false), []);
@@ -793,15 +808,15 @@ describe('CV do piccTools visivel no banco geral', () => {
 
     test('nao duplica quando o mesmo CV esta nos dois bancos', async () => {
         comStorage({
-            'jcr_cv:id:5555555555555555': cvCompleto('Rita', '5555555555555555'),
-            'jcr_picc_cv:id:5555555555555555': cvCompleto('Rita', '5555555555555555')
+            'jcr_cv:id:5555555555555555': salvoDeProposito('Rita', '5555555555555555'),
+            'jcr_picc_cv:id:5555555555555555': salvoDeProposito('Rita', '5555555555555555')
         });
         assert.strictEqual((await B.getDB(false)).length, 1);
     });
 
     test('a proposta continua vendo so o seu banco', async () => {
         comStorage({
-            'jcr_picc_cv:id:6666666666666666': cvCompleto('Luis', '6666666666666666'),
+            'jcr_picc_cv:id:6666666666666666': salvoDeProposito('Luis', '6666666666666666'),
             'jcr_proc:proc:404040': { name: 'Projeto', isProcesso: true, processId: '404040' }
         });
         const propostas = await B.getDB(true);
@@ -811,7 +826,7 @@ describe('CV do piccTools visivel no banco geral', () => {
 
     test('excluir do geral nao apaga o CV de que a proposta depende', async () => {
         const chave = 'jcr_picc_cv:id:7777777777777777';
-        const store = comStorage({ [chave]: cvCompleto('Clara', '7777777777777777') });
+        const store = comStorage({ [chave]: salvoDeProposito('Clara', '7777777777777777') });
         const db = await B.getDB(false);
         await B.removeCVs(db);
         assert.ok(store[chave], 'o registro do picc tem de continuar no storage');
@@ -820,7 +835,7 @@ describe('CV do piccTools visivel no banco geral', () => {
     });
 
     test('a marca da chave do picc nao vai para o storage nem para o backup', async () => {
-        comStorage({ 'jcr_picc_cv:id:8888888888888888': cvCompleto('Ines', '8888888888888888') });
+        comStorage({ 'jcr_picc_cv:id:8888888888888888': salvoDeProposito('Ines', '8888888888888888') });
         const cv = (await B.getDB(false))[0];
         assert.strictEqual(cv._piccOnlyKey, 'jcr_picc_cv:id:8888888888888888');
         assert.ok(!Object.keys(cv).includes('_piccOnlyKey'));
@@ -834,7 +849,7 @@ describe('gravacao de CV emprestado do piccTools', () => {
     test('saveCVs grava de volta na chave de origem', async () => {
         const chave = 'jcr_picc_cv:id:9999999999999999';
         const store = {
-            [chave]: { name: 'Bruno', lattesId: '9999999999999999', hasFullCv: true, publications: [{ year: 2024 }] }
+            [chave]: { name: 'Bruno', lattesId: '9999999999999999', hasFullCv: true, publications: [{ year: 2024 }], inGeneralDb: true }
         };
         globalThis.chrome = {
             runtime: { id: 'teste', lastError: null },
