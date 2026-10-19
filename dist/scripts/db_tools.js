@@ -780,6 +780,8 @@ window.JCRDBTools = {
                 const instituicao = String((f && f.instituicao) || '').trim();
                 return {
                     nome: cv.name || '(sem nome)',
+                    // identifica a linha na reordenacao manual da matriz
+                    chave: String(cv.lattesId || '').trim() || (cv.name || ''),
                     artigos: artigosDe(cv),
                     coordenador: coordenador,
                     instituicao: instituicao
@@ -6340,12 +6342,43 @@ window.JCRDBTools = {
                 });
             }
 
-            const r = this._matrizCoautoria(cvData.groupMembers, fichas, anos, currentYear);
-            const gente = r.gente, m = r.m, n = gente.length;
+            ultimaMatriz = this._matrizCoautoria(cvData.groupMembers, fichas, anos, currentYear);
+            ultimaMatriz.anos = anos;
+            coautoriaGerada = true;
+            desenharMatrizCoautoria();
+        };
+
+        // Ordem manual (setas ao lado do nome): guardada no estado da aba pela chave de
+        // cada pesquisador, para sobreviver ao Atualizar e a troca do periodo. Quem nao
+        // estiver na ordem salva (CV novo no consolidado) vai para o fim, na ordem
+        // automatica.
+        let ultimaMatriz = null;
+        const ordemManualDe = (gente) => {
+            const salva = Array.isArray(state.coautoriaOrdem) ? state.coautoriaOrdem : null;
+            const idx = gente.map((_, i) => i);
+            if (!salva || salva.length === 0) return idx;
+            const pos = new Map(salva.map((k, p) => [k, p]));
+            return idx.sort((a, b) => {
+                const pa = pos.has(gente[a].chave) ? pos.get(gente[a].chave) : Infinity;
+                const pb = pos.has(gente[b].chave) ? pos.get(gente[b].chave) : Infinity;
+                return pa !== pb ? pa - pb : a - b;
+            });
+        };
+
+        const desenharMatrizCoautoria = () => {
+            if (!coautoriaContainer || !ultimaMatriz) return;
+            const r = ultimaMatriz, anos = r.anos;
+            const ordem = ordemManualDe(r.gente);
+            const manual = Array.isArray(state.coautoriaOrdem) && state.coautoriaOrdem.length > 0;
+            // o traco de grupo acompanha a ordem exibida: separa vizinhos de grupos diferentes
+            const gente = ordem.map((idx, pos) => Object.assign({}, r.gente[idx], {
+                primeiroDoGrupo: pos > 0 && r.gente[idx].grupo !== r.gente[ordem[pos - 1]].grupo
+            }));
+            const m = ordem.map(i => ordem.map(j => r.m[i][j]));
+            const n = gente.length;
 
             if (n < 2) {
                 coautoriaContainer.innerHTML = '<div style="color: #777; text-align: center; padding: 10px;">São necessários ao menos dois currículos no consolidado (fora técnicos e alunos) para montar a matriz.</div>';
-                coautoriaGerada = true;
                 return;
             }
 
@@ -6377,10 +6410,14 @@ window.JCRDBTools = {
                     : '';
                 // traco grosso onde comeca outro grupo de colaboracao
                 const separaGrupo = g.primeiroDoGrupo ? ' border-top: 2px solid #90CAF9;' : '';
+                const seta = (dir, simbolo, titulo, inativa) => inativa
+                    ? `<span style="display: inline-block; width: 14px; color: #E0E0E0; text-align: center;">${simbolo}</span>`
+                    : `<button type="button" data-coaut-mover="${i}" data-coaut-dir="${dir}" title="${titulo}" style="width: 14px; padding: 0; border: none; background: none; cursor: pointer; color: #1565C0; font-size: 0.9em; line-height: 1;">${simbolo}</button>`;
+                const setas = `<span class="no-print" style="margin-right: 4px;">${seta(-1, '▲', 'Subir na matriz', i === 0)}${seta(1, '▼', 'Descer na matriz', i === n - 1)}</span>`;
                 return `
                     <tr style="border-bottom: 1px solid #f0f0f0;${separaGrupo}${g.coordenador ? ` background: ${FUNDO_COORD};` : ''}">
                         <td style="padding: 4px 8px; text-align: right; color: #0D47A1; font-weight: bold;">${i + 1}</td>
-                        <td style="padding: 4px 8px; white-space: nowrap;${g.coordenador ? ' font-weight: bold;' : ''}">${selo}${this._esc(g.nome)}</td>
+                        <td style="padding: 4px 8px; white-space: nowrap;${g.coordenador ? ' font-weight: bold;' : ''}">${setas}${selo}${this._esc(g.nome)}</td>
                         <td style="padding: 4px 8px; text-align: center; color: #666; font-size: 0.85em;" title="Artigos identificados no período">${g.artigos.size}</td>
                         ${celulas}
                         <td style="padding: 4px 8px; text-align: center; border-left: 2px solid #90CAF9; font-weight: bold; color: #1B5E20;">${total}</td>
@@ -6391,7 +6428,9 @@ window.JCRDBTools = {
             coautoriaContainer.innerHTML = `
                 <div style="font-size: 0.85em; color: #777; margin-bottom: 10px;">
                     ${n} pesquisadores — ${r.pares} de ${totalPares} pares com artigo em comum (${periodo})${r.grupos > 1 ? `, em <strong>${r.grupos}</strong> grupos de colaboração` : ''}.
-                    As linhas estão agrupadas por colaboração, começando pelo coordenador; o traço horizontal separa um grupo do seguinte.
+                    ${manual
+                        ? 'As linhas estão na ordem definida à mão pelas setas; o traço horizontal separa vizinhos de grupos de colaboração diferentes. <button type="button" id="btn-coautoria-ordem-auto" class="no-print" style="padding: 0 6px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff; font-size: 0.95em;">Restaurar ordem automática</button>'
+                        : 'As linhas estão agrupadas por colaboração, começando pelo coordenador; o traço horizontal separa um grupo do seguinte. Use as setas ao lado do nome para reorganizar.'}
                     Contados por DOI e, na falta dele, por título e ano. Técnicos e alunos ficam de fora.
                     ${r.pares === 0 ? '<strong style="color:#E65100;">Nenhuma coautoria encontrada entre os currículos disponíveis.</strong>' : ''}
                 </div>
@@ -6408,8 +6447,30 @@ window.JCRDBTools = {
                     </thead>
                     <tbody>${linhas}</tbody>
                 </table>`;
-            coautoriaGerada = true;
         };
+
+        if (coautoriaContainer) {
+            coautoriaContainer.addEventListener('click', (e) => {
+                if (!ultimaMatriz) return;
+                if (e.target.closest('#btn-coautoria-ordem-auto')) {
+                    state.coautoriaOrdem = null;
+                    desenharMatrizCoautoria();
+                    return;
+                }
+                const btn = e.target.closest('[data-coaut-mover]');
+                if (!btn) return;
+                const de = parseInt(btn.dataset.coautMover, 10);
+                const para = de + parseInt(btn.dataset.coautDir, 10);
+                const chaves = ordemManualDe(ultimaMatriz.gente).map(i => ultimaMatriz.gente[i].chave);
+                if (isNaN(de) || para < 0 || para >= chaves.length) return;
+                [chaves[de], chaves[para]] = [chaves[para], chaves[de]];
+                // a ordem salva guarda tambem quem saiu do periodo atual, para voltar ao
+                // lugar quando o periodo mudar de novo
+                const anteriores = Array.isArray(state.coautoriaOrdem) ? state.coautoriaOrdem.filter(k => !chaves.includes(k)) : [];
+                state.coautoriaOrdem = chaves.concat(anteriores);
+                desenharMatrizCoautoria();
+            });
+        }
 
         if (headerCoautoria) {
             headerCoautoria.addEventListener('click', () => {
