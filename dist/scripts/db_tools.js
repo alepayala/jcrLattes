@@ -1626,6 +1626,13 @@ window.JCRDBTools = {
                         if (!salvos && this.reportFiltersCollapsed) {
                             this.reportCollapsed[this._chaveColapso('Limiares e Filtros')] = true;
                         }
+                        // "Limiares e Filtros" passou a abrir recolhido. Quem ja tinha o
+                        // bloco lembrado aberto recomeca recolhido uma vez (a marca abaixo
+                        // impede de repetir); dai em diante vale o que o usuario escolher.
+                        if (!this.reportCollapsed._filtrosRecolhidosPorPadrao) {
+                            this.reportCollapsed[this._chaveColapso('Limiares e Filtros')] = true;
+                            this.reportCollapsed._filtrosRecolhidosPorPadrao = true;
+                        }
                         this.dbPrintOrientation = result[this.settingsKey].dbPrintOrientation === 'portrait' ? 'portrait' : 'landscape';
                     }
                     resolve();
@@ -4774,7 +4781,8 @@ window.JCRDBTools = {
 
         // Renderiza ja com o estado salvo para nao haver salto de layout; o passe geral
         // logo apos o render confirma o mesmo valor.
-        const filtersCollapsed = (this.reportCollapsed || {})[this._chaveColapso('Limiares e Filtros')] === true;
+        // Sem estado salvo, o bloco abre recolhido.
+        const filtersCollapsed = (this.reportCollapsed || {})[this._chaveColapso('Limiares e Filtros')] !== false;
 
         // Linha-resumo dos filtros, impressa no lugar do bloco interativo
         const jcrHidden = [];
