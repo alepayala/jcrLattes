@@ -386,3 +386,59 @@ describe('_apelidosDoTexto', () => {
         assert.deepStrictEqual(L._apelidosDoTexto(null), []);
     });
 });
+
+// Casos tirados de CVs reais (Formação acadêmica/titulação).
+describe('titulacao', () => {
+    test('ano de "Ano de obtenção" quando existe', () => {
+        assert.deepStrictEqual(L._titulacaoDaEntrada('2014 - 2018',
+            'Doutorado em Física. Universidade Federal de Minas Gerais, UFMG, Brasil. Título: X, Ano de obtenção: 2018.'),
+            { nivel: 'D', ano: 2018 });
+        assert.deepStrictEqual(L._titulacaoDaEntrada('2012 - 2014', 'Mestrado em Física. UFMG. Título: Y, Ano de Obtenção: 2014.'),
+            { nivel: 'M', ano: 2014 });
+    });
+
+    test('sem "Ano de obtenção", o último ano da célula', () => {
+        assert.deepStrictEqual(L._titulacaoDaEntrada('2004 - 2008', 'Doutorado em Física. Universidade Estadual de Campinas.'),
+            { nivel: 'D', ano: 2008 });
+    });
+
+    test('em andamento e interrompida não contam', () => {
+        assert.strictEqual(L._titulacaoDaEntrada('2014', 'Mestrado em andamento em Física. UFC.'), null);
+        assert.strictEqual(L._titulacaoDaEntrada('2005 interrompida',
+            'Graduação interrompida em 2007 em Química. UFSM. Ano de interrupção: 2007'), null);
+    });
+
+    // Caso real: marcado "interrompido", mas com "Ano de obtenção" — concluiu.
+    test('"Ano de obtenção" vale mesmo com "interrompido"', () => {
+        assert.deepStrictEqual(L._titulacaoDaEntrada('2020 interrompida',
+            'Doutorado interrompido em 2023 em Física. UFRGS, Ano de obtenção: 2023.'), { nivel: 'D', ano: 2023 });
+    });
+
+    test('estudante em andamento fica com a titulação concluída anterior', () => {
+        const e = (anos, texto) => ({ anos, texto });
+        assert.deepStrictEqual(L._maiorTitulacao([
+            e('2023', 'Doutorado em andamento em Física. UFC.'),
+            e('2021 - 2023', 'Mestrado em Física. UFC. Título: X, Ano de Obtenção: 2023.')
+        ]), { nivel: 'M', ano: 2023 });
+    });
+
+    test('ensino médio, técnico e outros não são titulação', () => {
+        assert.strictEqual(L._titulacaoDaEntrada('2007 - 2009', 'Ensino Médio (2º grau). Escola X.'), null);
+        assert.strictEqual(L._titulacaoDaEntrada('2008 - 2010', 'Curso técnico/profissionalizante. CEFET.'), null);
+    });
+
+    test('a maior titulação vence; no mesmo nível, a primeira', () => {
+        const e = (anos, texto) => ({ anos, texto });
+        assert.deepStrictEqual(L._maiorTitulacao([
+            e('2011 - 2014', 'Graduação em Física.'),
+            e('2016 - 2018', 'Mestrado em Física.'),
+            e('2023 - 2024', 'Especialização em Dados.')
+        ]), { nivel: 'M', ano: 2018 });
+        assert.deepStrictEqual(L._maiorTitulacao([
+            e('2014 - 2015', 'Graduação em Engenharia Física.'),
+            e('2012 - 2017', 'Graduação em Engenharia Física.')
+        ]), { nivel: 'G', ano: 2015 });
+        assert.strictEqual(L._maiorTitulacao([e('2014', 'Mestrado em andamento em Física.')]), null);
+        assert.strictEqual(L._maiorTitulacao(null), null);
+    });
+});

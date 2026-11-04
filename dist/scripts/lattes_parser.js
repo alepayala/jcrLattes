@@ -579,8 +579,71 @@
         return candidatos.length > 0 ? _apelidosDoTexto(candidatos[0]) : [];
     }
 
+    // ------------------------------------------------------------------
+    // Formação acadêmica/titulação: a maior titulação concluída e o ano.
+    //
+    // Cada entrada tem a célula de anos ("2014 - 2018") e o texto ("Doutorado em
+    // Física. ... Ano de obtenção: 2018."). O ano vem de "Ano de obtenção" quando o
+    // Lattes o escreve — muitos CVs não escrevem — e, na falta dele, do último ano da
+    // célula. Entrada em andamento ou interrompida não conta — a menos que traga "Ano
+    // de obtenção": há CVs marcados "interrompido" de quem concluiu de fato (o Lattes
+    // grava a conclusão nesse campo; a interrupção vai em "Ano de interrupção").
+
+    const NIVEIS_TITULACAO = [
+        { nivel: 'D', re: /^doutorado\b/i },
+        { nivel: 'M', re: /^mestrado\b/i },
+        { nivel: 'E', re: /^especializa/i },
+        { nivel: 'G', re: /^gradua/i }
+    ];
+
+    // { nivel, ano } de uma entrada, ou null se ela não é titulação concluída.
+    function _titulacaoDaEntrada(celulaAnos, texto) {
+        const anos = String(celulaAnos || '').replace(/\s+/g, ' ').trim();
+        const t = String(texto || '').replace(/\s+/g, ' ').trim();
+        const n = NIVEIS_TITULACAO.find(x => x.re.test(t));
+        if (!n) return null;
+        const obtencao = t.match(/ano de obten\S*\s*:?\s*((?:19|20)\d{2})/i);
+        if (!obtencao && (/em andamento|interrompid/i.test(t) || /interrompid/i.test(anos))) return null;
+        const ano = obtencao ? parseInt(obtencao[1], 10) : _ultimoAno(anos);
+        return isNaN(ano) ? null : { nivel: n.nivel, ano: ano };
+    }
+
+    // A maior titulação entre as entradas ({ anos, texto }); no mesmo nível, a
+    // primeira obtida. null quando não há nenhuma concluída.
+    function _maiorTitulacao(entradas) {
+        let melhor = null;
+        const ordem = (nivel) => NIVEIS_TITULACAO.findIndex(x => x.nivel === nivel);
+        (Array.isArray(entradas) ? entradas : []).forEach(e => {
+            const tit = _titulacaoDaEntrada(e && e.anos, e && e.texto);
+            if (!tit) return;
+            if (!melhor || ordem(tit.nivel) < ordem(melhor.nivel)
+                || (tit.nivel === melhor.nivel && tit.ano < melhor.ano)) melhor = tit;
+        });
+        return melhor;
+    }
+
+    function lerTitulacao(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        if (!d) return null;
+        const ancora = Array.from(d.querySelectorAll('a[name]')).find(
+            a => a.getAttribute('name').toLowerCase() === 'formacaoacademicatitulacao');
+        if (!ancora) return null;
+        const bloco = ancora.closest('.title-wrapper') || ancora.parentElement;
+        if (!bloco) return null;
+        const entradas = [];
+        bloco.querySelectorAll('.layout-cell-3.text-align-right').forEach(celula => {
+            const corpo = celula.nextElementSibling;
+            if (!corpo || !corpo.classList.contains('layout-cell-9')) return;
+            entradas.push({ anos: celula.textContent, texto: corpo.textContent });
+        });
+        return _maiorTitulacao(entradas);
+    }
+
     raiz.JCRLattesParser = {
         AUTORES_GRANDE_COLABORACAO: AUTORES_GRANDE_COLABORACAO,
+        lerTitulacao: lerTitulacao,
+        _titulacaoDaEntrada: _titulacaoDaEntrada,
+        _maiorTitulacao: _maiorTitulacao,
         lerPublicacao: lerPublicacao,
         lerIdentificacao: lerIdentificacao,
         lerApelidos: lerApelidos,

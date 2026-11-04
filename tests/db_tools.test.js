@@ -944,6 +944,23 @@ describe('_indicadoresMembro', () => {
     });
 });
 
+// Coluna "Doutorado": o ano do doutorado, ou o da maior titulacao com o nivel.
+describe('_textoTitulacao', () => {
+    test('doutorado so com o ano, os demais niveis com a letra', () => {
+        assert.strictEqual(B._textoTitulacao({ nivel: 'D', ano: 2018 }), '2018');
+        assert.strictEqual(B._textoTitulacao({ nivel: 'M', ano: 2022 }), '2022 (M)');
+        assert.strictEqual(B._textoTitulacao({ nivel: 'G', ano: 2010 }), '2010 (G)');
+    });
+    test('CV salvo antes da coluna existir fica vazio', () => {
+        assert.strictEqual(B._textoTitulacao(undefined), '');
+        assert.strictEqual(B._textoTitulacao(null), '');
+    });
+    test('vai para a planilha na terceira coluna', () => {
+        const L = B._planilhaMembros([{ name: 'Ana', titulacao: { nivel: 'M', ano: 2014 } }], null, 2026, 7, 1.5);
+        assert.strictEqual(L[2][2], '2014 (M)');
+    });
+});
+
 describe('_planilhaMembros', () => {
     test('duas linhas de cabecalho, membros por nome, JCR com 2 casas', () => {
         const membros = [
@@ -952,15 +969,15 @@ describe('_planilhaMembros', () => {
         ];
         const L = B._planilhaMembros(membros, 5, 2025, 7, 1.5);
         assert.strictEqual(L.length, 4);
-        assert.strictEqual(L[0][2], 'Últimos 5 anos (2020–2025)');
+        assert.strictEqual(L[0][3], 'Últimos 5 anos (2020–2025)');
         assert.ok(L[0].includes('Carreira toda'));
-        assert.strictEqual(L[1].length, 16);
-        assert.strictEqual(L[1][15], 'CV Lattes');
-        assert.strictEqual(L[1][14], 'Atualizado');
-        assert.deepStrictEqual(L[1].slice(0, 3), ['Nome', 'Bolsa', 'Artigos']);
-        assert.deepStrictEqual(L[2].slice(0, 2), ['Ana', '']);
-        assert.deepStrictEqual(L[3].slice(0, 3), ['Bruno', 'PQ 2', 1]);
-        assert.strictEqual(L[3][7], 2.35);   // soma JCR
+        assert.strictEqual(L[1].length, 17);
+        assert.strictEqual(L[1][16], 'CV Lattes');
+        assert.strictEqual(L[1][15], 'Atualizado');
+        assert.deepStrictEqual(L[1].slice(0, 4), ['Nome', 'Bolsa', 'Doutorado', 'Artigos']);
+        assert.deepStrictEqual(L[2].slice(0, 3), ['Ana', '', '']);
+        assert.deepStrictEqual(L[3].slice(0, 4), ['Bruno', 'PQ 2', '', 1]);
+        assert.strictEqual(L[3][8], 2.35);   // soma JCR
     });
 });
 
@@ -994,8 +1011,8 @@ describe('_linhasMembros: ordenacao', () => {
     test('planilha segue a mesma ordem e leva a data como Date', () => {
         const L = B._planilhaMembros(membros, null, 2026, 7, 1.5, { chave: 'hWos', dir: -1 });
         assert.deepStrictEqual(L.slice(2).map(r => r[0]), ['Carla', 'ana', 'Bruno']);
-        assert.ok(L[2][14] instanceof Date);
-        assert.strictEqual(L[4][14], '');
+        assert.ok(L[2][15] instanceof Date);
+        assert.strictEqual(L[4][15], '');
     });
     test('direcao padrao: texto sobe, numero e data descem', () => {
         assert.strictEqual(B._direcaoPadraoMembros('texto'), 1);
@@ -1024,7 +1041,7 @@ describe('_planilhaMembros: link do CV Lattes', () => {
         const L = B._planilhaMembros([{ name: 'Ana', lattesId: '1234567890123456' }], null, 2026, 7, 1.5);
         const url = 'http://lattes.cnpq.br/1234567890123456';
         assert.deepStrictEqual(L[2][0], { texto: 'Ana', link: url });
-        assert.deepStrictEqual(L[2][15], { texto: url, link: url });
+        assert.deepStrictEqual(L[2][16], { texto: url, link: url });
     });
     test('sem lattesId (ou com lixo no campo) fica sem link', () => {
         const L = B._planilhaMembros([{ name: 'Ana' }, { name: 'Bia', lattesId: 'javascript:x' }], null, 2026, 7, 1.5);

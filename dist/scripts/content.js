@@ -93,6 +93,10 @@ async function main() {
   // check whether name and link were not found (if not this is not a CV Lattes!)
   if (!nameLink['name']) return;
 
+  // maior titulacao concluida e o ano ({ nivel: 'D'|'M'|'E'|'G', ano }), para a
+  // tabela de membros da equipe
+  nameLink.titulacao = window.JCRLattesParser.lerTitulacao(document);
+
   // Abort if this is the Capitcha page
   if (document.querySelector('.tituloCaptcha') || document.getElementById('idSecaoCaptcha')) {
     console.log('JCR Lattes: Captcha page detected. Aborting.');
@@ -324,6 +328,7 @@ async function checkAndUpdateProponenteLattesId(nameLink, finalStats = null, sup
         lattesId: lattesId,
         cvLink: nameLink.link || (lattesId ? `http://lattes.cnpq.br/${lattesId}` : ''),
         fellowshipString: cvBolsa || (nameLink.fellowshipString || ''),
+        titulacao: nameLink.titulacao || null,
         totalPapers: finalStats ? (finalStats.totalPapers || 0) : 0,
         papersWithJcr: finalStats ? (finalStats.papersWithJcr || 0) : 0,
         highJcrCount: finalStats ? (finalStats.highJcrCount || 0) : 0,

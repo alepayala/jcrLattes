@@ -556,6 +556,7 @@ window.JCRDBTools = {
         return [
             { chave: 'nome', rotulo: 'Nome', titulo: 'Nome do Pesquisador (link para o Lattes)', grupo: '', tipo: 'texto' },
             { chave: 'bolsa', rotulo: 'Bolsa', titulo: 'Bolsa e Nível', grupo: '', tipo: 'texto' },
+            { chave: 'titulacao', rotulo: 'Doutorado', titulo: 'Ano de obtenção do doutorado. Sem doutorado, o ano da maior titulação seguido do nível: (M) mestrado, (E) especialização, (G) graduação. Lido de "Formação acadêmica/titulação" ao salvar o CV.', grupo: '', tipo: 'texto' },
             { chave: 'artigos', rotulo: 'Artigos', titulo: 'Artigos completos publicados no período', grupo: 'periodo', tipo: 'num' },
             { chave: 'high', rotulo: `Alto (≥${alto})`, titulo: `Artigos com JCR ≥ ${alto}`, grupo: 'periodo', tipo: 'num', faixa: 'high' },
             { chave: 'mid', rotulo: `Médio (${baixo}–${alto})`, titulo: `Artigos com ${baixo} ≤ JCR < ${alto}`, grupo: 'periodo', tipo: 'num', faixa: 'mid' },
@@ -628,6 +629,7 @@ window.JCRDBTools = {
             const ind = this._indicadoresMembro(c, anos, anoAtual, alto, baixo);
             ind.nome = String(c.name || '');
             ind.bolsa = c.fellowshipString && c.fellowshipString !== '-' ? String(c.fellowshipString) : '';
+            ind.titulacao = this._textoTitulacao(c.titulacao);
             const d = c.dateAdded ? new Date(c.dateAdded) : null;
             ind.atualizado = d && !isNaN(d.getTime()) ? d : '';
             return { cv: c, ind };
@@ -666,6 +668,13 @@ window.JCRDBTools = {
             }).concat([link ? { texto: link, link } : '']);
         });
         return [grupo, cabecalho].concat(corpo);
+    },
+
+    // Maior titulacao como sai na tabela de membros: o doutorado so com o ano, os
+    // demais niveis com a letra depois ("2014 (M)"). Sem registro, ''.
+    _textoTitulacao: function (t) {
+        if (!t || !t.ano) return '';
+        return t.nivel === 'D' ? String(t.ano) : `${t.ano} (${t.nivel})`;
     },
 
     // Endereco do CV no Lattes, ou '' sem lattesId. O id e so digitos; qualquer outra
@@ -1561,6 +1570,7 @@ window.JCRDBTools = {
             scopusHIndex: stats.all.citations.scopus.hIndex,
             fellowshipText: nameLink.fellowshipText || '',
             fellowshipString: nameLink.fellowshipString || '',
+            titulacao: nameLink.titulacao || null,
             researcherIdLink: nameLink.researcherIdLink || '',
             ridHIndex: ridStats?.hIndex !== undefined && ridStats.hIndex !== null ? ridStats.hIndex : '',
             ridPublications: ridStats?.publications !== undefined && ridStats.publications !== null ? ridStats.publications : '',
