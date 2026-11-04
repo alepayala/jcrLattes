@@ -867,18 +867,42 @@ window.JCRReportUtils = {
     return this._normalizarAutoresDaReferencia(limpa, pub.paperTitle || pub.title);
   },
 
+  // Periodo dos seletores "Periodo (anos)" do relatorio — todos seguem esta regra.
+  // N = N anos completos mais o ano em curso, a definicao usada pelos editais: entram
+  // os itens com ano >= anoAtual - N. Zero e o ano corrente sozinho. Nao ha teto: um
+  // artigo ja datado do ano que vem entra sem ajuste. "Toda a carreira" e null (ou
+  // vazio): sem corte, e e o checkbox ao lado do campo que manda null.
+  inicioDoPeriodo: function (anos, anoAtual) {
+    if (anos === null || anos === undefined || anos === '') return null;
+    const n = parseInt(anos, 10);
+    if (isNaN(n)) return null;
+    const atual = parseInt(anoAtual, 10) || new Date().getFullYear();
+    return atual - Math.max(0, n);
+  },
+
+  // O periodo por extenso, para tooltip: "2021 em diante (5 anos completos + o atual)".
+  descricaoPeriodo: function (anos, anoAtual) {
+    const inicio = this.inicioDoPeriodo(anos, anoAtual);
+    if (inicio === null) return 'Toda a carreira';
+    const atual = parseInt(anoAtual, 10) || new Date().getFullYear();
+    const n = atual - inicio;
+    const conta = n === 0 ? 'só o ano atual' : `${n} ${n === 1 ? 'ano completo' : 'anos completos'} + o atual`;
+    return `${inicio} em diante (${conta})`;
+  },
+
   // Publicacoes do periodo, por ano decrescente e, dentro do ano, do maior JCR para o
   // menor.
   //
-  // `anosCorte` conta para TRAS a partir do ano atual, e o zero nao e atalho para "tudo":
-  // zero ano de recuo e o ano corrente sozinho. E o que o campo "Periodo (anos)" sempre
-  // fez no relatorio; para ver tudo, poe-se um numero grande. So um valor invalido (campo
-  // vazio) desliga o corte.
-  publicacoesAgrupadas: function (publicacoes, anosCorte, anoAtual) {
+  // `ordem` = 'jcr' ou 'citacoes' troca os blocos por ano por um bloco unico, do maior
+  // para o menor (citacoes: o maior entre WoS e Scopus, que contam quase os mesmos
+  // artigos — somar dobraria). Empates caem no ano mais recente. Qualquer outro valor
+  // e a ordem por ano.
+  //
+  // `anosCorte` segue inicioDoPeriodo: zero e o ano corrente sozinho, null e a
+  // carreira toda.
+  publicacoesAgrupadas: function (publicacoes, anosCorte, anoAtual, ordem) {
     const lista = Array.isArray(publicacoes) ? publicacoes : [];
-    const corte = parseInt(anosCorte, 10);
-    const atual = parseInt(anoAtual, 10) || new Date().getFullYear();
-    const anoInicial = isNaN(corte) ? null : atual - corte;
+    const anoInicial = this.inicioDoPeriodo(anosCorte, anoAtual);
 
     const noPeriodo = lista.filter(p => {
       if (!p) return false;
@@ -893,6 +917,20 @@ window.JCRReportUtils = {
       if (yB !== yA) return yB - yA;
       return (parseFloat(b.jif) || 0) - (parseFloat(a.jif) || 0);
     });
+
+    if (ordem === 'jcr' || ordem === 'citacoes') {
+      const jcr = p => parseFloat(p.jif) || 0;
+      const cit = p => Math.max(parseInt(p.wosCitations, 10) || 0, parseInt(p.scopusCitations, 10) || 0);
+      const [principal, secundario] = ordem === 'jcr' ? [jcr, cit] : [cit, jcr];
+      // sort estavel: o desempate final e a ordem por ano que ja saiu acima
+      noPeriodo.sort((a, b) => (principal(b) - principal(a)) || (secundario(b) - secundario(a)));
+      if (noPeriodo.length === 0) return [];
+      return [{
+        titulo: ordem === 'jcr' ? 'Por JCR (maior primeiro)' : 'Por citações (mais citadas primeiro)',
+        grupos: [{ titulo: '', itens: noPeriodo }],
+        total: noPeriodo.length
+      }];
+    }
 
     const porAno = new Map();
     noPeriodo.forEach(p => {
@@ -935,6 +973,8 @@ window.JCRReportUtils = {
   // Texto puro para colar num documento. Sem numeracao por padrao, pelo mesmo motivo da
   // lista de orientacoes: numero colado vira texto fixo e qualquer edicao obriga a
   // renumerar tudo a mao. `opcoes.numerar` liga a numeracao continua.
+  // `opcoes.reiniciar` recomeca a contagem a cada conjunto (o grupo mais interno), como
+  // na tela.
   publicacoesEmTexto: function (blocos, opcoes) {
     const o = opcoes || {};
     const numerar = !!o.numerar;
@@ -944,6 +984,7 @@ window.JCRReportUtils = {
       if (linhas.length > 0) linhas.push('');
       linhas.push(bloco.titulo);
       bloco.grupos.forEach(grupo => {
+        if (o.reiniciar) n = 0;
         if (grupo.titulo) linhas.push('  ' + grupo.titulo);
         grupo.itens.forEach(pub => {
           n++;
@@ -1144,9 +1185,7 @@ window.JCRReportUtils = {
       : (itens && Array.isArray(itens.raw) ? itens.raw : []);
 
     const porCategoria = String(ordem || 'ano').toLowerCase() === 'categoria';
-    const corte = parseInt(anosCorte, 10);
-    const atual = parseInt(anoAtual, 10) || new Date().getFullYear();
-    const anoInicial = isNaN(corte) ? null : atual - corte;
+    const anoInicial = this.inicioDoPeriodo(anosCorte, anoAtual);
 
     const vistos = new Map();
     const pares = [];
@@ -1249,12 +1288,14 @@ window.JCRReportUtils = {
   // formas de copiar; hoje nenhum caminho passa essa opcao.
   orientacoesEmTexto: function (blocos, opcoes) {
     const numerar = !!(opcoes && opcoes.numerar);
+    const reiniciar = !!(opcoes && opcoes.reiniciar);
     const linhas = [];
     let n = 0;
     (Array.isArray(blocos) ? blocos : []).forEach(bloco => {
       if (linhas.length > 0) linhas.push('');
       linhas.push(bloco.titulo);
       bloco.grupos.forEach(grupo => {
+        if (reiniciar) n = 0;
         linhas.push('  ' + grupo.titulo);
         grupo.itens.forEach(o => {
           n++;
@@ -2190,7 +2231,7 @@ ${htmlText}`;
   // diferente para o mesmo nome, sao periodicos distintos e ficam separados.
   agruparPorPeriodico: function (publications, yearsCutoff, currentYear) {
     const lista = Array.isArray(publications) ? publications : [];
-    const startYear = yearsCutoff > 0 ? currentYear - yearsCutoff : 0;
+    const startYear = this.inicioDoPeriodo(yearsCutoff, currentYear);   // null = carreira
 
     const stripName = (raw) => {
       let n = raw.trim();
@@ -2211,7 +2252,7 @@ ${htmlText}`;
     for (const pub of lista) {
       if (!pub.journalName) continue;
       const y = parseInt(pub.year, 10);
-      if (isNaN(y) || (yearsCutoff > 0 && y < startYear)) continue;
+      if (isNaN(y) || (startYear !== null && y < startYear)) continue;
       const stripped = stripName(pub.journalName);
       if (!stripped) continue;
       const lk = stripped.toLowerCase();
@@ -2360,7 +2401,6 @@ ${htmlText}`;
 
   generateJournalTableHTML: function(publications, yearsCutoff, minPapers, currentYear, highJcr, lowJcr) {
     const COLORS = this.COLORS;
-    const startYear = yearsCutoff > 0 ? currentYear - yearsCutoff : 0;
 
     const allJournals = this.agruparPorPeriodico(publications, yearsCutoff, currentYear);
 

@@ -265,7 +265,7 @@ describe('_matrizCoautoria', () => {
     ];
 
     test('conta os artigos em comum de cada par', () => {
-        const r = B._matrizCoautoria(equipe(), [], 0, 2026);
+        const r = B._matrizCoautoria(equipe(), [], null, 2026);
         assert.strictEqual(r.gente.length, 3);
         assert.strictEqual(r.m[0][1], 2);       // Ana e Bruno
         assert.strictEqual(r.m[0][2], 0);       // Ana e Carla
@@ -274,15 +274,15 @@ describe('_matrizCoautoria', () => {
     });
 
     test('a matriz e simetrica e tem diagonal zerada', () => {
-        const r = B._matrizCoautoria(equipe(), [], 0, 2026);
+        const r = B._matrizCoautoria(equipe(), [], null, 2026);
         for (let i = 0; i < r.gente.length; i++) {
             assert.strictEqual(r.m[i][i], 0);
             for (let j = 0; j < r.gente.length; j++) assert.strictEqual(r.m[i][j], r.m[j][i]);
         }
     });
 
-    test('anos = 0 considera toda a carreira', () => {
-        assert.strictEqual(B._matrizCoautoria(equipe(), [], 0, 2026).m[0][1], 2);
+    test('anos = null considera toda a carreira', () => {
+        assert.strictEqual(B._matrizCoautoria(equipe(), [], null, 2026).m[0][1], 2);
     });
 
     test('a janela de anos corta os artigos antigos', () => {
@@ -300,7 +300,7 @@ describe('_matrizCoautoria', () => {
             { name: 'Bruno', role: 'Técnico', formacao: 'Doutorado' },
             { name: 'Carla', role: 'Aluno', formacao: '' }
         ];
-        const r = B._matrizCoautoria(equipe(), fichas, 0, 2026);
+        const r = B._matrizCoautoria(equipe(), fichas, null, 2026);
         assert.deepStrictEqual(r.gente.map(g => g.nome), ['Ana']);
     });
 
@@ -310,12 +310,12 @@ describe('_matrizCoautoria', () => {
             { name: 'Bruno', role: 'Pesquisador', formacao: 'Mestrado' },
             { name: 'Carla', role: 'Pesquisador', formacao: '' }   // vem vazia do PDF
         ];
-        const r = B._matrizCoautoria(equipe(), fichas, 0, 2026);
+        const r = B._matrizCoautoria(equipe(), fichas, null, 2026);
         assert.deepStrictEqual(r.gente.map(g => g.nome), ['Ana', 'Carla']);
     });
 
     test('sem fichas (relatorio de grupo) ninguem e filtrado', () => {
-        assert.strictEqual(B._matrizCoautoria(equipe(), [], 0, 2026).gente.length, 3);
+        assert.strictEqual(B._matrizCoautoria(equipe(), [], null, 2026).gente.length, 3);
     });
 
     test('o coordenador vem primeiro, mesmo fora da ordem alfabetica', () => {
@@ -324,7 +324,7 @@ describe('_matrizCoautoria', () => {
             { name: 'Ana', role: 'Pesquisador', formacao: 'Doutorado' }
         ];
         const cvs = [cv('Ana', [P('10/a', 2020)]), cv('Zeca', [P('10/a', 2020)])];
-        const r = B._matrizCoautoria(cvs, fichas, 0, 2026);
+        const r = B._matrizCoautoria(cvs, fichas, null, 2026);
         assert.deepStrictEqual(r.gente.map(g => g.nome), ['Zeca', 'Ana']);
         assert.strictEqual(r.gente[0].coordenador, true);
         assert.strictEqual(r.gente[1].coordenador, false);
@@ -332,7 +332,7 @@ describe('_matrizCoautoria', () => {
 
     test('"Coordenador" tambem marca, nao so "Proponente"', () => {
         const fichas = [{ name: 'Zeca', role: 'Coordenador do projeto', formacao: '' }];
-        const r = B._matrizCoautoria([cv('Ana', []), cv('Zeca', [])], fichas, 0, 2026);
+        const r = B._matrizCoautoria([cv('Ana', []), cv('Zeca', [])], fichas, null, 2026);
         assert.strictEqual(r.gente[0].nome, 'Zeca');
         assert.strictEqual(r.gente[0].coordenador, true);
     });
@@ -348,7 +348,7 @@ describe('_matrizCoautoria', () => {
             cv('Coord', [P('c1', 2024), P('c2', 2024)])
         ];
         const fichas = [{ name: 'Coord', role: 'Proponente', formacao: 'Doutorado' }];
-        const r = B._matrizCoautoria(cvs, fichas, 0, 2026);
+        const r = B._matrizCoautoria(cvs, fichas, null, 2026);
 
         assert.strictEqual(r.gente[0].nome, 'Coord');            // coordenador abre
         assert.strictEqual(r.grupos, 3);
@@ -363,7 +363,7 @@ describe('_matrizCoautoria', () => {
 
     test('marca onde comeca cada grupo, e nao a primeira linha', () => {
         const cvs = [cv('Ana', [P('a', 2024)]), cv('Bia', [P('b', 2024)])];
-        const r = B._matrizCoautoria(cvs, [], 0, 2026);
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
         assert.strictEqual(r.gente[0].primeiroDoGrupo, false);   // a primeira nunca separa
         assert.strictEqual(r.gente[1].primeiroDoGrupo, true);    // sem colaboracao: outro grupo
     });
@@ -374,7 +374,7 @@ describe('_matrizCoautoria', () => {
             cv('Ana',  [P('p1', 2024)]),
             cv('Bia',  [P('p2', 2024)])
         ];
-        const r = B._matrizCoautoria(cvs, [], 0, 2026);
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
         const idx = (nome) => r.gente.findIndex(g => g.nome === nome);
         assert.strictEqual(r.m[idx('Zeca')][idx('Ana')], 1);
         assert.strictEqual(r.m[idx('Zeca')][idx('Bia')], 1);
@@ -395,7 +395,7 @@ describe('_matrizCoautoria', () => {
             cv('Bruno',  [P('p2', 2024)])
         ];
         const fichas = [{ name: 'Zeca', role: 'Proponente', formacao: 'Doutorado' }];
-        const r = B._matrizCoautoria(cvs, fichas, 0, 2026);
+        const r = B._matrizCoautoria(cvs, fichas, null, 2026);
         assert.strictEqual(r.gente[0].nome, 'Zeca');
         assert.strictEqual(r.gente[1].nome, 'Yara');
     });
@@ -406,7 +406,7 @@ describe('_matrizCoautoria', () => {
             cv('Ana',   [P('p1', 2024)]),
             cv('Bruno', [P('p2', 2024), P('p1', 2024)])
         ];
-        const r = B._matrizCoautoria(cvs, [], 0, 2026);
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
         assert.strictEqual(r.grupos, 1);
         // com um grupo unico nenhuma linha carrega separador
         assert.ok(r.gente.every(g => g.primeiroDoGrupo === false));
@@ -418,7 +418,7 @@ describe('_matrizCoautoria', () => {
             cv('Bia',  [P('p1', 2024), P('p2', 2024)]),
             cv('Caio', [P('p2', 2024)])
         ];
-        const r = B._matrizCoautoria(cvs, [], 0, 2026);
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
         assert.strictEqual(r.gente[0].nome, 'Bia');   // 2 colaboracoes, contra 1 dos outros
     });
 
@@ -427,32 +427,32 @@ describe('_matrizCoautoria', () => {
             { name: 'Ana', role: 'Pesquisador', formacao: 'Doutorado', instituicao: 'UFPA' },
             { name: 'Zeca', role: 'Proponente', formacao: 'Doutorado', instituicao: 'UFMG' }
         ];
-        const r = B._matrizCoautoria([cv('Ana', []), cv('Zeca', [])], fichas, 0, 2026);
+        const r = B._matrizCoautoria([cv('Ana', []), cv('Zeca', [])], fichas, null, 2026);
         assert.strictEqual(r.gente[0].instituicao, 'UFMG');   // Zeca, coordenador, vem primeiro
         assert.strictEqual(r.gente[1].instituicao, 'UFPA');
     });
 
     test('sem ficha correspondente a instituicao fica vazia', () => {
-        const r = B._matrizCoautoria([cv('Ana', [])], [], 0, 2026);
+        const r = B._matrizCoautoria([cv('Ana', [])], [], null, 2026);
         assert.strictEqual(r.gente[0].instituicao, '');
     });
 
     test('sem coordenador identificado, a ordem e so alfabetica', () => {
         const fichas = [{ name: 'Zeca', role: 'Pesquisador', formacao: '' }];
-        const r = B._matrizCoautoria([cv('Zeca', []), cv('Ana', [])], fichas, 0, 2026);
+        const r = B._matrizCoautoria([cv('Zeca', []), cv('Ana', [])], fichas, null, 2026);
         assert.deepStrictEqual(r.gente.map(g => g.nome), ['Ana', 'Zeca']);
         assert.ok(r.gente.every(g => g.coordenador === false));
     });
 
     test('os nomes saem em ordem alfabetica', () => {
         const fora = [cv('Zeca', [P('10/a', 2020)]), cv('Ana', [P('10/a', 2020)])];
-        assert.deepStrictEqual(B._matrizCoautoria(fora, [], 0, 2026).gente.map(g => g.nome), ['Ana', 'Zeca']);
+        assert.deepStrictEqual(B._matrizCoautoria(fora, [], null, 2026).gente.map(g => g.nome), ['Ana', 'Zeca']);
     });
 
     test('lista vazia ou com um so CV nao quebra', () => {
-        assert.strictEqual(B._matrizCoautoria([], [], 0, 2026).gente.length, 0);
-        assert.strictEqual(B._matrizCoautoria(null, null, 0, 2026).gente.length, 0);
-        const um = B._matrizCoautoria([cv('Ana', [P('10/a', 2020)])], [], 0, 2026);
+        assert.strictEqual(B._matrizCoautoria([], [], null, 2026).gente.length, 0);
+        assert.strictEqual(B._matrizCoautoria(null, null, null, 2026).gente.length, 0);
+        const um = B._matrizCoautoria([cv('Ana', [P('10/a', 2020)])], [], null, 2026);
         assert.strictEqual(um.pares, 0);
     });
 });
@@ -890,8 +890,8 @@ describe('_indicadoresMembro', () => {
         wosCitations: 48
     };
 
-    test('carreira toda (anos = 0)', () => {
-        const r = B._indicadoresMembro(cv, 0, 2025, 7, 1.5);
+    test('carreira toda (anos = null)', () => {
+        const r = B._indicadoresMembro(cv, null, 2025, 7, 1.5);
         assert.strictEqual(r.artigos, 5);
         assert.deepStrictEqual([r.high, r.mid, r.low, r.noJcr], [2, 1, 1, 1]);
         assert.strictEqual(r.somaJcr, 19);
@@ -917,14 +917,14 @@ describe('_indicadoresMembro', () => {
 
     test('registro antigo sem wosHIndex recalcula das citacoes por artigo', () => {
         const antigo = { publications: cv.publications };
-        const r = B._indicadoresMembro(antigo, 0, 2025, 7, 1.5);
+        const r = B._indicadoresMembro(antigo, null, 2025, 7, 1.5);
         assert.strictEqual(r.hWos, 3);   // 30, 10, 5, 2, 1
         assert.strictEqual(r.citacoesWos, 48);
     });
 
     test('sem os anos das orientacoes, usa o total guardado so na carreira toda', () => {
         const semAnos = { totalPhdOrientations: 4, totalMscOrientations: 2, totalPatents: 1 };
-        const toda = B._indicadoresMembro(semAnos, 0, 2025, 7, 1.5);
+        const toda = B._indicadoresMembro(semAnos, null, 2025, 7, 1.5);
         assert.deepStrictEqual([toda.doutorados, toda.mestrados, toda.patentes], [4, 2, 1]);
         const periodo = B._indicadoresMembro(semAnos, 5, 2025, 7, 1.5);
         assert.deepStrictEqual([periodo.doutorados, periodo.mestrados, periodo.patentes], [0, 0, 0]);
@@ -932,9 +932,9 @@ describe('_indicadoresMembro', () => {
 
     test('item sem ano so entra na carreira toda; media sem JCR e zero', () => {
         const c = { publications: [{ jif: 0 }, { year: 'x', jif: 0 }] };
-        assert.strictEqual(B._indicadoresMembro(c, 0, 2025, 7, 1.5).artigos, 2);
+        assert.strictEqual(B._indicadoresMembro(c, null, 2025, 7, 1.5).artigos, 2);
         assert.strictEqual(B._indicadoresMembro(c, 5, 2025, 7, 1.5).artigos, 0);
-        assert.strictEqual(B._indicadoresMembro(c, 0, 2025, 7, 1.5).mediaJcr, 0);
+        assert.strictEqual(B._indicadoresMembro(c, null, 2025, 7, 1.5).mediaJcr, 0);
     });
 
     test('CV vazio nao quebra', () => {
@@ -970,7 +970,7 @@ describe('_linhasMembros: ordenacao', () => {
         { name: 'ana', fellowshipString: '-', dateAdded: '2026-05-01T12:00:00Z', publications: [{ year: 2024, jif: 9 }, { year: 2023, jif: 1 }], wosHIndex: 5 },
         { name: 'Bruno', fellowshipString: 'PQ 2', publications: [{ year: 2024, jif: 2 }], wosHIndex: 5 }
     ];
-    const nomes = (ordem) => B._linhasMembros(membros, 0, 2026, 7, 1.5, ordem).map(l => l.cv.name);
+    const nomes = (ordem) => B._linhasMembros(membros, null, 2026, 7, 1.5, ordem).map(l => l.cv.name);
 
     test('sem ordem sai por nome, ignorando caixa', () => {
         assert.deepStrictEqual(nomes(), ['ana', 'Bruno', 'Carla']);
@@ -992,7 +992,7 @@ describe('_linhasMembros: ordenacao', () => {
         assert.deepStrictEqual(nomes({ chave: 'xyz', dir: -1 }), ['ana', 'Bruno', 'Carla']);
     });
     test('planilha segue a mesma ordem e leva a data como Date', () => {
-        const L = B._planilhaMembros(membros, 0, 2026, 7, 1.5, { chave: 'hWos', dir: -1 });
+        const L = B._planilhaMembros(membros, null, 2026, 7, 1.5, { chave: 'hWos', dir: -1 });
         assert.deepStrictEqual(L.slice(2).map(r => r[0]), ['Carla', 'ana', 'Bruno']);
         assert.ok(L[2][14] instanceof Date);
         assert.strictEqual(L[4][14], '');
@@ -1013,20 +1013,21 @@ describe('_explicacaoPeriodoMembros', () => {
     test('singular com 1 ano', () => {
         assert.ok(B._explicacaoPeriodoMembros(1, 2026).startsWith('1 ano completo (2025) mais o ano em curso (2026)'));
     });
-    test('0 e a carreira toda', () => {
-        assert.ok(B._explicacaoPeriodoMembros(0, 2026).startsWith('Toda a carreira'));
+    test('null e a carreira toda; 0 e so o ano em curso', () => {
+        assert.ok(B._explicacaoPeriodoMembros(null, 2026).startsWith('Toda a carreira'));
+        assert.ok(B._explicacaoPeriodoMembros(0, 2026).startsWith('Só o ano em curso (2026)'));
     });
 });
 
 describe('_planilhaMembros: link do CV Lattes', () => {
     test('nome com link e coluna CV Lattes no fim', () => {
-        const L = B._planilhaMembros([{ name: 'Ana', lattesId: '1234567890123456' }], 0, 2026, 7, 1.5);
+        const L = B._planilhaMembros([{ name: 'Ana', lattesId: '1234567890123456' }], null, 2026, 7, 1.5);
         const url = 'http://lattes.cnpq.br/1234567890123456';
         assert.deepStrictEqual(L[2][0], { texto: 'Ana', link: url });
         assert.deepStrictEqual(L[2][15], { texto: url, link: url });
     });
     test('sem lattesId (ou com lixo no campo) fica sem link', () => {
-        const L = B._planilhaMembros([{ name: 'Ana' }, { name: 'Bia', lattesId: 'javascript:x' }], 0, 2026, 7, 1.5);
+        const L = B._planilhaMembros([{ name: 'Ana' }, { name: 'Bia', lattesId: 'javascript:x' }], null, 2026, 7, 1.5);
         assert.strictEqual(L[2][0], 'Ana');
         assert.strictEqual(L[2][15], '');
         assert.strictEqual(L[3][0], 'Bia');

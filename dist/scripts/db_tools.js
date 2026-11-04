@@ -488,13 +488,12 @@ window.JCRDBTools = {
     // patentes); indice H e citacoes WoS sao SEMPRE da carreira inteira, como estao
     // no CV — um indice H "do periodo" nao seria o numero que o revisor conhece.
     //
-    // anos = 0 (ou vazio) considera toda a carreira, como na Matriz de Coautoria.
-    // Com periodo, entram os anos >= anoAtual - anos: a mesma janela das outras listas.
-    // Item sem ano so entra quando o periodo e a carreira toda.
+    // O periodo segue JCRReportUtils.inicioDoPeriodo, como todas as listas: entram os
+    // anos >= anoAtual - anos (0 = so o ano corrente) e null e a carreira toda. Item
+    // sem ano so entra quando o periodo e a carreira toda.
     _indicadoresMembro: function (cv, anos, anoAtual, alto, baixo) {
         const c = cv || {};
-        const janela = Number(anos) || 0;
-        const corte = janela > 0 ? ((Number(anoAtual) || new Date().getFullYear()) - janela) : null;
+        const corte = window.JCRReportUtils.inicioDoPeriodo(anos, anoAtual);
         const noPeriodo = (ano) => {
             if (corte === null) return true;
             const y = parseInt(ano, 10);
@@ -574,20 +573,23 @@ window.JCRDBTools = {
     },
 
     _rotuloPeriodoMembros: function (anos, anoAtual) {
-        const janela = Number(anos) || 0;
-        if (janela <= 0) return 'Toda a carreira';
+        const inicio = window.JCRReportUtils.inicioDoPeriodo(anos, anoAtual);
+        if (inicio === null) return 'Toda a carreira';
         const atual = Number(anoAtual) || new Date().getFullYear();
-        return `Últimos ${janela} ${janela === 1 ? 'ano' : 'anos'} (${atual - janela}–${atual})`;
+        const janela = atual - inicio;
+        if (janela === 0) return `Ano atual (${atual})`;
+        return `Últimos ${janela} ${janela === 1 ? 'ano' : 'anos'} (${inicio}–${atual})`;
     },
 
     // Texto do tooltip que explica a conta do periodo: N anos completos mais o ano
     // em curso, que e a mesma janela das outras listas do relatorio.
     _explicacaoPeriodoMembros: function (anos, anoAtual) {
-        const janela = Number(anos) || 0;
         const fixo = 'Índice H e citações WoS não dependem do período: são sempre da carreira toda.';
-        if (janela <= 0) return `Toda a carreira: entram todos os artigos, orientações e patentes, inclusive os sem ano. ${fixo}`;
+        const inicio = window.JCRReportUtils.inicioDoPeriodo(anos, anoAtual);
+        if (inicio === null) return `Toda a carreira: entram todos os artigos, orientações e patentes, inclusive os sem ano. ${fixo}`;
         const atual = Number(anoAtual) || new Date().getFullYear();
-        const inicio = atual - janela;
+        const janela = atual - inicio;
+        if (janela === 0) return `Só o ano em curso (${atual}): entram os itens com ano ≥ ${inicio}. Itens sem ano ficam de fora. ${fixo}`;
         const completos = janela === 1 ? `1 ano completo (${inicio})` : `${janela} anos completos (${inicio}–${atual - 1})`;
         return `${completos} mais o ano em curso (${atual}): entram os itens com ano ≥ ${inicio}. Itens sem ano ficam de fora. ${fixo}`;
     },
@@ -751,10 +753,9 @@ window.JCRDBTools = {
             return this._ehDoutorDaEquipe(f);
         };
 
-        // 0 significa sem corte. Difere da Lista de Publicacoes, onde 0 deixa so o ano
-        // corrente: numa matriz de colaboracao o util por omissao e a carreira inteira.
-        const janela = Number(anos) || 0;
-        const corte = janela > 0 ? ((Number(anoAtual) || new Date().getFullYear()) - janela) : null;
+        // Mesma regra de periodo das listas (JCRReportUtils.inicioDoPeriodo): null e a
+        // carreira toda, que e o padrao do relatorio para a matriz.
+        const corte = window.JCRReportUtils.inicioDoPeriodo(anos, anoAtual);
 
         const artigosDe = (cv) => {
             const chaves = new Set();
@@ -3825,7 +3826,9 @@ window.JCRDBTools = {
     // `linhaHTML(item, n)`, que sabe desenhar um item — é a única parte que difere entre
     // as duas listas. Grupo sem título não vira subtítulo: é o caso das publicações, que
     // não têm segundo nível.
-    _listaEmBlocosHTML: function (blocos, linhaHTML, rotuloTotal) {
+    // `reiniciar` recomeca a numeracao a cada conjunto: o grupo com titulo (categoria)
+    // ou, sem ele, o bloco (ano).
+    _listaEmBlocosHTML: function (blocos, linhaHTML, rotuloTotal, reiniciar) {
         const rotulo = rotuloTotal || 'item(ns)';
         let n = 0;
         let html = '';
@@ -3839,6 +3842,7 @@ window.JCRDBTools = {
                 <div class="jcr-bloco-content" style="padding: 12px; border: 1px solid #ccc; border-top: none; background: #fff; display: block; border-radius: 0 0 4px 4px;">`;
 
             bloco.grupos.forEach(grupo => {
+                if (reiniciar) n = 0;
                 if (grupo.titulo) {
                     html += `<div style="font-weight: bold; color: #37474F; margin: 4px 0 6px;">${this._esc(grupo.titulo)} <span style="font-weight: normal; color: #777;">(${grupo.itens.length})</span></div>`;
                 }
@@ -3870,6 +3874,68 @@ window.JCRDBTools = {
         });
     },
 
+    // Campo "Periodo (anos)" das secoes do relatorio, todos com a mesma regra
+    // (JCRReportUtils.inicioDoPeriodo): N anos completos + o atual, 0 = so o ano
+    // atual, e "Toda a carreira" num checkbox ao lado, que desliga o numero. O tooltip
+    // mostra o periodo por extenso. Na impressao sai o numero ou "toda a carreira".
+    _seletorPeriodoHTML: function (id, anos, carreira, anoAtual) {
+        const titulo = window.JCRReportUtils.descricaoPeriodo(carreira ? null : anos, anoAtual);
+        return `<span class="jcr-periodo${carreira ? ' carreira' : ''}" title="${this._esc(titulo)}">Período (anos): <input type="number" id="${id}" value="${this._esc(String(anos))}" min="0" style="width: 50px; padding: 2px;"${carreira ? ' disabled' : ''}>
+            <label class="no-print" style="cursor: pointer;"><input type="checkbox" id="${id}-carreira"${carreira ? ' checked' : ''}> Toda a carreira</label><span class="somente-impressao jcr-periodo-carreira-txt" style="display: none;">toda a carreira</span></span>`;
+    },
+
+    // Liga um campo de _seletorPeriodoHTML. Nao ha botao Atualizar: o tooltip
+    // acompanha o numero e a secao se refaz sozinha (aoMudar) — na hora ao marcar a
+    // carreira, e com um pequeno atraso ao mexer no numero, para nao recalcular a cada
+    // clique nas setas. Campo vazio (apagando para digitar outro) nao dispara nada.
+    // Devolve o leitor do campo: { anos, carreira, valor }, com valor = null na
+    // carreira toda (o que os calculos esperam).
+    _ligarSeletorPeriodo: function (doc, id, anoAtual, aoMudar) {
+        const inp = doc.getElementById(id);
+        const chk = doc.getElementById(id + '-carreira');
+        const caixa = inp && typeof inp.closest === 'function' ? inp.closest('.jcr-periodo') : null;
+        const ler = () => {
+            const v = parseInt(inp && inp.value, 10);
+            const anos = isNaN(v) || v < 0 ? 0 : v;
+            const carreira = !!(chk && chk.checked);
+            return { anos: anos, carreira: carreira, valor: carreira ? null : anos };
+        };
+        const atualizar = () => {
+            const p = ler();
+            if (inp) inp.disabled = p.carreira;
+            if (caixa) {
+                caixa.classList.toggle('carreira', p.carreira);
+                caixa.title = window.JCRReportUtils.descricaoPeriodo(p.valor, anoAtual);
+            }
+        };
+        const disparar = this._comAtraso(aoMudar);
+        if (inp) inp.addEventListener('input', () => {
+            atualizar();
+            if (inp.value !== '') disparar();
+        });
+        if (chk) chk.addEventListener('change', () => { atualizar(); disparar.agora(); });
+        return ler;
+    },
+
+    // Chama fn so depois de `ms` sem novas chamadas; .agora() chama na hora e
+    // cancela a pendente.
+    _comAtraso: function (fn, ms) {
+        let t = null;
+        const f = () => {
+            clearTimeout(t);
+            t = setTimeout(() => { t = null; if (fn) fn(); }, ms || 600);
+        };
+        f.agora = () => { clearTimeout(t); t = null; if (fn) fn(); };
+        return f;
+    },
+
+    // Abre uma secao recolhivel do relatorio (o que o clique no cabecalho faria).
+    _abrirSecao: function (content, header) {
+        if (content) content.style.display = 'block';
+        const icone = header && header.querySelector('.toggle-icon');
+        if (icone) icone.textContent = '[-]';
+    },
+
     // Controles de cópia de uma lista: o checkbox da numeração, o botão e o aviso. Ficam
     // por último no cabeçalho, depois dos filtros — são o que se usa no fim, e é onde o
     // usuário espera achá-los nas duas listas.
@@ -3878,8 +3944,14 @@ window.JCRDBTools = {
     // linha inserida depois obriga a renumerar tudo à mão. Quem quiser a lista pronta,
     // com número, marca a caixa. A lista NA TELA é sempre numerada — ali o número serve
     // para ler e contar, e não vai para lugar nenhum.
-    _opcoesDeCopiaHTML: function (prefixo, numerar) {
+    //
+    // "Reiniciar a cada grupo" vale para a tela e para a copia: a contagem recomeca em
+    // cada conjunto depois de um separador (ano ou categoria).
+    _opcoesDeCopiaHTML: function (prefixo, numerar, reiniciar) {
         return `
+            <label class="no-print" style="cursor: pointer; color: #555;" title="Recomeça a numeração em 1 a cada conjunto (ano ou categoria), na tela e no texto copiado.">
+                <input type="checkbox" id="chk-${prefixo}-list-reiniciar" ${reiniciar ? 'checked' : ''}> Reiniciar a cada grupo
+            </label>
             <label class="no-print" style="cursor: pointer; color: #555;" title="Inclui a numeração no texto copiado. A lista na tela é sempre numerada.">
                 <input type="checkbox" id="chk-${prefixo}-list-numerar" ${numerar ? 'checked' : ''}> Numerar ao copiar
             </label>
@@ -4613,10 +4685,13 @@ window.JCRDBTools = {
                 customYears: 1,
                 targetAuthorRank: 1,
                 pubListYears: 5,
+                pubListOrdem: 'ano',
                 pubListNumerar: false,
+                pubListReiniciar: false,
                 supListYears: 5,
                 supListOrdem: 'ano',
                 supListNumerar: false,
+                supListReiniciar: false,
                 journalYears: 5,
                 minJournalPapers: 1,
                 showHighJcr: true,
@@ -4757,7 +4832,7 @@ window.JCRDBTools = {
 
                         <div style="flex: 1; min-width: 200px;">
                             <div style="font-weight: bold; margin-bottom: 8px;">Período Customizado:</div>
-                            <div>Anos: <input type="number" id="inp-custom-years" value="${state.customYears}" min="0" style="width: 50px;"></div>
+                            <div title="${this._esc(window.JCRReportUtils.descricaoPeriodo(state.customYears, currentYear))}. A carreira toda já tem coluna própria na tabela.">Anos: <input type="number" id="inp-custom-years" value="${state.customYears}" min="0" style="width: 50px;"></div>
                         </div>
                     </div>
                 </div>
@@ -4838,8 +4913,7 @@ window.JCRDBTools = {
                         <div style="display: flex; align-items: center; gap: 15px;">
                             <h3 style="margin: 0;">Membros do Grupo</h3>
                             <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                                <span>Período (anos): <input type="number" id="inp-membros-anos" value="${state.membrosAnos !== undefined ? state.membrosAnos : 5}" min="0" style="width: 50px; padding: 2px;" title="N anos completos mais o ano em curso (ex.: 5 em ${currentYear} = ${currentYear - 5} a ${currentYear}). 0 considera toda a carreira."></span>
-                                <button id="btn-membros-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                ${this._seletorPeriodoHTML('inp-membros-anos', state.membrosAnos !== undefined ? state.membrosAnos : 5, state.membrosCarreira === true, currentYear)}
                                 <button id="btn-membros-xlsx" class="no-print" title="Exportar a tabela para Excel (.xlsx)" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #A5D6A7; background: #E8F5E9; color: #1B5E20;">📥 Excel</button>
                             </div>
                         </div>
@@ -4865,8 +4939,7 @@ window.JCRDBTools = {
                             <div style="display: flex; align-items: center; gap: 15px;">
                                 <h3 style="margin: 0;">Matriz de Coautoria</h3>
                                 <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                                    <span>Período (anos): <input type="number" id="inp-coautoria-anos" value="${state.coautoriaAnos !== undefined ? state.coautoriaAnos : 0}" min="0" style="width: 50px; padding: 2px;" title="0 considera toda a carreira"></span>
-                                    <button id="btn-coautoria-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                    ${this._seletorPeriodoHTML('inp-coautoria-anos', state.coautoriaAnos !== undefined ? state.coautoriaAnos : 5, state.coautoriaCarreira !== false, currentYear)}
                                 </div>
                             </div>
                             <span class="toggle-icon">[+]</span>
@@ -4965,6 +5038,9 @@ window.JCRDBTools = {
                         /* Rótulos que substituem, no papel, controles só de tela
                            (o título da coluna DB / Usar, que virou botões de ação) */
                         .somente-impressao { display: inline !important; }
+                        /* Período: com "toda a carreira" marcado, o número não vale */
+                        .jcr-periodo.carreira input[type=number] { display: none !important; }
+                        .jcr-periodo:not(.carreira) .jcr-periodo-carreira-txt { display: none !important; }
 
                         /* Libera contêineres com scroll: imprime o conteúdo completo */
                         .collapsible-content div { max-height: none !important; overflow: visible !important; }
@@ -5080,14 +5156,18 @@ window.JCRDBTools = {
                             <div style="display: flex; align-items: center; gap: 15px;">
                                 <h3 style="margin: 0;">Lista de Publicações</h3>
                                 <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                                    <span>Período (anos): <input type="number" id="inp-pub-list-years" value="${state.pubListYears !== undefined ? state.pubListYears : 5}" min="0" style="width: 50px; padding: 2px;"></span>
-                                    <button id="btn-pub-list-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
+                                    ${this._seletorPeriodoHTML('inp-pub-list-years', state.pubListYears !== undefined ? state.pubListYears : 5, state.pubListCarreira === true, currentYear)}
+                                    <span class="no-print">Ordem: <select id="sel-pub-list-ordem" style="padding: 2px;" title="Sempre do maior para o menor">
+                                        <option value="ano" ${state.pubListOrdem !== 'jcr' && state.pubListOrdem !== 'citacoes' ? 'selected' : ''}>Ano</option>
+                                        <option value="jcr" ${state.pubListOrdem === 'jcr' ? 'selected' : ''}>JCR</option>
+                                        <option value="citacoes" ${state.pubListOrdem === 'citacoes' ? 'selected' : ''}>Citações</option>
+                                    </select></span>
                                     <span class="no-print" style="display: flex; align-items: center; gap: 10px; color: #555;">
                                         <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-jcr" ${state.showPubListJcr !== false ? 'checked' : ''}> JCR</label>
                                         <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-doi" ${state.showPubListDoi !== false ? 'checked' : ''}> DOI</label>
                                         <label style="cursor: pointer;"><input type="checkbox" id="chk-pub-show-cit" ${state.showPubListCitations !== false ? 'checked' : ''}> Citações</label>
                                     </span>
-                                    ${this._opcoesDeCopiaHTML('pub', state.pubListNumerar === true)}
+                                    ${this._opcoesDeCopiaHTML('pub', state.pubListNumerar === true, state.pubListReiniciar === true)}
                                 </div>
                             </div>
                             <span class="toggle-icon">[+]</span>
@@ -5105,13 +5185,12 @@ window.JCRDBTools = {
                             <div style="display: flex; align-items: center; gap: 15px;">
                                 <h3 style="margin: 0;">Lista de Orientações</h3>
                                 <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                                    <span>Período (anos): <input type="number" id="inp-sup-list-years" value="${state.supListYears !== undefined ? state.supListYears : 5}" min="0" style="width: 50px; padding: 2px;"></span>
+                                    ${this._seletorPeriodoHTML('inp-sup-list-years', state.supListYears !== undefined ? state.supListYears : 5, state.supListCarreira === true, currentYear)}
                                     <span class="no-print">Ordem: <select id="sel-sup-list-ordem" style="padding: 2px;">
                                         <option value="ano" ${state.supListOrdem !== 'categoria' ? 'selected' : ''}>Ano / Categoria</option>
                                         <option value="categoria" ${state.supListOrdem === 'categoria' ? 'selected' : ''}>Categoria / Ano</option>
                                     </select></span>
-                                    <button id="btn-sup-list-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
-                                    ${this._opcoesDeCopiaHTML('sup', state.supListNumerar === true)}
+                                    ${this._opcoesDeCopiaHTML('sup', state.supListNumerar === true, state.supListReiniciar === true)}
                                 </div>
                             </div>
                             <span class="toggle-icon">[+]</span>
@@ -5129,9 +5208,8 @@ window.JCRDBTools = {
                             <div style="display: flex; align-items: center; gap: 15px;">
                                 <h3 style="margin: 0;">Publicações por Periódico</h3>
                                 <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px;">
-                                    Período (anos): <input type="number" id="inp-journal-years" value="${state.journalYears !== undefined ? state.journalYears : 5}" min="0" style="width: 50px; padding: 2px;">
+                                    ${this._seletorPeriodoHTML('inp-journal-years', state.journalYears !== undefined ? state.journalYears : 5, state.journalCarreira === true, currentYear)}
                                     &nbsp;Mín. artigos: <input type="number" id="inp-journal-min-papers" value="${state.minJournalPapers !== undefined ? state.minJournalPapers : 1}" min="1" style="width: 40px; padding: 2px;">
-                                    <button id="btn-journal-update" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">Atualizar</button>
                                 </div>
                             </div>
                             <span class="toggle-icon">[+]</span>
@@ -5864,24 +5942,17 @@ window.JCRDBTools = {
         // botoes sao recriados a cada atualizacao.
         const membrosContainer = doc.getElementById('membros-container');
         if (membrosContainer && cvData.groupMembers) {
-            const inpMembrosAnos = doc.getElementById('inp-membros-anos');
-            const anosMembros = () => {
-                const v = parseInt(inpMembrosAnos && inpMembrosAnos.value, 10);
-                return isNaN(v) || v < 0 ? 0 : v;
-            };
+            const periodoMembros = this._ligarSeletorPeriodo(doc, 'inp-membros-anos', currentYear, () => gerarTabelaMembros());
+            const anosMembros = () => periodoMembros().valor;
             const gerarTabelaMembros = () => {
-                state.membrosAnos = anosMembros();
+                const p = periodoMembros();
+                state.membrosAnos = p.anos;
+                state.membrosCarreira = p.carreira;
                 membrosContainer.innerHTML = this._tabelaMembrosHTML(
-                    cvData.groupMembers, state.membrosAnos, currentYear, state.highJcr, state.lowJcr, state.membrosOrdem);
+                    cvData.groupMembers, p.valor, currentYear, state.highJcr, state.lowJcr, state.membrosOrdem);
             };
             gerarTabelaMembros();
 
-            const btnMembrosUpdate = doc.getElementById('btn-membros-update');
-            if (btnMembrosUpdate) btnMembrosUpdate.addEventListener('click', gerarTabelaMembros);
-            if (inpMembrosAnos) {
-                inpMembrosAnos.addEventListener('change', gerarTabelaMembros);
-                inpMembrosAnos.addEventListener('keydown', (e) => { if (e.key === 'Enter') gerarTabelaMembros(); });
-            }
 
             const btnMembrosXlsx = doc.getElementById('btn-membros-xlsx');
             if (btnMembrosXlsx) btnMembrosXlsx.addEventListener('click', () => {
@@ -6417,14 +6488,16 @@ window.JCRDBTools = {
         const headerCoautoria = doc.getElementById('header-coautoria');
         const contentCoautoria = doc.getElementById('content-coautoria');
         const coautoriaContainer = doc.getElementById('coautoria-container');
-        const inpCoautoriaAnos = doc.getElementById('inp-coautoria-anos');
-        const btnCoautoriaUpdate = doc.getElementById('btn-coautoria-update');
         let coautoriaGerada = false;
+        const periodoCoautoria = this._ligarSeletorPeriodo(doc, 'inp-coautoria-anos', currentYear,
+            () => { gerarMatrizCoautoria(); this._abrirSecao(contentCoautoria, headerCoautoria); });
 
         const gerarMatrizCoautoria = () => {
             if (!coautoriaContainer) return;
-            const anos = parseInt(inpCoautoriaAnos && inpCoautoriaAnos.value, 10) || 0;
-            state.coautoriaAnos = anos;
+            const p = periodoCoautoria();
+            const anos = p.valor;
+            state.coautoriaAnos = p.anos;
+            state.coautoriaCarreira = p.carreira;
 
             // categoria e titulacao so existem quando o relatorio e de uma proposta
             const fichas = [];
@@ -6445,7 +6518,7 @@ window.JCRDBTools = {
         };
 
         // Ordem manual (setas ao lado do nome): guardada no estado da aba pela chave de
-        // cada pesquisador, para sobreviver ao Atualizar e a troca do periodo. Quem nao
+        // cada pesquisador, para sobreviver a troca do periodo. Quem nao
         // estiver na ordem salva (CV novo no consolidado) vai para o fim, na ordem
         // automatica.
         let ultimaMatriz = null;
@@ -6478,7 +6551,7 @@ window.JCRDBTools = {
                 return;
             }
 
-            const periodo = anos > 0 ? `últimos ${anos} anos` : 'toda a carreira';
+            const periodo = window.JCRReportUtils.descricaoPeriodo(anos, currentYear).toLowerCase();
             const totalPares = (n * (n - 1)) / 2;
 
             // realce do coordenador: linha e coluna dele, para o cruzamento ficar obvio
@@ -6573,33 +6646,29 @@ window.JCRDBTools = {
                 if (!coautoriaGerada) gerarMatrizCoautoria();
             });
         }
-        if (btnCoautoriaUpdate) {
-            btnCoautoriaUpdate.addEventListener('click', (e) => {
-                e.stopPropagation();
-                gerarMatrizCoautoria();
-                contentCoautoria.style.display = 'block';
-                headerCoautoria.querySelector('.toggle-icon').textContent = '[-]';
-            });
-        }
 
         const headerPubList = doc.getElementById('header-pub-list');
         const contentPubList = doc.getElementById('content-pub-list');
         const pubContainer = doc.getElementById('pub-list-container');
-        const inpPubYears = doc.getElementById('inp-pub-list-years');
-        const btnPubUpdate = doc.getElementById('btn-pub-list-update');
+        const selPubOrdem = doc.getElementById('sel-pub-list-ordem');
         const btnPubCopy = doc.getElementById('btn-pub-list-copy');
         const chkPubNumerar = doc.getElementById('chk-pub-list-numerar');
         const avisoPubCopy = doc.getElementById('pub-list-copy-aviso');
 
         let isPubListGenerated = false;
+        const periodoPub = this._ligarSeletorPeriodo(doc, 'inp-pub-list-years', currentYear,
+            () => { generatePubList(); this._abrirSecao(contentPubList, headerPubList); });
         let blocosPublicacoes = [];
 
         const generatePubList = () => {
             if (!pubContainer) return;
-            const pubYears = parseInt(inpPubYears.value, 10) || 0;
-            state.pubListYears = pubYears;
+            const p = periodoPub();
+            const pubYears = p.valor;
+            state.pubListYears = p.anos;
+            state.pubListCarreira = p.carreira;
+            state.pubListOrdem = selPubOrdem ? selPubOrdem.value : 'ano';
             blocosPublicacoes = window.JCRReportUtils.publicacoesAgrupadas(
-                filteredPublications, pubYears, currentYear);
+                filteredPublications, pubYears, currentYear, state.pubListOrdem);
 
             if (blocosPublicacoes.length === 0) {
                 pubContainer.innerHTML = `<div style="padding: 10px; color: #777; text-align: center;">Nenhuma publicação encontrada neste período.</div>`;
@@ -6635,7 +6704,7 @@ window.JCRDBTools = {
                     ? `<div style="font-size: 0.9em; margin-top: 4px; color: #555;">${extras.join(' | ')}</div>`
                     : '';
                 return `<div style="font-size: 0.95em;"><b>${n}.</b> ${this._esc(window.JCRReportUtils._referenciaLimpa(pub))}</div>${extraHtml}`;
-            }, 'publicação(ões)');
+            }, 'publicação(ões)', state.pubListReiniciar === true);
 
             this._ligarBlocosRecolhiveis(pubContainer);
             isPubListGenerated = true;
@@ -6647,8 +6716,10 @@ window.JCRDBTools = {
             });
         }
 
-        if (btnPubUpdate) {
-            btnPubUpdate.addEventListener('click', (e) => {
+
+        // Como na lista de orientações, trocar a ordem refaz a lista na hora.
+        if (selPubOrdem) {
+            selPubOrdem.addEventListener('change', (e) => {
                 e.stopPropagation();
                 generatePubList();
                 contentPubList.style.display = 'block';
@@ -6663,6 +6734,13 @@ window.JCRDBTools = {
                 state.pubListNumerar = chkPubNumerar.checked;
             });
         }
+        const chkPubReiniciar = doc.getElementById('chk-pub-list-reiniciar');
+        if (chkPubReiniciar) {
+            chkPubReiniciar.addEventListener('change', () => {
+                state.pubListReiniciar = chkPubReiniciar.checked;
+                if (isPubListGenerated) generatePubList();
+            });
+        }
 
         if (btnPubCopy) {
             btnPubCopy.addEventListener('click', async (e) => {
@@ -6672,7 +6750,8 @@ window.JCRDBTools = {
                     jcr: state.showPubListJcr !== false,
                     doi: state.showPubListDoi !== false,
                     citacoes: state.showPubListCitations !== false,
-                    numerar: state.pubListNumerar === true
+                    numerar: state.pubListNumerar === true,
+                    reiniciar: state.pubListReiniciar === true
                 });
                 this._avisarCopia(newTab, avisoPubCopy, await this._copiarTexto(newTab, texto));
             });
@@ -6702,21 +6781,23 @@ window.JCRDBTools = {
         const headerSupList = doc.getElementById('header-sup-list');
         const contentSupList = doc.getElementById('content-sup-list');
         const supContainer = doc.getElementById('sup-list-container');
-        const inpSupYears = doc.getElementById('inp-sup-list-years');
         const selSupOrdem = doc.getElementById('sel-sup-list-ordem');
-        const btnSupUpdate = doc.getElementById('btn-sup-list-update');
         const btnSupCopy = doc.getElementById('btn-sup-list-copy');
         const chkSupNumerar = doc.getElementById('chk-sup-list-numerar');
         const avisoSupCopy = doc.getElementById('sup-list-copy-aviso');
 
         let isSupListGenerated = false;
+        const periodoSup = this._ligarSeletorPeriodo(doc, 'inp-sup-list-years', currentYear,
+            () => { generateSupList(); this._abrirSecao(contentSupList, headerSupList); });
         let blocosOrientacoes = [];
 
         const generateSupList = () => {
             if (!supContainer) return;
-            const anos = parseInt(inpSupYears.value, 10) || 0;
+            const p = periodoSup();
+            const anos = p.valor;
             const ordem = selSupOrdem ? selSupOrdem.value : 'ano';
-            state.supListYears = anos;
+            state.supListYears = p.anos;
+            state.supListCarreira = p.carreira;
             state.supListOrdem = ordem;
             blocosOrientacoes = window.JCRReportUtils.orientacoesAgrupadas(
                 rawSupervisions, anos, currentYear, ordem);
@@ -6731,7 +6812,7 @@ window.JCRDBTools = {
             // conforme o seletor de ordem.
             supContainer.innerHTML = this._listaEmBlocosHTML(blocosOrientacoes, (o, n) =>
                 `<div style="font-size: 0.95em;"><b>${n}.</b> ${this._esc(window.JCRReportUtils.orientacaoEmLinha(o))}</div>`,
-                'orientação(ões)');
+                'orientação(ões)', state.supListReiniciar === true);
 
             this._ligarBlocosRecolhiveis(supContainer);
             isSupListGenerated = true;
@@ -6743,17 +6824,9 @@ window.JCRDBTools = {
             });
         }
 
-        if (btnSupUpdate) {
-            btnSupUpdate.addEventListener('click', (e) => {
-                e.stopPropagation();
-                generateSupList();
-                contentSupList.style.display = 'block';
-                headerSupList.querySelector('.toggle-icon').textContent = '[-]';
-            });
-        }
 
-        // Trocar a ordem refaz a lista na hora: não é um filtro, é a mesma lista
-        // rearranjada, e esperar pelo Atualizar só confundiria.
+        // Trocar a ordem refaz a lista na hora, como o campo de período.
+        // (É a mesma lista rearranjada.)
         if (selSupOrdem) {
             selSupOrdem.addEventListener('change', (e) => {
                 e.stopPropagation();
@@ -6770,13 +6843,21 @@ window.JCRDBTools = {
                 state.supListNumerar = chkSupNumerar.checked;
             });
         }
+        const chkSupReiniciar = doc.getElementById('chk-sup-list-reiniciar');
+        if (chkSupReiniciar) {
+            chkSupReiniciar.addEventListener('change', () => {
+                state.supListReiniciar = chkSupReiniciar.checked;
+                if (isSupListGenerated) generateSupList();
+            });
+        }
 
         if (btnSupCopy) {
             btnSupCopy.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 if (!isSupListGenerated) generateSupList();
                 const texto = window.JCRReportUtils.orientacoesEmTexto(blocosOrientacoes, {
-                    numerar: state.supListNumerar === true
+                    numerar: state.supListNumerar === true,
+                    reiniciar: state.supListReiniciar === true
                 });
                 this._avisarCopia(newTab, avisoSupCopy, await this._copiarTexto(newTab, texto));
             });
@@ -6786,10 +6867,14 @@ window.JCRDBTools = {
         const headerJournalList = doc.getElementById('header-journal-list');
         const contentJournalList = doc.getElementById('content-journal-list');
         const journalContainer = doc.getElementById('journal-list-container');
-        const inpJournalYears = doc.getElementById('inp-journal-years');
         const inpJournalMinPapers = doc.getElementById('inp-journal-min-papers');
-        const btnJournalUpdate = doc.getElementById('btn-journal-update');
         let isJournalGenerated = false;
+        if (inpJournalMinPapers) {
+            const refazPeriodicos = this._comAtraso(() => { generateJournalList(); this._abrirSecao(contentJournalList, headerJournalList); });
+            inpJournalMinPapers.addEventListener('input', () => { if (inpJournalMinPapers.value !== '') refazPeriodicos(); });
+        }
+        const periodoJournal = this._ligarSeletorPeriodo(doc, 'inp-journal-years', currentYear,
+            () => { generateJournalList(); this._abrirSecao(contentJournalList, headerJournalList); });
 
         const attachJournalSort = () => {
             const table = doc.getElementById('journal-table');
@@ -6834,12 +6919,13 @@ window.JCRDBTools = {
         };
 
         const generateJournalList = () => {
-            const years = parseInt(inpJournalYears.value, 10);
+            const p = periodoJournal();
             const minP = parseInt(inpJournalMinPapers.value, 10);
-            state.journalYears = isNaN(years) ? 5 : Math.max(0, years);
+            state.journalYears = p.anos;
+            state.journalCarreira = p.carreira;
             state.minJournalPapers = isNaN(minP) || minP < 1 ? 1 : minP;
             journalContainer.innerHTML = window.JCRReportUtils.generateJournalTableHTML(
-                filteredPublications, state.journalYears, state.minJournalPapers,
+                filteredPublications, p.valor, state.minJournalPapers,
                 currentYear, state.highJcr, state.lowJcr
             );
             attachJournalSort();
@@ -6852,14 +6938,6 @@ window.JCRDBTools = {
             });
         }
 
-        if (btnJournalUpdate) {
-            btnJournalUpdate.addEventListener('click', (e) => {
-                e.stopPropagation();
-                generateJournalList();
-                contentJournalList.style.display = 'block';
-                headerJournalList.querySelector('.toggle-icon').textContent = '[-]';
-            });
-        }
 
         // Lista de Publicações e Publicações por Periódico começam recolhidas e só são geradas
         // sob demanda. Sem isto, imprimir sem antes abri-las manualmente resulta na seção vazia

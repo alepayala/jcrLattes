@@ -194,7 +194,7 @@ describe('agruparPorPeriodico', () => {
         const r = R.agruparPorPeriodico([
             P('Physical Review B', '1098-0121', 3.9, 2022),
             P('PHYS REV B', '1098-0121', 3.9, 2021),
-        ], 0, 2026);
+        ], null, 2026);
         assert.strictEqual(r.length, 1);
         assert.strictEqual(r[0].count, 2);
     });
@@ -203,7 +203,7 @@ describe('agruparPorPeriodico', () => {
         const r = R.agruparPorPeriodico([
             P('Nature Physics', '', 19.6, 2022),
             P('NATURE PHYSICS', '', 19.6, 2021),
-        ], 0, 2026);
+        ], null, 2026);
         assert.strictEqual(r.length, 1);
         assert.strictEqual(r[0].count, 2);
     });
@@ -213,7 +213,7 @@ describe('agruparPorPeriodico', () => {
         const r = R.agruparPorPeriodico([
             P('Acta Cientifica', '', 1.2, 2022),
             P('Acta Cientifica', '', 4.8, 2021),
-        ], 0, 2026);
+        ], null, 2026);
         assert.strictEqual(r.length, 2);
     });
 
@@ -221,7 +221,7 @@ describe('agruparPorPeriodico', () => {
         const r = R.agruparPorPeriodico([
             P('Revista X', '', 2.0, 2022), P('Revista X', '', 2.0, 2021),
             P('Revista X', '', 0, 2020), P('Revista X', '', 0, 2019),
-        ], 0, 2026);
+        ], null, 2026);
         assert.strictEqual(r.length, 1);
         assert.strictEqual(r[0].count, 4);
         assert.strictEqual(r[0].jif, 2);
@@ -232,25 +232,25 @@ describe('agruparPorPeriodico', () => {
         const r = R.agruparPorPeriodico([
             P('Journal of Physics (Print) (Online)', '', 2.2, 2022),
             P('Journal of Physics', '', 2.2, 2021),
-        ], 0, 2026);
+        ], null, 2026);
         assert.strictEqual(r.length, 1);
         assert.strictEqual(r[0].name, 'Journal of Physics');
     });
 
     test('o corte de anos descarta o que e mais antigo', () => {
         const pubs = [P('Rev W', '', 1, 1990), P('Rev W', '', 1, 2022)];
-        assert.strictEqual(R.agruparPorPeriodico(pubs, 0, 2026)[0].count, 2);   // 0 = sem corte
+        assert.strictEqual(R.agruparPorPeriodico(pubs, null, 2026)[0].count, 2);   // null = sem corte
         assert.strictEqual(R.agruparPorPeriodico(pubs, 5, 2026)[0].count, 1);
     });
 
     test('publicacao sem nome de periodico e ignorada', () => {
-        const r = R.agruparPorPeriodico([P('', '1234-5678', 3, 2022)], 0, 2026);
+        const r = R.agruparPorPeriodico([P('', '1234-5678', 3, 2022)], null, 2026);
         assert.deepStrictEqual(r, []);
     });
 
     test('entrada invalida devolve lista vazia', () => {
-        assert.deepStrictEqual(R.agruparPorPeriodico([], 0, 2026), []);
-        assert.deepStrictEqual(R.agruparPorPeriodico(null, 0, 2026), []);
+        assert.deepStrictEqual(R.agruparPorPeriodico([], null, 2026), []);
+        assert.deepStrictEqual(R.agruparPorPeriodico(null, null, 2026), []);
     });
 });
 
@@ -675,6 +675,12 @@ describe('orientacoesEmTexto', () => {
         assert.ok(linhas[5].trim().startsWith('2. Ana Souza'));
     });
 
+    test('reiniciar recomeca a numeracao a cada grupo', () => {
+        const linhas = R.orientacoesEmTexto(blocos(), { numerar: true, reiniciar: true }).split('\n').filter(l => l !== '');
+        assert.ok(linhas[2].trim().startsWith('1. Bruno Lima'));
+        assert.ok(linhas[5].trim().startsWith('1. Ana Souza'));
+    });
+
     test('lista vazia devolve texto vazio', () => {
         assert.strictEqual(R.orientacoesEmTexto([]), '');
         assert.strictEqual(R.orientacoesEmTexto(null), '');
@@ -966,6 +972,24 @@ describe('publicacoesAgrupadas', () => {
         assert.deepStrictEqual(R.publicacoesAgrupadas(itens, '', 2026).map(x => x.titulo), ['2026', '2025']);
     });
 
+    test('ordem por JCR: bloco unico, maior primeiro, empate pelo ano mais recente', () => {
+        const b = R.publicacoesAgrupadas([pub(2020, 2, 'a'), pub(2024, 9, 'b'), pub(2019, 5, 'c'), pub(2023, 5, 'd')], 100, 2026, 'jcr');
+        assert.strictEqual(b.length, 1);
+        assert.strictEqual(b[0].total, 4);
+        assert.deepStrictEqual(b[0].grupos[0].itens.map(p => p.reference), ['b', 'd', 'c', 'a']);
+    });
+
+    // WoS e Scopus contam quase os mesmos artigos: vale o maior dos dois, nao a soma
+    test('ordem por citacoes usa o maior entre WoS e Scopus', () => {
+        const c = (ref, wos, scopus) => Object.assign(pub(2024, 1, ref), { wosCitations: wos, scopusCitations: scopus });
+        const b = R.publicacoesAgrupadas([c('x', 10, 12), c('y', 15, 0), c('z', 0, 0)], 100, 2026, 'citacoes');
+        assert.deepStrictEqual(b[0].grupos[0].itens.map(p => p.reference), ['y', 'x', 'z']);
+    });
+
+    test('ordem por JCR respeita o periodo e nao cria bloco vazio', () => {
+        assert.deepStrictEqual(R.publicacoesAgrupadas([pub(2010, 3)], 3, 2026, 'jcr'), []);
+    });
+
     test('publicacao sem ano fica de fora, e entrada invalida nao quebra', () => {
         assert.deepStrictEqual(R.publicacoesAgrupadas([{ jif: 3 }], 100, 2026), []);
         assert.deepStrictEqual(R.publicacoesAgrupadas(null, 100, 2026), []);
@@ -1045,6 +1069,12 @@ describe('publicacoesEmTexto', () => {
         const linhas = R.publicacoesEmTexto(blocos(), { numerar: true }).split('\n').filter(l => l !== '');
         assert.ok(linhas[1].trim().startsWith('1. SILVA'));
         assert.ok(linhas[3].trim().startsWith('2. SOUZA'));
+    });
+
+    test('reiniciar recomeca a numeracao a cada ano', () => {
+        const linhas = R.publicacoesEmTexto(blocos(), { numerar: true, reiniciar: true }).split('\n').filter(l => l !== '');
+        assert.ok(linhas[1].trim().startsWith('1. SILVA'));
+        assert.ok(linhas[3].trim().startsWith('1. SOUZA'));
     });
 
     test('lista vazia devolve texto vazio', () => {
@@ -1265,5 +1295,32 @@ describe('planilhaXlsx: hiperlinks', () => {
         assert.ok(!t.includes('<hyperlink'));
         assert.ok(!t.includes('sheet1.xml.rels'));
         assert.ok(t.includes('>x</t>'));
+    });
+});
+
+// Regra unica dos campos "Periodo (anos)": N anos completos + o atual, 0 = so o ano
+// atual, null (checkbox "Toda a carreira") = sem corte. Sem teto para o ano que vem.
+describe('inicioDoPeriodo / descricaoPeriodo', () => {
+    test('N anos completos mais o atual', () => {
+        assert.strictEqual(R.inicioDoPeriodo(5, 2026), 2021);
+        assert.strictEqual(R.descricaoPeriodo(5, 2026), '2021 em diante (5 anos completos + o atual)');
+        assert.strictEqual(R.descricaoPeriodo(1, 2026), '2025 em diante (1 ano completo + o atual)');
+    });
+
+    test('0 e so o ano atual', () => {
+        assert.strictEqual(R.inicioDoPeriodo(0, 2026), 2026);
+        assert.strictEqual(R.descricaoPeriodo(0, 2026), '2026 em diante (só o ano atual)');
+    });
+
+    test('null, vazio ou invalido e a carreira toda', () => {
+        [null, undefined, '', 'x'].forEach(v => assert.strictEqual(R.inicioDoPeriodo(v, 2026), null));
+        assert.strictEqual(R.descricaoPeriodo(null, 2026), 'Toda a carreira');
+    });
+
+    test('todas as secoes seguem a regra, inclusive o ano que vem', () => {
+        const pubs = [{ year: 2027, jif: 1, journalName: 'J' }, { year: 2026, jif: 1, journalName: 'J' }, { year: 2020, jif: 1, journalName: 'J' }];
+        assert.strictEqual(R.publicacoesAgrupadas(pubs, 0, 2026).reduce((s, b) => s + b.total, 0), 2);
+        assert.strictEqual(R.agruparPorPeriodico(pubs, 0, 2026)[0].count, 2);
+        assert.strictEqual(R.agruparPorPeriodico(pubs, null, 2026)[0].count, 3);
     });
 });
