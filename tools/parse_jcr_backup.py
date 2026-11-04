@@ -2,9 +2,20 @@ import json
 import argparse
 import re
 import textwrap
-from typing import List, Dict, Any
-from dataclasses import dataclass
+import unicodedata
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
 from itertools import combinations
+
+# O formato do JSON e o da extensao (dist/scripts/db_tools.js). Ela exporta tres
+# arquivos, todos uma lista de registros:
+#   jcr_lattes_database_backup.json        banco geral: so CVs
+#   <ID>_jcr_lattes_database_backup.json   um grupo (ID de grupo): so CVs
+#   jcr_lattes_picc_backup_<data>.json     piccTools: propostas, CVs da base do
+#                                          piccTools (inclusive esqueletos) e um
+#                                          registro de configuracao
+# So os CVs viram pesquisadores. Quem identifica o pesquisador e o ID Lattes, nunca
+# o nome: e a mesma regra da extensao (cvMatches), que evita juntar homonimos.
 
 @dataclass
 class CVData:
@@ -23,74 +34,204 @@ class CVData:
     declared_citations: Dict[str, Any]
     date_added: str
     raw_data: Dict[str, Any]
+    # registro so com nome/bolsa/formacao, criado ao importar uma proposta
+    skeleton: bool = False
 
-def parse_jcr_backup(file_path: str) -> List[CVData]:
+    @property
+    def key(self) -> str:
+        """Identificador do pesquisador: o ID Lattes; sem ele, o nome normalizado."""
+        return f"id:{self.lattes_id}" if self.lattes_id else f"nm:{normalize_name(self.name)}"
+
+
+@dataclass
+class BackupContents:
+    cvs: List[CVData]
+    proposals: List[Dict[str, Any]] = field(default_factory=list)
+    skeletons: int = 0
+    duplicates: int = 0
+    ignored: int = 0
+
+
+def normalize_name(s: Any) -> str:
+    """Mesma normalizacao de JCRDBTools.normalizeName: sem acentos, caixa e pontuacao."""
+    t = unicodedata.normalize('NFD', str(s or ''))
+    t = ''.join(c for c in t if unicodedata.category(c) != 'Mn').lower()
+    return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9]', ' ', t)).strip()
+
+
+_PARTICLES = {'da', 'de', 'do', 'das', 'dos', 'e', 'd', 'del', 'della', 'di', 'du', 'van', 'von'}
+_SUFFIXES = {'junior', 'jr', 'filho', 'filha', 'neto', 'neta', 'sobrinho', 'sobrinha'}
+
+
+def name_tokens(name: Any) -> List[str]:
+    """Mesmo criterio de JCRDBTools._tokensNome."""
+    t = [p for p in normalize_name(name).split(' ') if p and p not in _PARTICLES]
+    while len(t) > 2 and t[-1] in _SUFFIXES:
+        t.pop()
+    return t
+
+
+def names_compatible(a: Any, b: Any) -> bool:
+    """Mesmo criterio de JCRDBTools._nomesCompativeis: nome identico, ou mesmo
+    primeiro e ultimo nome com ao menos dois nomes de cada lado. Compara palavras,
+    nunca letras: "Ana Silva" nao casa com "Luciana Silva"."""
+    n1, n2 = normalize_name(a), normalize_name(b)
+    if not n1 or not n2:
+        return False
+    if n1 == n2:
+        return True
+    t1, t2 = name_tokens(a), name_tokens(b)
+    if len(t1) < 2 or len(t2) < 2:
+        return False
+    return t1 == t2 or (t1[0] == t2[0] and t1[-1] == t2[-1])
+
+
+def _is_full_cv(entry: Dict[str, Any]) -> bool:
+    """Versao resumida de JCRDBTools.isFullCv."""
+    if entry.get('hasFullCv') is True:
+        return True
+    if entry.get('hasFullCv') is False:
+        return False
+    if entry.get('publications') or entry.get('rawPatents') or entry.get('totalPapers'):
+        return True
+    return bool(entry.get('dateAdded')) and ('publications' in entry or 'totalPapers' in entry)
+
+
+def _as_list(v: Any) -> List[Any]:
+    return v if isinstance(v, list) else []
+
+
+def load_backup(file_path: str) -> BackupContents:
     """
-    Reads the JSON backup file and converts it into a list of CVData structures.
+    Reads any of the extension's JSON exports and separates researchers (CVs)
+    from proposals and configuration records.
     """
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
-        
-    cvs = []
-    
+
     # Handle different possible JSON export structures (list vs dict)
     if isinstance(data, dict):
         if 'jcrLattesCVs' in data:
-            entries = data['jcrLattesCVs'].values()
+            entries = list(data['jcrLattesCVs'].values())
         else:
-            entries = data.values()
+            entries = list(data.values())
     else:
         entries = data
 
+    out = BackupContents(cvs=[])
+    by_key: Dict[str, CVData] = {}
+
     for entry in entries:
+        if not isinstance(entry, dict):
+            out.ignored += 1
+            continue
+        if entry.get('__piccConfig'):
+            continue                                  # mapa de chamadas do piccTools
+        if entry.get('isProcesso') or entry.get('processId'):
+            out.proposals.append(entry)               # proposta, nao pesquisador
+            continue
+
         # Backward compatibility with older exports
-        name_link = entry.get('nameLink', {})
-        
-        name = entry.get('name') or name_link.get('name', 'Unknown Researcher')
-        lattes_id = entry.get('lattesId') or name_link.get('lattesId', '')
-        custom_id = entry.get('customId', '')
-        
+        name_link = entry.get('nameLink') or {}
+        name = entry.get('name') or name_link.get('name') or ''
+        lattes_id = str(entry.get('lattesId') or name_link.get('lattesId') or '').strip()
+        if not name and not lattes_id:
+            out.ignored += 1
+            continue
+
         if lattes_id:
             link = f"http://lattes.cnpq.br/{lattes_id}"
         else:
-            link = name_link.get('link', 'No Link')
-        
+            link = entry.get('cvLink') or name_link.get('link') or 'No Link'
+
         # Handle supervisions structure
         raw_supervisions = entry.get('supervisions', [])
         if isinstance(raw_supervisions, dict) and 'raw' in raw_supervisions:
-            sups_list = raw_supervisions.get('raw', [])
+            sups_list = _as_list(raw_supervisions.get('raw'))
         else:
-            sups_list = raw_supervisions if isinstance(raw_supervisions, list) else []
+            sups_list = _as_list(raw_supervisions)
 
         cv = CVData(
-            name=name,
+            name=name or 'Unknown Researcher',
             lattes_id=lattes_id,
-            custom_id=custom_id,
+            custom_id=entry.get('customId') or '',
             link=link,
-            publications=entry.get('publications', []),
-            patents=entry.get('rawPatents', entry.get('patents', [])),
-            events=entry.get('rawEvents', entry.get('events', [])),
+            publications=_as_list(entry.get('publications')),
+            # 'patents' hoje e o resumo {total, statusCounts}; a lista e rawPatents
+            patents=_as_list(entry.get('rawPatents')) or _as_list(entry.get('patents')),
+            events=_as_list(entry.get('rawEvents')) or _as_list(entry.get('events')),
             supervisions=sups_list,
-            declared_citations=entry.get('declaredCitations', {}),
-            date_added=entry.get('dateAdded', 'Unknown Date'),
-            raw_data=entry
+            declared_citations=entry.get('declaredCitations') or {},
+            date_added=entry.get('dateAdded') or 'Unknown Date',
+            raw_data=entry,
+            skeleton=not _is_full_cv(entry),
         )
-        cvs.append(cv)
-        
-    return cvs
+
+        # A mesma pessoa duas vezes (ex.: backups juntados): fica o CV completo e,
+        # entre iguais, o mais novo — a mesma escolha de _mesclarVersoesCv.
+        prev = by_key.get(cv.key)
+        if prev is not None:
+            out.duplicates += 1
+            if (not cv.skeleton, cv.date_added) <= (not prev.skeleton, prev.date_added):
+                continue
+        by_key[cv.key] = cv
+
+    for cv in by_key.values():
+        if cv.skeleton:
+            out.skeletons += 1
+        out.cvs.append(cv)
+    return out
+
+
+def parse_jcr_backup(file_path: str) -> List[CVData]:
+    """
+    Reads the JSON backup file and returns the researchers (CVs) in it.
+    Proposals and configuration records are left out; see load_backup.
+    """
+    return load_backup(file_path).cvs
+
 
 def get_pub_id(pub: Dict[str, Any]) -> str:
     """
-    Returns a unique identifier for a publication.
-    Prefers DOI; falls back to normalized reference text.
+    Identificador de um artigo, igual ao de JCRDBTools._chaveArtigo (a Matriz de
+    Coautoria): o DOI; sem ele, o titulo normalizado + o ano. A referencia completa
+    nao serve: traz a lista de autores, escrita de um jeito em cada CV.
     """
-    doi = pub.get('doi')
+    doi = str(pub.get('doi') or '').strip().lower()
     if doi:
-        return doi.strip().lower()
-    
-    ref = pub.get('reference', '')
-    # Normalize reference: alphanumeric only, lowercase
-    return re.sub(r'\W+', '', ref).lower()
+        return 'doi:' + doi
+    title = str(pub.get('paperTitle') or pub.get('title') or '')
+    title = re.sub(r'<[^>]*>', ' ', title)
+    title = re.sub(r'&[a-z#0-9]+;', ' ', title, flags=re.I)
+    title = re.sub(r'\$\$[\s\S]*?\$\$', ' ', title)
+    title = unicodedata.normalize('NFD', title)
+    title = ''.join(c for c in title if unicodedata.category(c) != 'Mn').lower()
+    title = re.sub(r'[^a-z0-9]+', ' ', title).strip()
+    if title:
+        return f"tt:{title}|{pub.get('year') or ''}"
+    # Backups antigos nao tem paperTitle (a extensao pede para atualizar esses CVs);
+    # ai so resta a referencia, que raramente casa entre CVs, mas nao custa tentar.
+    ref = re.sub(r'\W+', '', str(pub.get('reference') or '')).lower()
+    return f"ref:{ref}" if ref else ''
+
+
+def find_researcher(cvs: List[CVData], query: str) -> Optional[CVData]:
+    """
+    Acha UM pesquisador por ID Lattes ou nome. Nome: identico (sem acentos/caixa);
+    senao, o unico compativel. Ambiguo ou ausente: None, com aviso dos candidatos.
+    """
+    q = str(query or '').strip()
+    if re.fullmatch(r'\d{16}', q):
+        return next((cv for cv in cvs if cv.lattes_id == q), None)
+    exact = [cv for cv in cvs if normalize_name(cv.name) == normalize_name(q)]
+    candidates = exact or [cv for cv in cvs if names_compatible(cv.name, q)]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        print(f"Warning: '{q}' matches {len(candidates)} researchers; use the Lattes ID instead:")
+        for cv in candidates:
+            print(f"  {cv.lattes_id or '(sem ID)'}  {cv.name}")
+    return None
 
 def generate_network_graph(cvs: List[CVData], output_file: str, zoom: float = 1.0, ignore_isolated: bool = False, target_researcher: str = None, target_custom_id: str = None):
     """
@@ -116,21 +257,43 @@ def generate_network_graph(cvs: List[CVData], output_file: str, zoom: float = 1.
         return
 
     print("Generating network graph...")
-    
+
+    # Esqueletos (so nome, da importacao de uma proposta) nao tem publicacoes: seriam
+    # nos soltos que so poluem o grafo.
+    skeletons = [cv for cv in cvs if cv.skeleton]
+    if skeletons:
+        print(f"Left out {len(skeletons)} skeleton record(s) without CV data.")
+    cvs = [cv for cv in cvs if not cv.skeleton]
+
+    target_key = None
+    if target_researcher:
+        target = find_researcher(cvs, target_researcher)
+        if target is None:
+            print(f"Warning: Researcher '{target_researcher}' not found (or ambiguous) in the dataset.")
+            return
+        target_key = target.key
+
     G = nx.Graph()
-    
-    # Map researcher names to a set of their publication IDs
+
+    # O no e o pesquisador (ID Lattes), e o nome e so o rotulo: com o nome como no,
+    # dois homonimos viravam um so e um sobrescrevia as publicacoes do outro.
+    homonyms = {}
+    for cv in cvs:
+        homonyms.setdefault(normalize_name(cv.name), []).append(cv)
+
     researcher_pubs = {}
     for cv in cvs:
-        node_name = textwrap.fill(cv.name, width=15)
+        label = cv.name
+        if len(homonyms[normalize_name(cv.name)]) > 1 and cv.lattes_id:
+            label = f"{cv.name} (ID ...{cv.lattes_id[-4:]})"
         pub_ids = set()
         for pub in cv.publications:
             pub_id = get_pub_id(pub)
             if pub_id:
                 pub_ids.add(pub_id)
-        
-        researcher_pubs[node_name] = pub_ids
-        G.add_node(node_name, num_pubs=len(pub_ids))
+
+        researcher_pubs[cv.key] = pub_ids
+        G.add_node(cv.key, label=textwrap.fill(label, width=15), num_pubs=len(pub_ids))
 
     # Find common publications and add edges
     for researcher1, researcher2 in combinations(researcher_pubs.keys(), 2):
@@ -149,18 +312,12 @@ def generate_network_graph(cvs: List[CVData], output_file: str, zoom: float = 1.
             G.remove_nodes_from(isolated_nodes)
             print(f"Removed {len(isolated_nodes)} isolated nodes.")
             
-    if target_researcher:
-        target_node = None
-        for node in G.nodes():
-            if target_researcher.lower() in node.replace('\n', ' ').lower():
-                target_node = node
-                break
-                
-        if target_node and target_node in G.nodes():
-            print(f"Producing ego network specifically for: {target_node.replace(chr(10), ' ')}")
-            G = nx.ego_graph(G, target_node, radius=1)
+    if target_key:
+        if target_key in G.nodes():
+            print(f"Producing ego network specifically for: {G.nodes[target_key]['label'].replace(chr(10), ' ')}")
+            G = nx.ego_graph(G, target_key, radius=1)
         else:
-            print(f"Warning: Researcher with name '{target_researcher}' not found in the plotted network.")
+            print(f"Warning: Researcher '{target_researcher}' has no common publications (removed as isolated).")
             return
             
     print(f"Graph generated: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges.")
@@ -230,8 +387,9 @@ def generate_network_graph(cvs: List[CVData], output_file: str, zoom: float = 1.
     
     # Labels with clear typography
     labels = nx.draw_networkx_labels(
-        G, pos, 
-        font_size=18, 
+        G, pos,
+        labels=nx.get_node_attributes(G, 'label'),
+        font_size=18,
         font_family='sans-serif', 
         font_weight='bold',
         font_color='#222222',
@@ -284,12 +442,22 @@ def main():
     
     try:
         print(f"Loading backup from: {args.backup_file}")
-        parsed_cvs = parse_jcr_backup(args.backup_file)
-        print(f"Successfully loaded {len(parsed_cvs)} CVs from the database.\n")
-        
+        contents = load_backup(args.backup_file)
+        parsed_cvs = contents.cvs
+        print(f"Successfully loaded {len(parsed_cvs)} CVs from the database.")
+        if contents.proposals:
+            print(f"  {len(contents.proposals)} proposal record(s) (piccTools backup) were not counted as researchers.")
+        if contents.skeletons:
+            print(f"  {contents.skeletons} of the CVs are skeletons (name only, from a proposal import).")
+        if contents.duplicates:
+            print(f"  {contents.duplicates} repeated record(s) of the same Lattes ID were merged (newest full CV kept).")
+        if contents.ignored:
+            print(f"  {contents.ignored} unreadable record(s) ignored.")
+        print()
+
         # Example processing: Print a summary for each CV
         for cv in parsed_cvs:
-            print(f"[{cv.name}]")
+            print(f"[{cv.name}]" + (" (skeleton)" if cv.skeleton else ""))
             print(f"  URL: {cv.link}")
             if cv.custom_id:
                 print(f"  Custom ID: {cv.custom_id}")
