@@ -4846,7 +4846,7 @@ window.JCRDBTools = {
                         <span class="toggle-icon">[-]</span>
                     </div>
                     <div class="collapsible-content" style="padding: 0;">
-                        <div id="membros-container" style="overflow-x: auto; max-height: 500px;">
+                        <div id="membros-container" class="jcr-redimensionavel" style="overflow: auto; max-height: 500px; resize: vertical;">
                             <div style="color: #777; text-align: center; padding: 10px;">Carregando...</div>
                         </div>
                     </div>
@@ -4968,6 +4968,7 @@ window.JCRDBTools = {
 
                         /* Libera contêineres com scroll: imprime o conteúdo completo */
                         .collapsible-content div { max-height: none !important; overflow: visible !important; }
+                        .jcr-redimensionavel { height: auto !important; resize: none !important; }
 
                         /* Quebras de página: não parte linhas nem deixa títulos órfãos */
                         tr, .collapsible-header { break-inside: avoid; page-break-inside: avoid; }
@@ -5092,7 +5093,7 @@ window.JCRDBTools = {
                             <span class="toggle-icon">[+]</span>
                         </div>
                         <div class="collapsible-content" style="display: none;" id="content-pub-list">
-                            <div id="pub-list-container" style="max-height: 500px; overflow-y: auto; padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 4px;">
+                            <div id="pub-list-container" class="jcr-redimensionavel" style="max-height: 500px; overflow-y: auto; resize: vertical; padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 4px;">
                                 <div style="color: #777; text-align: center;">Carregando...</div>
                             </div>
                         </div>
@@ -5116,7 +5117,7 @@ window.JCRDBTools = {
                             <span class="toggle-icon">[+]</span>
                         </div>
                         <div class="collapsible-content" style="display: none;" id="content-sup-list">
-                            <div id="sup-list-container" style="max-height: 500px; overflow-y: auto; padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 4px;">
+                            <div id="sup-list-container" class="jcr-redimensionavel" style="max-height: 500px; overflow-y: auto; resize: vertical; padding: 15px; border: 1px solid #eee; background: #fafafa; border-radius: 4px;">
                                 <div style="color: #777; text-align: center;">Carregando...</div>
                             </div>
                         </div>
@@ -6383,6 +6384,31 @@ window.JCRDBTools = {
                 if (this.reportCollapsed[chave] === recolhido) return;
                 this.reportCollapsed[chave] = recolhido;
                 this.saveSettings();
+            });
+        });
+
+        // Caixas com rolagem do fim do relatorio (membros, listas): redimensionaveis na
+        // vertical pelo canto inferior direito. O max-height de 500px so vale enquanto o
+        // usuario nao mexe — com ele, o resize nao passaria de 500px. Ao pegar o canto,
+        // a altura atual vira altura fixa e o teto sai. A altura escolhida fica no
+        // estado da aba e volta quando o relatorio e remontado (filtros, periodo).
+        if (!state.alturaCaixas) state.alturaCaixas = {};
+        doc.querySelectorAll('.jcr-redimensionavel').forEach(caixa => {
+            const fixar = (altura) => {
+                caixa.style.boxSizing = 'border-box';
+                caixa.style.maxHeight = 'none';
+                caixa.style.height = altura + 'px';
+            };
+            if (caixa.id && state.alturaCaixas[caixa.id]) fixar(state.alturaCaixas[caixa.id]);
+            caixa.addEventListener('pointerdown', (e) => {
+                const r = caixa.getBoundingClientRect();
+                if (e.clientX < r.right - 18 || e.clientY < r.bottom - 18) return;   // fora do canto
+                fixar(caixa.offsetHeight);
+                const soltar = () => {
+                    doc.removeEventListener('pointerup', soltar);
+                    if (caixa.id) state.alturaCaixas[caixa.id] = caixa.offsetHeight;
+                };
+                doc.addEventListener('pointerup', soltar);
             });
         });
 
