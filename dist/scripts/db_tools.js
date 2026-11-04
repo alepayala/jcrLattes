@@ -2626,7 +2626,7 @@ window.JCRDBTools = {
                     theadHtml += `<th${titleAttr} data-key="${m.key}"${classAttr}>
                         ${label}<span class="sort-indicator">${arrow}</span><br>
                         <div style="display: flex; gap: 2px; margin-top: 4px;">
-                            <input type="text" id="bulk-id-input" placeholder="Lote..." style="width: 100%; min-width: 60px; padding: 2px 4px; font-weight: normal; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;">
+                            <input type="text" id="bulk-id-input" placeholder="Filtrar..." title="Sem CVs marcados: filtra a tabela pelo ID. Com CVs marcados: define o ID deles." value="${this._esc(this.idFilter || '')}" style="width: 100%; min-width: 60px; padding: 2px 4px; font-weight: normal; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;">
                             <select id="bulk-id-select" style="width: 24px; border: 1px solid #ccc; border-radius: 3px; background: white;" title="Selecionar ID Existente">${dropdownOptionsHtml}</select>
                         </div>
                     </th>`;
@@ -3011,17 +3011,58 @@ window.JCRDBTools = {
             }
         };
 
+        const bulkIdInput = newTab.document.getElementById('bulk-id-input');
+        const bulkIdSelect = newTab.document.getElementById('bulk-id-select');
+
+        // O campo de ID do cabecalho tem dois papeis. Sem CV marcado, filtra a tabela:
+        // ficam so as linhas com algum ID que contenha o texto digitado (varios separados
+        // por virgula valem como "ou"). Marcado um CV, a tabela volta inteira e o campo
+        // passa a definir o ID dos marcados. O filtro so esconde linhas, sem remontar a
+        // tabela, e fica em this.idFilter para sobreviver a reordenacao das colunas.
+        const algumMarcado = () => Array.from(rowCheckboxes).some(cb => cb.checked);
+        const idsDaLinha = (tr) => {
+            const inp = tr.querySelector('.custom-id-input');
+            return String(inp ? inp.value : '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        };
+        const aplicarFiltroId = () => {
+            const termos = String(this.idFilter || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            rowCheckboxes.forEach(cb => {
+                const tr = cb.closest('tr');
+                if (!tr) return;
+                const ids = idsDaLinha(tr);
+                const mostra = termos.length === 0 || termos.some(t => ids.some(id => id.includes(t)));
+                tr.style.display = mostra ? '' : 'none';
+            });
+            if (bulkIdInput) {
+                const filtrando = termos.length > 0;
+                bulkIdInput.placeholder = algumMarcado() ? 'ID p/ marcados...' : 'Filtrar...';
+                bulkIdInput.style.borderColor = filtrando ? '#E65100' : '#ccc';
+                bulkIdInput.style.background = filtrando ? '#FFF3E0' : '';
+            }
+        };
+        const mudouSelecao = () => {
+            updateBulkOpenBtn();
+            if (algumMarcado() && this.idFilter) {
+                // marcar um CV encerra o filtro: o campo agora e o ID a aplicar
+                this.idFilter = '';
+                if (bulkIdInput) bulkIdInput.value = '';
+            }
+            aplicarFiltroId();
+        };
+
         if (selectAllCheckbox) {
             selectAllCheckbox.addEventListener('change', (e) => {
                 const isChecked = e.currentTarget.checked;
-                rowCheckboxes.forEach(cb => { cb.checked = isChecked; });
-                updateBulkOpenBtn();
+                // com filtro, "todos" sao os que estao a vista
+                rowCheckboxes.forEach(cb => {
+                    const tr = cb.closest('tr');
+                    if (!isChecked || !tr || tr.style.display !== 'none') cb.checked = isChecked;
+                });
+                mudouSelecao();
             });
         }
-        rowCheckboxes.forEach(cb => cb.addEventListener('change', updateBulkOpenBtn));
-        
-        const bulkIdInput = newTab.document.getElementById('bulk-id-input');
-        const bulkIdSelect = newTab.document.getElementById('bulk-id-select');
+        rowCheckboxes.forEach(cb => cb.addEventListener('change', mudouSelecao));
+        aplicarFiltroId();
 
         const selectedCheckboxData = () => Array.from(rowCheckboxes)
             .filter(cb => cb.checked)
@@ -3080,7 +3121,13 @@ window.JCRDBTools = {
 
         if (bulkIdInput) {
             bulkIdInput.addEventListener('click', (e) => e.stopPropagation());
+            bulkIdInput.addEventListener('input', (e) => {
+                if (algumMarcado()) return;
+                this.idFilter = e.currentTarget.value;
+                aplicarFiltroId();
+            });
             bulkIdInput.addEventListener('change', async (e) => {
+                if (!algumMarcado()) return;   // sem marcados o campo so filtra
                 await applyBulkId(e.currentTarget.value.trim(), e.currentTarget);
             });
         }
@@ -3089,8 +3136,16 @@ window.JCRDBTools = {
             bulkIdSelect.addEventListener('click', (e) => e.stopPropagation());
             bulkIdSelect.addEventListener('change', async (e) => {
                 const selectedVal = e.currentTarget.value;
-                e.currentTarget.value = ""; 
+                e.currentTarget.value = "";
                 if (!selectedVal) return;
+
+                if (!algumMarcado()) {
+                    // escolher um ID existente sem marcados filtra por ele
+                    this.idFilter = selectedVal;
+                    if (bulkIdInput) bulkIdInput.value = selectedVal;
+                    aplicarFiltroId();
+                    return;
+                }
 
                 const currentVal = bulkIdInput ? bulkIdInput.value.trim() : "";
                 let existingIds = currentVal.split(',').map(s => s.trim()).filter(s => s !== '');
@@ -3144,7 +3199,7 @@ window.JCRDBTools = {
         // Lista de processos para colar na planilha do piccTools. Com linhas marcadas,
         // leva so elas; sem marcacao, leva a tabela inteira — que ja e o resultado do
         // filtro de faixa, porque ele e aplicado antes da renderizacao (as linhas de fora
-        // nao chegam a existir).
+        // nao chegam a existir), menos as escondidas pelo filtro de ID.
         const bulkBtnProcList = newTab.document.getElementById('bulk-btn-proclist');
         if (bulkBtnProcList) {
             bulkBtnProcList.addEventListener('click', () => {
@@ -3152,7 +3207,9 @@ window.JCRDBTools = {
                 const usouSelecao = selecionados.length > 0;
                 const fonte = usouSelecao
                     ? selecionados.map(s => s.processId)
-                    : Array.from(rowCheckboxes).map(cb => cb.getAttribute('data-processid'));
+                    : Array.from(rowCheckboxes)
+                        .filter(cb => { const tr = cb.closest('tr'); return !tr || tr.style.display !== 'none'; })
+                        .map(cb => cb.getAttribute('data-processid'));
                 const processos = [...new Set(fonte.map(p => String(p || '').trim()).filter(Boolean))];
                 if (processos.length === 0) {
                     newTab.alert('Nenhuma proposta com número de processo na tabela.');
