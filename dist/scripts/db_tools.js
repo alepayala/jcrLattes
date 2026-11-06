@@ -4002,15 +4002,15 @@ window.JCRDBTools = {
     // com número, marca a caixa. A lista NA TELA é sempre numerada — ali o número serve
     // para ler e contar, e não vai para lugar nenhum.
     //
-    // "Reiniciar a cada grupo" vale para a tela e para a copia: a contagem recomeca em
+    // "Reiniciar" (a cada grupo) vale para a tela e para a copia: a contagem recomeca em
     // cada conjunto depois de um separador (ano ou categoria).
     _opcoesDeCopiaHTML: function (prefixo, numerar, reiniciar) {
         return `
-            <label class="no-print" style="cursor: pointer; color: #555;" title="Recomeça a numeração em 1 a cada conjunto (ano ou categoria), na tela e no texto copiado.">
-                <input type="checkbox" id="chk-${prefixo}-list-reiniciar" ${reiniciar ? 'checked' : ''}> Reiniciar a cada grupo
+            <label class="no-print" style="cursor: pointer; color: #555;" title="Reiniciar a numeração a cada grupo: recomeça em 1 a cada ano ou categoria, na tela e no texto copiado.">
+                <input type="checkbox" id="chk-${prefixo}-list-reiniciar" ${reiniciar ? 'checked' : ''}> Reiniciar
             </label>
-            <label class="no-print" style="cursor: pointer; color: #555;" title="Inclui a numeração no texto copiado. A lista na tela é sempre numerada.">
-                <input type="checkbox" id="chk-${prefixo}-list-numerar" ${numerar ? 'checked' : ''}> Numerar ao copiar
+            <label class="no-print" style="cursor: pointer; color: #555;" title="Numerar ao copiar: inclui a numeração no texto copiado. A lista na tela é sempre numerada.">
+                <input type="checkbox" id="chk-${prefixo}-list-numerar" ${numerar ? 'checked' : ''}> Numerar
             </label>
             <button id="btn-${prefixo}-list-copy" class="no-print" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #1565C0; background: #fff; color: #1565C0;">📋 Copiar</button>
             <span id="${prefixo}-list-copy-aviso" class="no-print" style="font-size: 0.9em; font-weight: bold; color: #2E7D32; visibility: hidden;">✓ Copiado</span>`;
@@ -4945,8 +4945,8 @@ window.JCRDBTools = {
                 <div class="collapsible-section" id="sec-members">
                     <div class="collapsible-header">
                         <div style="display: flex; align-items: center; gap: 15px;">
-                            <h3 style="margin: 0;">Membros do Grupo</h3>
-                            <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <h3 style="margin: 0; white-space: nowrap;">Membros do Grupo</h3>
+                            <div class="jcr-stop-propagation" style="font-size: 0.8em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                                 ${this._seletorPeriodoHTML('inp-membros-anos', state.membrosAnos !== undefined ? state.membrosAnos : 5, state.membrosCarreira === true, currentYear)}
                                 <button id="btn-membros-xlsx" class="no-print" title="Exportar a tabela para Excel (.xlsx)" style="padding: 2px 8px; cursor: pointer; border-radius: 3px; border: 1px solid #A5D6A7; background: #E8F5E9; color: #1B5E20;">📥 Excel</button>
                             </div>
@@ -4971,8 +4971,8 @@ window.JCRDBTools = {
                     <div class="collapsible-section" id="sec-coautoria">
                         <div class="collapsible-header" id="header-coautoria" data-collapse-key="matriz-de-coautoria">
                             <div style="display: flex; align-items: center; gap: 15px;">
-                                <h3 style="margin: 0;">Matriz de Coautoria</h3>
-                                <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <h3 style="margin: 0; white-space: nowrap;">Matriz de Coautoria</h3>
+                                <div class="jcr-stop-propagation" style="font-size: 0.8em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                                     ${this._seletorPeriodoHTML('inp-coautoria-anos', state.coautoriaAnos !== undefined ? state.coautoriaAnos : 5, state.coautoriaCarreira !== false, currentYear)}
                                 </div>
                             </div>
@@ -5188,8 +5188,8 @@ window.JCRDBTools = {
                     <div class="collapsible-section" id="sec-pub-list">
                         <div class="collapsible-header" id="header-pub-list">
                             <div style="display: flex; align-items: center; gap: 15px;">
-                                <h3 style="margin: 0;">Lista de Publicações</h3>
-                                <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <h3 style="margin: 0; white-space: nowrap;">Lista de Publicações</h3>
+                                <div class="jcr-stop-propagation" style="font-size: 0.8em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                                     ${this._seletorPeriodoHTML('inp-pub-list-years', state.pubListYears !== undefined ? state.pubListYears : 5, state.pubListCarreira === true, currentYear)}
                                     <span class="no-print">Ordem: <select id="sel-pub-list-ordem" style="padding: 2px;" title="Sempre do maior para o menor">
                                         <option value="ano" ${state.pubListOrdem !== 'jcr' && state.pubListOrdem !== 'citacoes' ? 'selected' : ''}>Ano</option>
@@ -5217,8 +5217,8 @@ window.JCRDBTools = {
                     <div class="collapsible-section" id="sec-sup-list">
                         <div class="collapsible-header" id="header-sup-list">
                             <div style="display: flex; align-items: center; gap: 15px;">
-                                <h3 style="margin: 0;">Lista de Orientações</h3>
-                                <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <h3 style="margin: 0; white-space: nowrap;">Lista de Orientações</h3>
+                                <div class="jcr-stop-propagation" style="font-size: 0.8em; font-weight: normal; margin-top: 2px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                                     ${this._seletorPeriodoHTML('inp-sup-list-years', state.supListYears !== undefined ? state.supListYears : 5, state.supListCarreira === true, currentYear)}
                                     <span class="no-print">Ordem: <select id="sel-sup-list-ordem" style="padding: 2px;">
                                         <option value="ano" ${state.supListOrdem !== 'categoria' ? 'selected' : ''}>Ano / Categoria</option>
@@ -5240,8 +5240,8 @@ window.JCRDBTools = {
                     <div class="collapsible-section" id="sec-journals">
                         <div class="collapsible-header" id="header-journal-list">
                             <div style="display: flex; align-items: center; gap: 15px;">
-                                <h3 style="margin: 0;">Publicações por Periódico</h3>
-                                <div class="jcr-stop-propagation" style="font-size: 0.9em; font-weight: normal; margin-top: 2px;">
+                                <h3 style="margin: 0; white-space: nowrap;">Publicações por Periódico</h3>
+                                <div class="jcr-stop-propagation" style="font-size: 0.8em; font-weight: normal; margin-top: 2px;">
                                     ${this._seletorPeriodoHTML('inp-journal-years', state.journalYears !== undefined ? state.journalYears : 5, state.journalCarreira === true, currentYear)}
                                     &nbsp;Mín. artigos: <input type="number" id="inp-journal-min-papers" value="${state.minJournalPapers !== undefined ? state.minJournalPapers : 1}" min="1" style="width: 40px; padding: 2px;">
                                 </div>
