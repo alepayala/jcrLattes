@@ -2,12 +2,18 @@
 // Shared utility functions for generating JCR Lattes reports
 
 window.JCRReportUtils = {
+  // Faixas de JCR na paleta "Vibrant" de Paul Tol, legivel por daltonicos: as quatro
+  // cores continuam distintas com protanopia, deuteranopia e tritanopia (a anterior,
+  // verde e vermelho, confundia Alto com Sem JCR). Os graficos usam as mesmas cores.
+  // CORES_PADRAO_ANTIGAS guarda a paleta anterior para content.js reconhecer quem a
+  // tem salva sem ter escolhido cor nenhuma.
+  CORES_PADRAO_ANTIGAS: { high: '#3daa43', mid: '#a838ca', low: '#e65100', none: '#e03535' },
   COLORS: {
-    highJcr: '#3daa43',
-    midJcr: '#a838ca',
-    lowJcr: '#E65100',
-    noJcr: '#e03535',
-    authorRank: '#3daa43',
+    highJcr: '#009988',
+    midJcr: '#0077BB',
+    lowJcr: '#EE7733',
+    noJcr: '#CC3311',
+    authorRank: '#009988',
     authorCount: '#666',
     footerText: '#333',
     border: '#ddd',
@@ -20,11 +26,11 @@ window.JCRReportUtils = {
   },
 
   GRAPH_COLORS: {
-    highJcr: '#2E7D32',
-    midJcr: '#1565C0',
-    lowJcr: '#E65100',
-    noJcr: '#C62828',
-    posDoc: '#6A1B9A'
+    highJcr: '#009988',
+    midJcr: '#0077BB',
+    lowJcr: '#EE7733',
+    noJcr: '#CC3311',
+    posDoc: '#EE3377'
   },
 
   // Linha vertical sutil que separa as colunas fora do eixo horizontal das que o

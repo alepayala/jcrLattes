@@ -230,10 +230,18 @@ async function processLattesPage(nameLink) {
   }
 
   if (saved?.colors) {
-    COLORS.highJcr = saved.colors.high || COLORS.highJcr;
-    COLORS.midJcr = saved.colors.mid || COLORS.midJcr;
-    COLORS.lowJcr = saved.colors.low || COLORS.lowJcr;
-    COLORS.noJcr = saved.colors.none || COLORS.noJcr;
+    // As cores sao gravadas sempre, escolhidas ou nao. Uma cor salva igual a da
+    // paleta padrao anterior e tratada como "nao escolhida" e passa para a nova
+    // paleta (para daltonicos); cor que o usuario mudou fica como esta.
+    const antigas = window.JCRReportUtils.CORES_PADRAO_ANTIGAS;
+    const salva = (k) => {
+      const v = saved.colors[k];
+      return v && String(v).toLowerCase() !== antigas[k] ? v : null;
+    };
+    COLORS.highJcr = salva('high') || COLORS.highJcr;
+    COLORS.midJcr = salva('mid') || COLORS.midJcr;
+    COLORS.lowJcr = salva('low') || COLORS.lowJcr;
+    COLORS.noJcr = salva('none') || COLORS.noJcr;
 
     GRAPH_COLORS.highJcr = COLORS.highJcr;
     GRAPH_COLORS.midJcr = COLORS.midJcr;

@@ -15,12 +15,12 @@ O repositório inclui:
 ## 🚀 Principais Funcionalidades (Extensão)
 
 ### 1. Métricas de Impacto e Anotação em Tempo Real
-* **Anotação de Fator de Impacto (JCR)**: Exibe o Fator de Impacto (JCR) mais recente e a contagem de autores logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual.
+* **Anotação de Fator de Impacto (JCR)**: Exibe o Fator de Impacto (JCR) mais recente e a contagem de autores logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual, numa paleta padrão legível por daltônicos e personalizável.
 * **Histograma de Distribuição JCR**: Gráfico interativo que revela o perfil de qualidade da sua produção ao longo do tempo.
 * **Métricas de Produção por Ano**: Visualize a evolução da sua carreira com barras empilhadas que mostram o impacto acumulado anualmente.
 * **Segunda Linha de Gráficos**:
   - **Distribuição por Rank de Autoria**: Histograma da distribuição por posição de autoria (`1º`, `2º`, ...), com colunas especiais para Último Autor (`Ult`) e Grandes Colaborações (`GC`), escala máxima fixada pelo histograma e barras empilhadas de cores JCR proporcionais.
-  - **Orientações por Ano**: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde, Doutorado em Azul, Mestrado em Laranja), complementado por colunas para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
+  - **Orientações por Ano**: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde-azulado, Doutorado em Azul, Mestrado em Laranja), complementado por colunas para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
 * **Tabelas Estatísticas Dinâmicas**: Tabelas com Somatórios e Médias automáticas para períodos customizados.
 * **Citação e Índice H**: Consolidação automática do Índice H e número de citações para Web of Science e Scopus.
 

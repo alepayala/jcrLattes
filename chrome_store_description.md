@@ -14,12 +14,12 @@ Com o JCRLattes, você pode criar e gerenciar um banco de dados local com os cur
 Principais Funcionalidades:
 
 1. Métricas de Impacto e Anotação em Tempo Real:
-* Anotação de Fator de Impacto (JCR): Exibe o Fator de Impacto (JCR) mais recente e a contagem de autores logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual (Alto, Médio, Baixo, Sem JCR).
+* Anotação de Fator de Impacto (JCR): Exibe o Fator de Impacto (JCR) mais recente e a contagem de autores logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual (Alto, Médio, Baixo, Sem JCR), numa paleta padrão legível por daltônicos e personalizável.
 * Histograma de Distribuição JCR: Gráfico interativo que revela o perfil de qualidade da sua produção ao longo do tempo.
 * Métricas de Produção por Ano: Visualize a evolução da sua carreira com barras empilhadas que mostram o impacto acumulado anualmente.
 * Segunda Linha de Gráficos Visualmente Rica:
   - Histograma por Rank de Autoria: Análise da distribuição de publicações por posição de autoria (1º, 2º, 3º, ...), com colunas especiais para Último Autor (`Ult`) e Grandes Colaborações (`GC`), escala máxima fixada pelo histograma e sub-barras empilhadas de cores JCR proporcionais à altura efetiva da coluna.
-  - Orientações por Ano: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde, Doutorado em Azul, Mestrado em Laranja), complementado por colunas especiais ao final para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
+  - Orientações por Ano: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde-azulado, Doutorado em Azul, Mestrado em Laranja), complementado por colunas especiais ao final para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
 * Tabelas Estatísticas Dinâmicas: Tabelas com Somatórios (Sigma) e Médias (Mu) automáticas para períodos de 5 anos, 10 anos ou intervalos customizados (ex: triênio/quadriênio de avaliação).
 * Citação e Índice H: Consolidação automática do Índice H e número de citações para Web of Science e Scopus.
 
