@@ -25,7 +25,6 @@
 window.JCRDBTools = {
     isUnlocked: true,
     autoSave: false,
-    reportFiltersCollapsed: false,
     // Opcoes globais da extensao (JCRReportUtils.OPCOES_CHAVE), como gravadas.
     opcoesGlobais: null,
     // Ids dos controles do dialogo de opcoes no relatorio. Os de limiar, filtro e
@@ -319,7 +318,7 @@ window.JCRDBTools = {
         return true;
     },
 
-    // Aplica os filtros de "Limiares e Filtros" do relatorio a uma lista de
+    // Aplica os filtros do relatorio (dialogo de opcoes) a uma lista de
     // publicacoes. So decide quem entra — nao desenha nada. Estava dentro de
     // renderCVReport e e o que define TODOS os numeros que aparecem depois: um erro
     // aqui nao da erro, da um relatorio com o total errado.
@@ -940,7 +939,7 @@ window.JCRDBTools = {
     },
 
     // Chave estavel de um bloco recolhivel do relatorio, derivada do proprio titulo
-    // ("Limiares e Filtros" -> "limiares-e-filtros"). Assim o estado independe da
+    // ("Lista de Publicacoes" -> "lista-de-publicacoes"). Assim o estado independe da
     // proposta ou do CV aberto.
     _chaveColapso: function (texto) {
         return String(texto || '')
@@ -1657,21 +1656,9 @@ window.JCRDBTools = {
                     if (result && result[this.settingsKey]) {
                         this.isUnlocked = result[this.settingsKey].isUnlocked !== undefined ? result[this.settingsKey].isUnlocked : true;
                         this.autoSave = result[this.settingsKey].autoSave !== undefined ? result[this.settingsKey].autoSave : false;
-                        this.reportFiltersCollapsed = result[this.settingsKey].reportFiltersCollapsed === true;
                         this.exportIncludeHtml = result[this.settingsKey].exportIncludeHtml !== false;
                         const salvos = result[this.settingsKey].reportCollapsed;
                         this.reportCollapsed = (salvos && typeof salvos === 'object') ? { ...salvos } : {};
-                        // Migracao: antes so o bloco de filtros era lembrado, num booleano proprio
-                        if (!salvos && this.reportFiltersCollapsed) {
-                            this.reportCollapsed[this._chaveColapso('Limiares e Filtros')] = true;
-                        }
-                        // "Limiares e Filtros" passou a abrir recolhido. Quem ja tinha o
-                        // bloco lembrado aberto recomeca recolhido uma vez (a marca abaixo
-                        // impede de repetir); dai em diante vale o que o usuario escolher.
-                        if (!this.reportCollapsed._filtrosRecolhidosPorPadrao) {
-                            this.reportCollapsed[this._chaveColapso('Limiares e Filtros')] = true;
-                            this.reportCollapsed._filtrosRecolhidosPorPadrao = true;
-                        }
                         this.dbPrintOrientation = result[this.settingsKey].dbPrintOrientation === 'portrait' ? 'portrait' : 'landscape';
                     }
                     resolve();
@@ -1689,7 +1676,6 @@ window.JCRDBTools = {
                 [this.settingsKey]: {
                     isUnlocked: this.isUnlocked,
                     autoSave: this.autoSave,
-                    reportFiltersCollapsed: this.reportFiltersCollapsed,
                     reportCollapsed: this.reportCollapsed || {},
                     exportIncludeHtml: this.exportIncludeHtml !== false,
                     dbPrintOrientation: this.dbPrintOrientation
@@ -5053,10 +5039,10 @@ window.JCRDBTools = {
                         body { background: #fff !important; padding: 0 !important; }
                         .container { max-width: none !important; box-shadow: none !important; padding: 0 !important; }
 
-                        /* Oculta controles interativos e o bloco de filtros */
+                        /* Oculta controles interativos (botoes, engrenagem, dialogo de opcoes) */
                         #btn-back-db, #btn-prev-cv, #btn-next-cv, #btn-print-report,
                         #btn-back-proc-db, #btn-prev-proc, #btn-next-proc, #proc-header-actions,
-                        #sec-report-filters, .toggle-icon, .y-icon,
+                        .toggle-icon, .y-icon,
                         .no-print,
                         .btn-view-member-report { display: none !important; }
 
@@ -6482,9 +6468,6 @@ window.JCRDBTools = {
 
                 if (chave) {
                     this.reportCollapsed[chave] = !isHidden;   // acabou de recolher?
-                    if (chave === this._chaveColapso('Limiares e Filtros')) {
-                        this.reportFiltersCollapsed = !isHidden;   // compatibilidade
-                    }
                     this.saveSettings();
                 }
 

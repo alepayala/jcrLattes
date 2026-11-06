@@ -13,7 +13,7 @@ const observerConfig = {
 
 const SETTINGS_KEY = 'jcr_lattes_settings';
 // "Opções e Filtros" abre recolhido; os demais blocos, abertos. O clique grava a escolha.
-let jcrTablesState = { publicacoes: false, citacoes: false, orientacoes: false, patentes: false, eventos: false, opcoes: true, graficos: false };
+let jcrTablesState = { publicacoes: false, citacoes: false, orientacoes: false, patentes: false, eventos: false, graficos: false };
 // Secoes do CV recolhidas pelo usuario (clique no titulo). Chave = id da ancora da secao,
 // que e estavel entre curriculos, entao o estado vale para os proximos CVs abertos.
 let jcrSectionsCollapsed = {};
@@ -219,13 +219,6 @@ async function processLattesPage(nameLink) {
 
   if (saved?.toggles?.tables) {
     jcrTablesState = { ...jcrTablesState, ...saved.toggles.tables };
-  }
-  // "Opções e Filtros" passou a abrir recolhido. Quem já o tinha lembrado aberto
-  // recomeça recolhido uma vez (a marca impede de repetir); daí em diante vale o
-  // que o usuário escolher.
-  if (!jcrTablesState._opcoesRecolhidasPorPadrao) {
-    jcrTablesState.opcoes = true;
-    jcrTablesState._opcoesRecolhidasPorPadrao = true;
   }
 
   if (saved?.toggles?.sectionsCollapsed) {
