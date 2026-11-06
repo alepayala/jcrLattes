@@ -8,7 +8,7 @@ Esta extensão automatiza a extração, anotação e visualização de métricas
 
 O repositório inclui:
 1. **Extensão para Google Chrome (`/dist`)**: Adiciona funcionalidades ao currículo Lattes.
-2. **Parser JSON e Gerador de Grafo (`parse_jcr_backup.py`)**: Script em Python para análise offline e geração de grafos de colaboração a partir do backup JSON gerado pela extensão.
+2. **Leitor do backup JSON (`tools/parse_jcr_backup.py`)**: Módulo Python que lê o backup JSON exportado pela extensão e entrega os currículos prontos para qualquer análise offline. Traz, como exemplo de uso, um gerador de grafo de colaboração.
 
 ---
 
@@ -50,35 +50,54 @@ O repositório inclui:
 
 ---
 
-## 🐍 Parser Python & Grafo de Colaboração (`tools/parse_jcr_backup.py`)
+## 🐍 Leitor do Backup JSON (`tools/parse_jcr_backup.py`)
 
-O repositório inclui um script em Python (na pasta `tools/`) desenvolvido para analisar o banco de dados JSON exportado pela extensão e gerar visualizações complexas de rede.
+O objetivo do `parse_jcr_backup.py` é ser a porta de entrada para os dados da extensão em Python: ele lê o backup JSON exportado pelo painel e devolve os currículos já organizados, para que você monte as suas próprias análises. O grafo de colaboração descrito mais abaixo é um exemplo do que dá para fazer com ele.
 
-### Requisitos:
+A leitura segue as mesmas regras da extensão:
+* Aceita os três tipos de exportação: o banco geral, o backup de um grupo (ID customizado) e o backup de propostas. Só os currículos viram pesquisadores; propostas e registros de configuração ficam separados.
+* Identifica o pesquisador pelo ID Lattes (não pelo nome, para não juntar homônimos) e junta registros repetidos do mesmo ID, mantendo o currículo completo mais recente.
+* Marca os "esqueletos" (registros só com nome, sem o currículo).
+* Identifica cada artigo pelo DOI ou, sem ele, pelo título e ano — a mesma chave da Matriz de Coautoria.
+
+### Requisitos
+A leitura não precisa de nenhuma biblioteca externa. Só o exemplo do grafo precisa de:
 ```bash
 pip install networkx matplotlib
 ```
 
-### Uso Básico:
-Exporte o backup JSON através do painel da extensão (o arquivo baixado será algo como `jcr_lattes_database_backup.json`).
+### Usando o leitor nas suas análises
+Exporte o backup JSON pelo painel da extensão (o arquivo baixado será algo como `jcr_lattes_database_backup.json`) e, de dentro da pasta `tools/`:
+```python
+from parse_jcr_backup import load_backup, find_researcher, get_pub_id
 
-Execute o script (de dentro da pasta `tools/`) passando o arquivo JSON exportado:
+dados = load_backup('jcr_lattes_database_backup.json')
+for cv in dados.cvs:                     # CVData: nome, ID Lattes, ID customizado, publicações,
+    print(cv.name, len(cv.publications)) # patentes, eventos, orientações e o registro bruto (raw_data)
+
+ana = find_researcher(dados.cvs, 'Ana Silva')        # por nome ou pelo ID Lattes
+artigos = {get_pub_id(p) for p in ana.publications}  # chave do artigo (DOI ou título + ano)
+```
+`dados.proposals` traz as propostas, quando o arquivo é um backup de propostas.
+
+### Exemplo: grafo de colaboração
+Pela linha de comando, o script imprime um resumo de cada currículo e, com `--graph`, desenha a rede de artigos em comum:
 ```bash
 cd tools
 python parse_jcr_backup.py jcr_lattes_database_backup.json --graph
 ```
 
 Isso irá:
-1. Analisar todos os currículos Lattes exportados.
-2. Identificar conexões e artigos publicados em comum.
-3. Imprimir um sumário das estatísticas (H-Index, Publicações, Patentes, Orientações) no terminal.
+1. Ler todos os currículos do backup e informar propostas, esqueletos e duplicatas encontrados.
+2. Imprimir um sumário de cada currículo no terminal.
+3. Identificar os artigos publicados em comum.
 4. Gerar um **Grafo de Rede de Colaboração (network_graph.png)** visualizando as pontes e a densidade das publicações em conjunto.
 
-### Opções Avançadas de Grafo
+### Opções do Grafo
 Você pode customizar a geração através do arquivo `tools/config.json` ou passando parâmetros via linha de comando:
 * `--target-custom-id "SIGLA"`: Filtra e gera o grafo *apenas* para os currículos que possuam este ID customizado.
 * `--ignore-isolated`: Oculta pesquisadores sem conexões (publicações em comum) da imagem.
-* `--target-researcher "Nome"`: Gera um Ego-Graph (raio 1) focado apenas neste pesquisador específico e seus colaboradores diretos.
+* `--target-researcher "Nome"`: Gera um Ego-Graph (raio 1) focado apenas neste pesquisador específico e seus colaboradores diretos. Aceita também o ID Lattes; se o nome corresponder a mais de uma pessoa, o script lista os candidatos.
 
 ---
 

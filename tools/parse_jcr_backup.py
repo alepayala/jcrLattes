@@ -1,3 +1,19 @@
+"""
+Leitor do backup JSON exportado pela extensao JCRLattes.
+
+O objetivo e dar acesso aos dados da extensao em Python para qualquer analise
+offline: load_backup() devolve os curriculos (CVData) e, num backup de propostas,
+as propostas, com as mesmas regras de identificacao da extensao. find_researcher()
+acha um pesquisador por nome ou ID Lattes e get_pub_id() da a chave de um artigo.
+
+O grafo de colaboracao (generate_network_graph, opcao --graph) e um exemplo de uso;
+so ele precisa de networkx e matplotlib.
+
+    from parse_jcr_backup import load_backup
+    dados = load_backup('jcr_lattes_database_backup.json')
+    for cv in dados.cvs:
+        print(cv.name, len(cv.publications))
+"""
 import json
 import argparse
 import re
@@ -409,7 +425,7 @@ def generate_network_graph(cvs: List[CVData], output_file: str, zoom: float = 1.
     # plt.show() # Commented out to prevent blocking in scripts
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse JCR Lattes JSON Database Backup")
+    parser = argparse.ArgumentParser(description="Read a JCRLattes JSON backup and summarize its CVs; --graph draws the collaboration network as an example of use")
     parser.add_argument("backup_file", nargs="?", default=None, help="Path to the exported jcr_lattes_database_backup.json file")
     parser.add_argument("--config", type=str, default="config.json", help="Path to a JSON configuration file specifying the arguments (default: config.json)")
     parser.add_argument("--graph", action="store_true", help="Generate a network graph of common publications")

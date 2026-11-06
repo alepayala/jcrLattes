@@ -73,7 +73,7 @@ Como Usar:
 --------------------------------------------------
 
 Código Fonte & Comunidade:
-O JCRLattes é um projeto de código aberto! Acesse o nosso repositório oficial no GitHub para baixar o script de geração de grafos (Parser Python), reportar problemas, contribuir com código ou ler a documentação completa:
+O JCRLattes é um projeto de código aberto! Acesse o nosso repositório oficial no GitHub para baixar o leitor em Python do backup JSON (com um gerador de grafos de colaboração como exemplo de uso), reportar problemas, contribuir com código ou ler a documentação completa:
 🔗 https://github.com/alepayala/jcrLattes
 
 --------------------------------------------------

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-JCRLattes is a Manifest V3 Chrome extension (vanilla JS, no framework, no bundler, no `package.json`) that annotates the Brazilian Lattes CV platform (CNPq) and the CNPq grant-proposal system with impact-factor (JCR) metrics, authorship analysis, and statistical reports. It also ships a standalone Python script for offline analysis of the extension's exported data.
+JCRLattes is a Manifest V3 Chrome extension (vanilla JS, no framework, no bundler, no `package.json`) that annotates the Brazilian Lattes CV platform (CNPq) and the CNPq grant-proposal system with impact-factor (JCR) metrics, authorship analysis, and statistical reports. It also ships a standalone Python reader for the extension's exported JSON, for offline analysis.
 
 **`dist/` is the source** — there is no build step. Chrome loads `dist/` directly as an unpacked extension, and edits are made straight to the files under `dist/scripts/`.
 
@@ -15,7 +15,7 @@ JCRLattes is a Manifest V3 Chrome extension (vanilla JS, no framework, no bundle
 - **Run the unit tests**: `node --test` (from the repo root). Uses Node's built-in runner — no `package.json`, no dependencies, nothing to install. Run it after touching any pure helper.
 - **Test suite scope**: `tests/` covers only the *pure* functions of `producoes_parser.js`, `report_utils.js`, and `db_tools.js` — parsing, deduplication, key derivation, stats, HTML escaping, and the `mesclarEquipe` hand-edit contract. `tests/helpers/load.js` loads the extension scripts in Node by supplying a minimal `window` global; the production files are untouched and require no module system. Anything that needs the DOM, `chrome.*`, or a real page is **not** covered.
 - **Everything else is still verified manually**: load the unpacked extension and open real or saved pages from `test_pages/` (sample Lattes CVs, "Produções e Orientações" pages, proposal PDFs — gitignored, kept locally for manual regression checks).
-- **Python collaboration-graph tool** (independent of the extension, only shares its JSON data format):
+- **Python JSON reader** (`tools/parse_jcr_backup.py`; independent of the extension, only shares its JSON data format). Its purpose is to read the backup into Python structures (`load_backup`, `CVData`, `find_researcher`, `get_pub_id`) for any offline analysis; the collaboration graph (`--graph`, needs networkx/matplotlib) is an example of use. Reading needs no dependencies; the graph example runs as:
   ```bash
   pip install networkx matplotlib
   cd tools
