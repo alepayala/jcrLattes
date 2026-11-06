@@ -25,11 +25,12 @@ Principais Funcionalidades:
 
 2. Gerenciamento e Banco de Dados Local:
 * Banco de Dados de Currículos: Salve múltiplos currículos Lattes localmente no seu navegador para consultas futuras e análises comparativas, com visualização nativa do Índice H e total de citações diretamente na listagem.
-* Consolidação Instantânea de Grupos: Atribua IDs customizados aos currículos para compilar métricas integradas em tempo real. 
+* Consolidação Instantânea de Grupos: Atribua IDs customizados aos currículos para compilar métricas integradas em tempo real. O mesmo campo de ID filtra a tabela do banco: sem currículos marcados, digite ou escolha um ID para ver só os membros daquele grupo.
 * Relatório de Seleção: Gere o resumo e o relatório consolidado apenas dos currículos marcados na tabela, sem precisar criar um ID de grupo — ideal para análises pontuais.
 * Salvamento Simultâneo Confiável: Cada currículo é armazenado individualmente no banco local. Atualize vários CVs em abas paralelas sem risco de um sobrescrever o outro.
 * Deduplicação Inteligente: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria/colaboração repetidos entre os membros, gerando métricas reais e não infladas da produção coletiva.
-* Tabela de Membros do Grupo: Indicadores de cada membro num período escolhido (artigos por faixa de JCR, soma e média do JCR, orientações, patentes), com índice H e citações WoS da carreira toda. Ordenável por qualquer coluna e exportável para Excel (.xlsx).
+* Tabela de Membros do Grupo: Indicadores de cada membro num período escolhido (artigos por faixa de JCR, soma e média do JCR, orientações, patentes), com índice H e citações WoS da carreira toda e o ano do doutorado (ou da maior titulação, com o nível indicado). Ordenável por qualquer coluna, com link para o currículo Lattes e exportável para Excel (.xlsx).
+* Matriz de Coautoria: Quantos artigos cada par de membros do grupo publicou junto, com os pesquisadores agrupados automaticamente por colaboração e setas para reorganizar as linhas à mão.
 * Acesso Direto Integrado: Atalho flutuante injetado na tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
 * Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status na coluna de ações, com botão direto para abrir o Lattes.
 * Atualização Simplificada (Update): Um botão de atualização rápida permite abrir o currículo Lattes em uma nova aba para reprocessar e sincronizar os dados mais recentes.
@@ -47,9 +48,11 @@ Principais Funcionalidades:
 * Divisão Cronológica Visual: Insere separadores anuais elegantes na lista de publicações do currículo Lattes para facilitar a leitura.
 * Filtros Interativos Rápidos: Oculte seções inteiras ou filtre publicações por faixa de JCR, papel de autoria ou grandes colaborações com apenas um clique.
 * Relatório Individual com Um Clique: Ícone dedicado no cabeçalho do currículo abre instantaneamente o relatório completo do CV em exibição, sem passar pelo banco de dados.
-* Lista de Publicações Detalhada: Cada publicação exibe JCR, DOI e número de citações (Web of Science/Scopus) lado a lado, com checkboxes para mostrar/ocultar cada informação conforme a necessidade.
+* Lista de Publicações Detalhada: Cada publicação exibe JCR, DOI e número de citações (Web of Science/Scopus) lado a lado, com checkboxes para mostrar/ocultar cada informação conforme a necessidade. A lista pode ser ordenada por ano, JCR ou citações.
+* Listas Prontas para Documentos: As listas de publicações e de orientações são copiadas em texto puro com um clique, com numeração opcional — contínua ou reiniciada a cada ano ou categoria.
+* Períodos Padronizados: Todos os campos de período seguem a regra dos editais — N anos completos mais o ano corrente —, com a opção "Toda a carreira" e o intervalo exato indicado ao passar o mouse. As seções se atualizam sozinhas ao mudar o período.
 * Versão de Impressão: Botão de impressão nos relatórios individuais e de grupo. As seções abertas são impressas por completo (listas e tabelas sem cortes de rolagem), com gráficos coloridos, linha-resumo dos limiares/filtros aplicados e cabeçalhos de tabela repetidos a cada página. A tabela do banco de CVs também tem impressão otimizada, com seletor de orientação (paisagem/retrato).
-* Cabeçalho Compacto: Controles do currículo convertidos em ícones com estado ligado/desligado, e bloco de limiares e filtros dos relatórios colapsável — a extensão lembra suas preferências entre sessões.
+* Cabeçalho Compacto: Controles do currículo convertidos em ícones com estado ligado/desligado, e blocos de opções e filtros que começam recolhidos — a extensão lembra suas preferências entre sessões. As caixas de listas e tabelas do relatório podem ser redimensionadas na vertical.
 * Design Premium: Interface moderna, limpa e responsiva que se integra de maneira nativa e elegante ao layout da Plataforma Lattes.
 
 Privacidade e Segurança Absoluta:
@@ -62,7 +65,7 @@ Como Usar:
 4. Para salvar o currículo no seu banco de dados local ou configurar filtros, utilize o painel lateral de opções da extensão.
 
 5. ⚠️ Atenção e Avisos Importantes:
-* Extração de Dados: O JCRLattes depende da formatação original do currículo Lattes. Preenchimentos atípicos ou informações inseridas fora do padrão pelo autor me podem gerar inconsistências na extração.
+* Extração de Dados: O JCRLattes depende da formatação original do currículo Lattes. Preenchimentos atípicos ou informações inseridas fora do padrão pelo autor podem gerar inconsistências na extração.
 * Carregamento Dinâmico: Algumas informações do Lattes são carregadas de forma assíncrona. A extensão precisa aguardar essas atualizações em tempo real, sendo suscetível a oscilações e lentidões na conexão com os servidores do CNPq.
 * Dados do ResearcherID: As requisições de citações e publicações para o ResearcherID podem falhar dependendo das restrições de acesso da base de dados. Preferencialmente, certifique-se de estar logado na Web of Science ou de utilizar uma rede com acesso institucional liberado (CAFe).
 * Relatórios em Grupo: A geração de relatórios coletivos, especialmente a deduplicação de produções, pode exigir muito processamento. Caso seu navegador mostre uma notificação alertando lentidão ou inatividade na página, selecione "Aguardar" e tenha paciência até a conclusão.
@@ -75,79 +78,3 @@ O JCRLattes é um projeto de código aberto! Acesse o nosso repositório oficial
 
 --------------------------------------------------
 Eleve o nível de sua gestão acadêmica e análise de produção científica com o JCRLattes.
-
---------------------------------------------------
-
-### 🔒 SEÇÃO PRIVADA — FORMULÁRIO DE ENVIO (NÃO É TEXTO PÚBLICO DA LOJA)
-
-> O que segue destina-se aos campos de justificativa do Chrome Web Store Developer
-> Console. Não aparece na página pública da extensão e não deve ser copiado para a
-> descrição, para o resumo nem para as capturas de tela.
-
---------------------------------------------------
-
-### ✅ CHECKLIST ANTES DE GERAR O ZIP DA LOJA
-
-* piccTools continua **desabilitado por padrão** e fora de todo texto público.
-* Versão do `dist/manifest.json` incrementada em relação à publicada.
-
---------------------------------------------------
-
-### 📝 JUSTIFICATIVA DAS PERMISSÕES DE HOST (CHROME WEB STORE SUBMISSION FORM)
-
-**English (Recommended for Chrome Web Store Developer Console Form):**
-> * `buscatextual.cnpq.br` — the Lattes CV pages themselves. The extension annotates the
->   impact factor of each article directly in the CV the user is already viewing.
-> * `researcherid.com` / `webofscience.com` — read the user's public citation and h-index
->   figures to complete the production report.
-> * `efomento.cnpq.br` — CNPq's grant management system. For users who are already
->   authorized reviewers, the extension reads the judgment spreadsheet **they already have
->   access to** and organizes the proposals under their review into a local database.
-> * `anexosform.cnpq.br` — the host that serves the proposal PDFs and their attachments,
->   linked from that same spreadsheet.
-> * `plsql1.cnpq.br` — frozen (archived) Lattes CVs linked from the proposals.
->
-> The extension only reads pages the signed-in user can already open by hand; it never
-> creates sessions, never sends data to third parties, and stores everything locally.
-
-**Português (para conferência do desenvolvedor):**
-> * `buscatextual.cnpq.br` — as próprias páginas de currículo Lattes, onde o fator de
->   impacto é anotado.
-> * `researcherid.com` / `webofscience.com` — leitura das citações e do índice h públicos.
-> * `efomento.cnpq.br` — sistema de fomento do CNPq. Para quem já é avaliador autorizado,
->   a extensão lê a planilha de julgamento **à qual essa pessoa já tem acesso** e organiza
->   localmente as propostas sob sua responsabilidade.
-> * `anexosform.cnpq.br` — servidor dos PDFs das propostas e dos anexos.
-> * `plsql1.cnpq.br` — currículos Lattes congelados vinculados às propostas.
->
-> A extensão só lê páginas que o usuário autenticado já consegue abrir manualmente; não
-> cria sessões, não envia dados a terceiros e guarda tudo localmente.
-
---------------------------------------------------
-
-### 📝 JUSTIFICATIVA DAS DEMAIS PERMISSÕES
-
-> * `storage` / `unlimitedStorage` — o banco de dados de currículos e propostas fica no
->   navegador do usuário; `unlimitedStorage` é necessário porque cópias de currículos e
->   documentos ultrapassam a cota padrão.
-> * `tabs` — abrir a página do banco de dados e os relatórios em novas abas.
-> * `scripting` — anotar o currículo aberto e montar os relatórios na própria página.
-
---------------------------------------------------
-
-### 📝 JUSTIFICATIVA PARA A PERMISSÃO "downloads" (CHROME WEB STORE SUBMISSION FORM)
-
-**English (Recommended for Chrome Web Store Developer Console Form):**
-> The "downloads" permission is strictly required to allow users to export and save their academic data and reports to their local disk. Specifically:
-> 1. Exporting local database backups as JSON files for data portability, backup, and restoration across devices.
-> 2. Exporting consolidated scientific production tables and metrics as CSV files for offline statistical analysis in spreadsheet applications (e.g., Microsoft Excel).
-> 3. Saving offline backup copies of academic document reports (in PDF and HTML formats) directly to the user's local Downloads folder for offline consultation when academic servers are unavailable.
-> No automatic or background downloads occur without explicit user interaction (clicking export/download buttons).
-
-**Português (Para conferência do desenvolvedor):**
-> A permissão "downloads" é estritamente necessária para permitir que o usuário exporte e salve seus dados e relatórios acadêmicos no disco rígido. Especificamente:
-> 1. Exportação de backups do banco de dados local em arquivos JSON para portabilidade e restauração em outros dispositivos.
-> 2. Exportação de relatórios e métricas de produção científica em arquivos CSV para análise estatística em planilhas (como o Excel).
-> 3. Salvamento de cópias de backup de documentos acadêmicos (PDF e HTML) na pasta Downloads local para consulta offline quando os servidores estiverem indisponíveis.
-> Nenhum download é realizado em segundo plano sem a ação direta e explícita do usuário (clique nos botões de exportação/salvamento).
-
