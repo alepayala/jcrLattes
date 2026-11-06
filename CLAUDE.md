@@ -46,7 +46,7 @@ Content scripts run in the page's origin and can't cross-origin `fetch`, open ta
 
 ### Storage conventions (`chrome.storage.local` only — no IndexedDB, no remote server)
 
-- `jcr_lattes_settings` — per-report display settings (JCR thresholds, colors, toggles) set from `content.js`.
+- `jcr_lattes_settings` — the extension-wide options shared by the Lattes CV panel and the reports: JCR thresholds, custom period, author rank, colors, display filters (`toggles.jcr/author/period`, honored only while `lembrarFiltros` is on), plus CV-panel layout state (`toggles.tables`, `sectionsCollapsed`). Both sides edit it through the same ⚙ dialog (`JCRReportUtils.dialogoOpcoesHTML`) and read it through `JCRReportUtils.opcoesEfetivas`; reports write with `salvarOpcoes` (a merge, never a full overwrite). The `highJcr`/`lowJcr` stored in each CV record are no longer used for display.
 - `jcr_private_settings` — feature flags, notably `isUnlocked` (DB tools access).
 - `jcr_cv:<id>` / `jcr_proc:<id>` — current per-record storage keys for CVs and proposals (`JCRDBTools.DB_SCHEMA_VERSION = 2`). `jcr_cv_database` is the legacy single-array key, kept only for migration.
 - `jcr_ca_member_auth` — rolling 7-day authorization proving the user is a CNPq committee ("CA") member, set when they visit a "Planilha de Julgamento" page; gates the proposals UI in the popup and PDF-page tooling in `picc_content.js`.

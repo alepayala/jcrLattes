@@ -5,9 +5,196 @@ window.JCRReportUtils = {
   // Faixas de JCR na paleta "Vibrant" de Paul Tol, legivel por daltonicos: as quatro
   // cores continuam distintas com protanopia, deuteranopia e tritanopia (a anterior,
   // verde e vermelho, confundia Alto com Sem JCR). Os graficos usam as mesmas cores.
-  // CORES_PADRAO_ANTIGAS guarda a paleta anterior para content.js reconhecer quem a
-  // tem salva sem ter escolhido cor nenhuma.
+  // CORES_PADRAO e a paleta de fabrica (o botao "Restaurar cores" volta a ela);
+  // CORES_PADRAO_ANTIGAS e a anterior, para reconhecer quem a tem salva sem ter
+  // escolhido cor nenhuma.
+  CORES_PADRAO: { high: '#009988', mid: '#0077BB', low: '#EE7733', none: '#CC3311' },
   CORES_PADRAO_ANTIGAS: { high: '#3daa43', mid: '#a838ca', low: '#e65100', none: '#e03535' },
+
+  // ---- Opcoes da extensao ----
+  // Limiares de JCR, periodo customizado, rank do autor, cores e filtros sao UMA
+  // configuracao, compartilhada pelo painel do CV Lattes e pelos relatorios, gravada
+  // em chrome.storage na chave abaixo (a mesma que o content.js ja usava). Os filtros
+  // (mostrar/ocultar por faixa e por autoria, e o periodo do CV) so sao lembrados
+  // quando lembrarFiltros esta ligado; desligado, cada tela comeca mostrando tudo.
+  OPCOES_CHAVE: 'jcr_lattes_settings',
+
+  // Valores efetivos a partir do objeto gravado, que pode faltar ou vir incompleto.
+  opcoesEfetivas: function (salvo) {
+    const s = salvo || {};
+    const num = (v, d) => { const n = parseFloat(v); return isNaN(n) ? d : n; };
+    const int = (v, d, min) => { const n = parseInt(v, 10); return isNaN(n) || n < min ? d : n; };
+    const antigas = this.CORES_PADRAO_ANTIGAS, padrao = this.CORES_PADRAO;
+    const cor = (k) => {
+      const v = s.colors && s.colors[k];
+      return v && /^#[0-9a-f]{6}$/i.test(v) && v.toLowerCase() !== antigas[k] ? v : padrao[k];
+    };
+    const lembrar = s.lembrarFiltros !== false;
+    const t = (lembrar && s.toggles) || {};
+    const j = t.jcr || {}, a = t.author || {};
+    return {
+      highJcr: num(s.highJcr, 7),
+      lowJcr: num(s.lowJcr, 1.5),
+      customYears: int(s.customYears, 1, 0),
+      targetAuthorRank: int(s.targetAuthorRank, 1, 1),
+      cores: { high: cor('high'), mid: cor('mid'), low: cor('low'), none: cor('none') },
+      lembrarFiltros: lembrar,
+      filtros: {
+        jcr: { high: j.high !== false, mid: j.mid !== false, low: j.low !== false, none: j.none !== false },
+        author: { first: a.first !== false, last: a.last !== false, others: a.others !== false, gc: a.gc !== false },
+        period: ['all', 'recent', 'last10', 'custom'].includes(t.period) ? t.period : 'all'
+      }
+    };
+  },
+
+  // Faixas e graficos passam a usar estas cores ({ high, mid, low, none }).
+  aplicarCores: function (cores) {
+    const c = cores || this.CORES_PADRAO;
+    this.COLORS.highJcr = this.GRAPH_COLORS.highJcr = c.high;
+    this.COLORS.midJcr = this.GRAPH_COLORS.midJcr = c.mid;
+    this.COLORS.lowJcr = this.GRAPH_COLORS.lowJcr = c.low;
+    this.COLORS.noJcr = this.GRAPH_COLORS.noJcr = c.none;
+    this.COLORS.authorRank = c.high;
+  },
+
+  // Mescla `parcial` no objeto gravado (toggles.jcr/author um nivel abaixo), sem
+  // apagar o que o content.js guarda junto (tabelas recolhidas, secoes do CV...).
+  mesclarOpcoes: function (salvo, parcial) {
+    const s = Object.assign({}, salvo || {});
+    const p = parcial || {};
+    Object.keys(p).forEach(k => {
+      if (k === 'colors') s.colors = Object.assign({}, s.colors || {}, p.colors);
+      else if (k === 'toggles') {
+        const t = Object.assign({}, s.toggles || {});
+        Object.keys(p.toggles).forEach(tk => {
+          const v = p.toggles[tk];
+          t[tk] = (v && typeof v === 'object' && !Array.isArray(v)) ? Object.assign({}, t[tk] || {}, v) : v;
+        });
+        s.toggles = t;
+      } else s[k] = p[k];
+    });
+    return s;
+  },
+
+  lerOpcoes: function () {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(this.OPCOES_CHAVE, (r) => {
+          resolve((!chrome.runtime.lastError && r && r[this.OPCOES_CHAVE]) || {});
+        });
+      } catch (e) { resolve({}); }
+    });
+  },
+
+  salvarOpcoes: async function (parcial) {
+    const atual = await this.lerOpcoes();
+    const novo = this.mesclarOpcoes(atual, parcial);
+    await new Promise((resolve) => {
+      try { chrome.storage.local.set({ [this.OPCOES_CHAVE]: novo }, () => resolve()); }
+      catch (e) { resolve(); }
+    });
+    return novo;
+  },
+
+  // Dialogo de opcoes, o mesmo no CV Lattes e nos relatorios. Cada tela passa os ids
+  // dos seus controles (`ids`), porque a logica que ja reage a eles continua a de
+  // cada lado; `o` sao os valores (formato de opcoesEfetivas). `comPeriodo` inclui o
+  // filtro por periodo, que so existe no CV. Nasce escondido; ligarDialogoOpcoes o
+  // abre pelo botao da engrenagem.
+  dialogoOpcoesHTML: function (cfg) {
+    const ids = cfg.ids, o = cfg.o, rank = o.targetAuthorRank;
+    const marc = (v) => (v ? ' checked' : '');
+    const caixa = 'border: 1px solid #ddd; border-radius: 6px; padding: 10px 12px; margin: 0;';
+    const leg = 'font-weight: bold; padding: 0 4px; color: #333;';
+    const num = 'width: 56px; padding: 3px; text-align: center;';
+    const faixa = (k, rotulo) => `
+        <div style="display: flex; align-items: center; gap: 8px; margin: 3px 0;">
+          <input type="color" id="${ids.cor[k]}" value="${o.cores[k]}" title="Cor da faixa ${rotulo}" style="width: 26px; height: 22px; padding: 0; border: 1px solid #ccc; cursor: pointer; background: transparent;">
+          <label style="cursor: pointer;"><input type="checkbox" id="${ids.jcr[k]}"${marc(o.filtros.jcr[k])}> ${rotulo}</label>
+        </div>`;
+    const periodo = !cfg.comPeriodo ? '' : `
+      <fieldset style="${caixa}">
+        <legend style="${leg}">Produções do CV por período</legend>
+        ${[['all', 'Todas'], ['recent', 'Últimos 5 anos'], ['last10', 'Últimos 10 anos'], ['custom', 'Período customizado']].map(([v, r]) =>
+          `<label style="display: block; cursor: pointer; margin: 3px 0;"><input type="radio" name="${ids.periodo}" value="${v}"${marc(o.filtros.period === v)}> ${r}</label>`).join('')}
+      </fieldset>`;
+    return `
+<div id="${ids.dialogo}" class="no-print" role="dialog" aria-modal="true" aria-labelledby="${ids.dialogo}-titulo"
+     style="display: none; position: fixed; inset: 0; z-index: 2147483000; background: rgba(0,0,0,0.35); align-items: center; justify-content: center; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+  <div style="background: #fff; color: #333; border-radius: 8px; width: min(640px, 94vw); max-height: 90vh; overflow: auto; padding: 16px 18px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); font-size: 13px; text-align: left;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <h3 id="${ids.dialogo}-titulo" style="margin: 0; font-size: 1.15em; color: #1565C0;">⚙️ Opções</h3>
+      <button type="button" data-fechar-opcoes title="Fechar (Esc)" style="border: none; background: none; font-size: 20px; cursor: pointer; color: #666; line-height: 1;">×</button>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px;">
+      <fieldset style="${caixa}">
+        <legend style="${leg}">Limiares de JCR</legend>
+        <div style="margin: 3px 0;">Alto: JCR ≥ <input type="number" id="${ids.high}" value="${o.highJcr}" step="0.5" min="0" style="${num}"></div>
+        <div style="margin: 3px 0;">Médio: JCR ≥ <input type="number" id="${ids.low}" value="${o.lowJcr}" step="0.5" min="0" style="${num}"></div>
+        <div style="color: #777; font-size: 0.9em; margin-top: 4px;">Abaixo do médio, Baixo; sem fator de impacto, Sem JCR.</div>
+      </fieldset>
+      <fieldset style="${caixa}">
+        <legend style="${leg}">Período customizado</legend>
+        <div style="margin: 3px 0;"><input type="number" id="${ids.custom}" value="${o.customYears}" min="0" style="${num}"> anos</div>
+        <div style="color: #777; font-size: 0.9em; margin-top: 4px;">N anos completos mais o ano atual (0 = só o ano atual). É a linha "período customizado" das tabelas.</div>
+      </fieldset>
+      <fieldset style="${caixa}">
+        <legend style="${leg}">Faixas de JCR: cor e exibição</legend>
+        ${faixa('high', 'Alto')}${faixa('mid', 'Médio')}${faixa('low', 'Baixo')}${faixa('none', 'Sem JCR')}
+        <button type="button" id="${ids.restaurar}" style="margin-top: 8px; padding: 4px 10px; cursor: pointer; border: 1px solid #1565C0; color: #1565C0; background: #fff; border-radius: 4px;" title="Volta à paleta padrão, legível por daltônicos">↺ Restaurar cores padrão</button>
+      </fieldset>
+      <fieldset style="${caixa}">
+        <legend style="${leg}">Autoria</legend>
+        <div style="margin: 3px 0 6px;">Rank do autor: <input type="number" id="${ids.rank}" value="${rank}" min="1" max="99" style="${num}"></div>
+        <label style="display: block; cursor: pointer; margin: 3px 0;"><input type="checkbox" id="${ids.autor.first}"${marc(o.filtros.author.first)}> <span id="${ids.rotuloRank}">${rank}º Autor</span></label>
+        <label style="display: block; cursor: pointer; margin: 3px 0;"><input type="checkbox" id="${ids.autor.last}"${marc(o.filtros.author.last)}> Último autor</label>
+        <label style="display: block; cursor: pointer; margin: 3px 0;"><input type="checkbox" id="${ids.autor.others}"${marc(o.filtros.author.others)}> Outras posições</label>
+        <label style="display: block; cursor: pointer; margin: 3px 0;"><input type="checkbox" id="${ids.autor.gc}"${marc(o.filtros.author.gc)}> Grandes colaborações (et al.)</label>
+      </fieldset>
+      ${periodo}
+    </div>
+    <label style="display: block; cursor: pointer; margin-top: 12px;" title="Ligado: os filtros de exibição valem para o CV Lattes e para os relatórios e continuam na próxima vez. Desligado: cada tela começa mostrando tudo.">
+      <input type="checkbox" id="${ids.lembrar}"${marc(o.lembrarFiltros)}> Lembrar os filtros de exibição entre telas e sessões
+    </label>
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; border-top: 1px solid #eee; padding-top: 10px;">
+      <span style="color: #777; font-size: 0.9em;">Limiares, período, rank e cores valem para o CV Lattes e para os relatórios.</span>
+      <button type="button" data-fechar-opcoes style="padding: 6px 16px; cursor: pointer; border: none; background: #1565C0; color: #fff; border-radius: 4px; font-weight: bold;">Fechar</button>
+    </div>
+  </div>
+</div>`;
+  },
+
+  // Abre e fecha o dialogo (engrenagem, X, Fechar, Esc, clique fora) e liga o
+  // "Restaurar cores". Como as telas se remontam a cada mudanca, a janela guarda se
+  // o dialogo estava aberto, e ele reabre sozinho depois da remontagem.
+  ligarDialogoOpcoes: function (doc, ids) {
+    const dlg = doc.getElementById(ids.dialogo);
+    if (!dlg) return;
+    const win = doc.defaultView || window;
+    const abrir = () => { dlg.style.display = 'flex'; win.__jcrOpcoesAbertas = true; };
+    const fechar = () => { dlg.style.display = 'none'; win.__jcrOpcoesAbertas = false; };
+    const botao = doc.getElementById(ids.abrir);
+    if (botao) botao.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); abrir(); });
+    dlg.querySelectorAll('[data-fechar-opcoes]').forEach(b => b.addEventListener('click', fechar));
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) fechar(); });
+    // um ouvinte de Esc por documento: a remontagem do relatorio (document.open)
+    // apaga os ouvintes, entao o anterior e trocado, nunca acumulado
+    if (win.__jcrOpcoesEsc) doc.removeEventListener('keydown', win.__jcrOpcoesEsc);
+    win.__jcrOpcoesEsc = (e) => {
+      const d = doc.getElementById(ids.dialogo);
+      if (e.key === 'Escape' && d && d.style.display !== 'none') { d.style.display = 'none'; win.__jcrOpcoesAbertas = false; }
+    };
+    doc.addEventListener('keydown', win.__jcrOpcoesEsc);
+    const restaurar = doc.getElementById(ids.restaurar);
+    if (restaurar) restaurar.addEventListener('click', () => {
+      const ks = ['high', 'mid', 'low', 'none'];
+      ks.forEach(k => { const c = doc.getElementById(ids.cor[k]); if (c) c.value = this.CORES_PADRAO[k].toLowerCase(); });
+      // um evento so: quem escuta le as quatro cores de uma vez
+      const ult = doc.getElementById(ids.cor.none);
+      if (ult) ult.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    if (win.__jcrOpcoesAbertas) dlg.style.display = 'flex';
+  },
   COLORS: {
     highJcr: '#009988',
     midJcr: '#0077BB',

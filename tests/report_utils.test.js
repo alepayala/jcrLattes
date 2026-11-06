@@ -1324,3 +1324,60 @@ describe('inicioDoPeriodo / descricaoPeriodo', () => {
         assert.strictEqual(R.agruparPorPeriodico(pubs, null, 2026)[0].count, 3);
     });
 });
+
+// Opcoes da extensao: uma configuracao so, lida pelo CV Lattes e pelos relatorios.
+describe('opcoesEfetivas / mesclarOpcoes', () => {
+    test('sem nada gravado: padroes e paleta para daltonicos', () => {
+        const o = R.opcoesEfetivas(null);
+        assert.deepStrictEqual([o.highJcr, o.lowJcr, o.customYears, o.targetAuthorRank], [7, 1.5, 1, 1]);
+        assert.deepStrictEqual(o.cores, R.CORES_PADRAO);
+        assert.strictEqual(o.lembrarFiltros, true);
+        assert.strictEqual(o.filtros.period, 'all');
+    });
+
+    test('cor da paleta antiga gravada sem escolha vira a nova; cor escolhida fica', () => {
+        const o = R.opcoesEfetivas({ colors: { high: '#3DAA43', mid: '#123456', low: 'lixo' } });
+        assert.strictEqual(o.cores.high, R.CORES_PADRAO.high);
+        assert.strictEqual(o.cores.mid, '#123456');
+        assert.strictEqual(o.cores.low, R.CORES_PADRAO.low);
+    });
+
+    test('periodo customizado 0 e valido (so o ano atual)', () => {
+        assert.strictEqual(R.opcoesEfetivas({ customYears: 0 }).customYears, 0);
+        assert.strictEqual(R.opcoesEfetivas({ customYears: -2 }).customYears, 1);
+    });
+
+    test('filtros gravados so valem com "lembrar" ligado', () => {
+        const gravado = { toggles: { jcr: { high: false }, author: { gc: false }, period: 'recent' } };
+        const lembra = R.opcoesEfetivas(gravado);
+        assert.strictEqual(lembra.filtros.jcr.high, false);
+        assert.strictEqual(lembra.filtros.author.gc, false);
+        assert.strictEqual(lembra.filtros.period, 'recent');
+        const esquece = R.opcoesEfetivas(Object.assign({ lembrarFiltros: false }, gravado));
+        assert.strictEqual(esquece.filtros.jcr.high, true);
+        assert.strictEqual(esquece.filtros.author.gc, true);
+        assert.strictEqual(esquece.filtros.period, 'all');
+    });
+
+    test('mesclar nao apaga o que o CV Lattes guarda junto', () => {
+        const salvo = { highJcr: 7, toggles: { tables: { graficos: true }, jcr: { high: false, mid: true } }, colors: { high: '#111111' } };
+        const novo = R.mesclarOpcoes(salvo, { highJcr: 5, toggles: { jcr: { high: true } }, colors: { mid: '#222222' } });
+        assert.strictEqual(novo.highJcr, 5);
+        assert.deepStrictEqual(novo.toggles.tables, { graficos: true });
+        assert.deepStrictEqual(novo.toggles.jcr, { high: true, mid: true });
+        assert.deepStrictEqual(novo.colors, { high: '#111111', mid: '#222222' });
+        assert.strictEqual(salvo.highJcr, 7);   // o original nao e alterado
+    });
+
+    test('o dialogo traz os ids pedidos e o periodo so quando pedido', () => {
+        const ids = { dialogo: 'd', abrir: 'a', high: 'h', low: 'l', custom: 'c', rank: 'r', rotuloRank: 'rr',
+            jcr: { high: 'jh', mid: 'jm', low: 'jl', none: 'jn' }, cor: { high: 'ch', mid: 'cm', low: 'cl', none: 'cn' },
+            autor: { first: 'af', last: 'al', others: 'ao', gc: 'ag' }, periodo: 'p', restaurar: 'rs', lembrar: 'lb' };
+        const o = R.opcoesEfetivas({ highJcr: 6 });
+        const sem = R.dialogoOpcoesHTML({ ids, o, comPeriodo: false });
+        const com = R.dialogoOpcoesHTML({ ids, o, comPeriodo: true });
+        ['id="h" value="6"', 'id="ch"', 'id="rs"', 'id="lb" checked', 'id="rr">1º Autor'].forEach(t => assert.ok(sem.includes(t), t));
+        assert.ok(!sem.includes('name="p"'));
+        assert.ok(com.includes('name="p" value="all" checked'));
+    });
+});

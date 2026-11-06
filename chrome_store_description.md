@@ -52,7 +52,8 @@ Principais Funcionalidades:
 * Listas Prontas para Documentos: As listas de publicações e de orientações são copiadas em texto puro com um clique, com numeração opcional — contínua ou reiniciada a cada ano ou categoria.
 * Períodos Padronizados: Todos os campos de período seguem a regra dos editais — N anos completos mais o ano corrente —, com a opção "Toda a carreira" e o intervalo exato indicado ao passar o mouse. As seções se atualizam sozinhas ao mudar o período.
 * Versão de Impressão: Botão de impressão nos relatórios individuais e de grupo. As seções abertas são impressas por completo (listas e tabelas sem cortes de rolagem), com gráficos coloridos, linha-resumo dos limiares/filtros aplicados e cabeçalhos de tabela repetidos a cada página. A tabela do banco de CVs também tem impressão otimizada, com seletor de orientação (paisagem/retrato).
-* Cabeçalho Compacto: Controles do currículo convertidos em ícones com estado ligado/desligado, e blocos de opções e filtros que começam recolhidos — a extensão lembra suas preferências entre sessões. As caixas de listas e tabelas do relatório podem ser redimensionadas na vertical.
+* Cabeçalho Compacto: Controles do currículo convertidos em ícones com estado ligado/desligado. As caixas de listas e tabelas do relatório podem ser redimensionadas na vertical.
+* Opções Unificadas (⚙️): Um só diálogo, aberto pela engrenagem no cabeçalho do currículo e dos relatórios, reúne limiares de JCR, período customizado, rank do autor, cores das faixas (com botão para voltar à paleta para daltônicos) e filtros. As opções valem em toda a extensão, e os filtros podem ser lembrados entre telas e sessões.
 * Design Premium: Interface moderna, limpa e responsiva que se integra de maneira nativa e elegante ao layout da Plataforma Lattes.
 
 Privacidade e Segurança Absoluta:

@@ -17,13 +17,16 @@ let jcrTablesState = { publicacoes: false, citacoes: false, orientacoes: false, 
 // Secoes do CV recolhidas pelo usuario (clique no titulo). Chave = id da ancora da secao,
 // que e estavel entre curriculos, entao o estado vale para os proximos CVs abertos.
 let jcrSectionsCollapsed = {};
+// "Lembrar os filtros de exibicao" (dialogo de opcoes); lido do que foi gravado.
+let lembrarFiltrosAtual = true;
 
 async function saveSettings() {
   const rankInputVal = parseInt(document.getElementById('target-author-rank-input')?.value);
   const settings = {
     highJcr: parseFloat(document.getElementById('high-jcr-input')?.value) || 7,
     lowJcr: parseFloat(document.getElementById('low-jcr-input')?.value) || 1.5,
-    customYears: parseInt(document.getElementById('custom-year-input')?.value) || 1,
+    customYears: (() => { const v = parseInt(document.getElementById('custom-year-input')?.value, 10); return isNaN(v) || v < 0 ? 1 : v; })(),
+    lembrarFiltros: lembrarFiltrosAtual,
     targetAuthorRank: !isNaN(rankInputVal) ? rankInputVal : 1,
     colors: {
       high: document.getElementById('color-jcr-high')?.value || COLORS.highJcr,
@@ -229,25 +232,11 @@ async function processLattesPage(nameLink) {
     jcrSectionsCollapsed = { ...saved.toggles.sectionsCollapsed };
   }
 
-  if (saved?.colors) {
-    // As cores sao gravadas sempre, escolhidas ou nao. Uma cor salva igual a da
-    // paleta padrao anterior e tratada como "nao escolhida" e passa para a nova
-    // paleta (para daltonicos); cor que o usuario mudou fica como esta.
-    const antigas = window.JCRReportUtils.CORES_PADRAO_ANTIGAS;
-    const salva = (k) => {
-      const v = saved.colors[k];
-      return v && String(v).toLowerCase() !== antigas[k] ? v : null;
-    };
-    COLORS.highJcr = salva('high') || COLORS.highJcr;
-    COLORS.midJcr = salva('mid') || COLORS.midJcr;
-    COLORS.lowJcr = salva('low') || COLORS.lowJcr;
-    COLORS.noJcr = salva('none') || COLORS.noJcr;
-
-    GRAPH_COLORS.highJcr = COLORS.highJcr;
-    GRAPH_COLORS.midJcr = COLORS.midJcr;
-    GRAPH_COLORS.lowJcr = COLORS.lowJcr;
-    GRAPH_COLORS.noJcr = COLORS.noJcr;
-  }
+  // Cores: as gravadas, ou a paleta padrao (opcoesEfetivas reconhece a paleta antiga
+  // gravada sem escolha do usuario e a troca pela nova)
+  const opcoesSalvas = window.JCRReportUtils.opcoesEfetivas(saved);
+  lembrarFiltrosAtual = opcoesSalvas.lembrarFiltros;
+  window.JCRReportUtils.aplicarCores(opcoesSalvas.cores);
 
   // Update from current on-page inputs if they exist
   const colorHigh = document.getElementById('color-jcr-high');
@@ -791,10 +780,10 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
             <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Estatísticas de Autoria">Autores</th>
             <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; vertical-align: middle; text-align: center;" title="Grandes Colaborações (et al. ou COLLABORATION)">GC</th>
             <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgHigh};" title="Artigos com Fator de Impacto Alto">
-              JCR Alto (>= <input type="number" id="high-jcr-input" value="${highJcr}" step="0.5" style="width: 40px; padding: 2px; text-align: center;">)
+              JCR Alto (≥ ${highJcr})
             </th>
             <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgMid};" title="Artigos com Fator de Impacto Médio">
-              JCR Médio (>= <input type="number" id="low-jcr-input" value="${lowJcr}" step="0.5" style="width: 40px; padding: 2px; text-align: center;">)
+              JCR Médio (≥ ${lowJcr})
             </th>
             <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgLow};" title="Artigos com Fator de Impacto Baixo">JCR Baixo (< ${lowJcr})</th>
             <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; vertical-align: middle; text-align: center; background-color: ${bgNone};" title="Artigos sem Fator de Impacto classificado">Sem JCR</th>
@@ -825,7 +814,7 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
         <tbody id="tbody-publicacoes" style="display: ${jcrTablesState.publicacoes ? 'none' : ''};">
           ${window.JCRReportUtils.corpoTabelaPublicacoes(stats,
             { min: minYear, max: maxYear, last10: startYearLast10, recent: startYearRecent },
-            `<input type="number" id="custom-year-input" value="${customYears}" min="0" style="width: 40px; padding: 2px; text-align: center;"> ${customYears == 1 || customYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`)}
+            `${customYears} ${customYears == 1 || customYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`)}
         </tbody>
       </table>
     </div>`;
@@ -1021,6 +1010,7 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
         </label>
         <button id="btn-view-cv-report" class="jcr-icon-btn" title="Abrir relatório individual deste CV">📊</button>
         <button id="btn-save-cv-html" class="jcr-icon-btn" title="Salvar este CV completo num arquivo HTML (Downloads/lattesData/)">💾</button>
+        <button id="btn-jcr-opcoes" class="jcr-icon-btn" title="Opções: limiares de JCR, período customizado, rank do autor, cores e filtros">⚙️</button>
       </div>
     </div>
   `;
@@ -1088,7 +1078,13 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   setupCollapsibleSections(sections);
   setupGeneralInfoGroup(sections);
 
-  const togglesHTML = generateSectionToggles(targetAuthorRank);
+  const savedOpcoes = await loadSettings();
+  const opcoes = window.JCRReportUtils.opcoesEfetivas(savedOpcoes);
+  lembrarFiltrosAtual = opcoes.lembrarFiltros;
+  // os valores desta montagem (que podem ter vindo dos campos, antes de gravar)
+  Object.assign(opcoes, { highJcr, lowJcr, customYears, targetAuthorRank });
+  opcoes.cores = { high: COLORS.highJcr, mid: COLORS.midJcr, low: COLORS.lowJcr, none: COLORS.noJcr };
+  const togglesHTML = generateSectionToggles(opcoes);
 
   // Append toggles to the reportContent
   const toggleContainer = document.createElement('div');
@@ -1147,9 +1143,11 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
     // (As secoes do CV agora sao recolhidas pelo proprio titulo — ver setupCollapsibleSections)
 
-    // 3. JCR Levels
+    // 3. JCR Levels (os filtros so voltam se "lembrar filtros" estiver ligado; o
+    // dialogo ja nasce com os valores efetivos, aqui so os campos da tabela)
+    const filtrosEfetivos = window.JCRReportUtils.opcoesEfetivas(saved).filtros;
     ['high', 'mid', 'low', 'none'].forEach(level => {
-      const savedVal = saved.toggles.jcr[level];
+      const savedVal = filtrosEfetivos.jcr[level];
       const cb = document.getElementById(`toggle-jcr-${level}`);
       if (cb && savedVal !== undefined) cb.checked = savedVal;
       const tCb = document.getElementById(`tbl-chk-${level}`);
@@ -1157,14 +1155,14 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
     });
 
     // 4. Period
-    if (saved.toggles.period) {
-      const radio = document.querySelector(`input[name="toggle-period"][value="${saved.toggles.period}"]`);
+    {
+      const radio = document.querySelector(`input[name="toggle-period"][value="${filtrosEfetivos.period}"]`);
       if (radio) radio.checked = true;
     }
 
     // 5. Author Roles
     ['first', 'last', 'others', 'gc'].forEach(role => {
-      const savedVal = saved.toggles.author[role];
+      const savedVal = filtrosEfetivos.author[role];
       const cb = document.getElementById(`toggle-author-${role}`);
       if (cb && savedVal !== undefined) cb.checked = savedVal;
       const tCb = document.getElementById(`tbl-chk-${role}`);
@@ -1188,6 +1186,13 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
     });
 
   }
+
+  window.JCRReportUtils.ligarDialogoOpcoes(document, IDS_OPCOES_CV);
+  const lembrarCb = document.getElementById(IDS_OPCOES_CV.lembrar);
+  if (lembrarCb) lembrarCb.addEventListener('change', () => {
+    lembrarFiltrosAtual = lembrarCb.checked;
+    saveSettings();
+  });
 
   // Apply visibility based on JCR/Period/Author (Initial Refresh).
   // Fora do bloco de settings salvos para funcionar também na primeira execução.
@@ -1492,15 +1497,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       tbody.innerHTML = `
         ${window.JCRReportUtils.corpoTabelaPublicacoes(tableStats,
           { min: minYear, max: maxYear, last10: startYearLast10, recent: startYearRecent },
-          `<input type="number" id="custom-year-input" value="${currentCustomYears}" min="0" style="width: 40px; padding: 2px; text-align: center;"> ${currentCustomYears == 1 || currentCustomYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`)}
+          `${currentCustomYears} ${currentCustomYears == 1 || currentCustomYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`)}
       `;
-      const newCyInput = document.getElementById('custom-year-input');
-      if (newCyInput) {
-        newCyInput.addEventListener('change', () => {
-          saveSettings();
-          processLattesPage(nameLink);
-        });
-      }
     }
   }
 
@@ -2087,128 +2085,24 @@ function getSections() {
   return sections;
 }
 
-function generateSectionToggles(targetAuthorRank = 1) {
-  let html = `
-    <div class="rodape-cv" style="margin-top: 10px; color: ${COLORS.footerText}; font-size: 1.1em;">
-      <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-        <thead>
-          <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
-            <th style="padding: 8px; text-align: left;">
-              <span class="toggle-table-btn" data-target="opcoes" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.opcoes ? '[+]' : '[-]'}</span> Opções e Filtros
-            </th>
-          </tr>
-        </thead>
-        <tbody id="tbody-opcoes" style="display: ${jcrTablesState.opcoes ? 'none' : ''};">
-          <tr>
-            <td style="padding: 0; text-align: left;">
-              <div style="padding: 10px; background-color: ${COLORS.backgroundSubHeader}; font-size: 0.9em; color: ${COLORS.footerText};">
-  `;
+// Ids dos controles de opcoes no CV. Sao os mesmos de antes, quando ficavam na faixa
+// "Opcoes e Filtros" e na tabela de publicacoes: a logica que reage a eles (filtros,
+// cores, recalculo) continua a mesma; so mudaram de lugar, para o dialogo da
+// engrenagem, que e o mesmo dos relatorios (JCRReportUtils.dialogoOpcoesHTML).
+const IDS_OPCOES_CV = {
+  dialogo: 'jcr-opcoes-dialogo', abrir: 'btn-jcr-opcoes',
+  high: 'high-jcr-input', low: 'low-jcr-input', custom: 'custom-year-input',
+  rank: 'target-author-rank-input', rotuloRank: 'lbl-toggle-author-first',
+  jcr: { high: 'toggle-jcr-high', mid: 'toggle-jcr-mid', low: 'toggle-jcr-low', none: 'toggle-jcr-none' },
+  cor: { high: 'color-jcr-high', mid: 'color-jcr-mid', low: 'color-jcr-low', none: 'color-jcr-none' },
+  autor: { first: 'toggle-author-first', last: 'toggle-author-last', others: 'toggle-author-others', gc: 'toggle-author-gc' },
+  periodo: 'toggle-period', restaurar: 'jcr-opcoes-restaurar', lembrar: 'jcr-opcoes-lembrar'
+};
 
-  // Production Filters Row
-  html += `
-      <div style="display: flex; gap: 30px; flex-wrap: wrap;">
-        
-        <!-- Column 1: Period -->
-        <div style="flex: 1; min-width: 200px;">
-          <div style="margin-bottom: 8px; font-weight: bold;">Mostrar/Ocultar Produções (por Período):</div>
-          <div style="display: flex; flex-direction: column; gap: 5px;">
-            <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-              <input type="radio" name="toggle-period" value="all" checked style="margin-right: 5px;">
-              Todos
-            </label>
-            <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-              <input type="radio" name="toggle-period" value="recent" style="margin-right: 5px;">
-              5 anos
-            </label>
-            <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-              <input type="radio" name="toggle-period" value="last10" style="margin-right: 5px;">
-              10 anos
-            </label>
-            <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-              <input type="radio" name="toggle-period" value="custom" style="margin-right: 5px;">
-              Customizado
-            </label>
-          </div>
-        </div>
-
-        <!-- Column 2: JCR -->
-        <div style="flex: 1; min-width: 200px;">
-          <div style="margin-bottom: 8px; font-weight: bold;">Mostrar/Ocultar Produções (por JCR):</div>
-          <div style="display: flex; flex-direction: column; gap: 5px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; max-width: 170px;">
-              <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-                <input type="checkbox" id="toggle-jcr-high" checked style="margin-right: 5px;">
-                <span style="color: ${COLORS.highJcr}; font-weight: bold;">JCR Alto</span>
-              </label>
-              <input type="color" id="color-jcr-high" value="${COLORS.highJcr}" style="width: 24px; height: 24px; padding: 0; border: none; cursor: pointer; background: transparent;" title="Escolher cor para JCR Alto">
-            </div>
-            <div style="display: flex; align-items: center; justify-content: space-between; max-width: 170px;">
-              <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-                <input type="checkbox" id="toggle-jcr-mid" checked style="margin-right: 5px;">
-                <span style="color: ${COLORS.midJcr}; font-weight: bold;">JCR Médio</span>
-              </label>
-              <input type="color" id="color-jcr-mid" value="${COLORS.midJcr}" style="width: 24px; height: 24px; padding: 0; border: none; cursor: pointer; background: transparent;" title="Escolher cor para JCR Médio">
-            </div>
-            <div style="display: flex; align-items: center; justify-content: space-between; max-width: 170px;">
-              <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-                <input type="checkbox" id="toggle-jcr-low" checked style="margin-right: 5px;">
-                <span style="color: ${COLORS.lowJcr}; font-weight: bold;">JCR Baixo</span>
-              </label>
-              <input type="color" id="color-jcr-low" value="${COLORS.lowJcr}" style="width: 24px; height: 24px; padding: 0; border: none; cursor: pointer; background: transparent;" title="Escolher cor para JCR Baixo">
-            </div>
-            <div style="display: flex; align-items: center; justify-content: space-between; max-width: 170px;">
-              <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-                <input type="checkbox" id="toggle-jcr-none" checked style="margin-right: 5px;">
-                <span style="color: ${COLORS.noJcr}; font-weight: bold;">Não classificado</span>
-              </label>
-              <input type="color" id="color-jcr-none" value="${COLORS.noJcr}" style="width: 24px; height: 24px; padding: 0; border: none; cursor: pointer; background: transparent;" title="Escolher cor para Não classificado">
-            </div>
-          </div>
-        </div>
-
-        <!-- Column 3: Author -->
-        <div style="flex: 1; min-width: 200px;">
-          <div style="margin-bottom: 8px; font-weight: bold;">Mostrar/Ocultar Produções (por Autor):</div>
-          <div style="display: flex; flex-direction: column; gap: 5px;">
-            <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-              <input type="checkbox" id="toggle-author-first" checked style="margin-right: 5px;">
-              <span id="lbl-toggle-author-first">${targetAuthorRank}º Autor</span>
-            </label>
-            <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-              <input type="checkbox" id="toggle-author-last" checked style="margin-right: 5px;">
-              Último Autor
-            </label>
-            <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-              <input type="checkbox" id="toggle-author-others" checked style="margin-right: 5px;">
-              Demais autores
-            </label>
-            <label style="cursor: pointer; display: inline-flex; align-items: center; white-space: nowrap;">
-              <input type="checkbox" id="toggle-author-gc" checked style="margin-right: 5px;">
-              GC (et al.)
-            </label>
-            <div style="margin-top: 6px; display: flex; align-items: center; gap: 5px; font-size: 0.95em;">
-              <label for="target-author-rank-input" style="font-weight: bold;">Rank do Autor:</label>
-              <input type="number" id="target-author-rank-input" value="${targetAuthorRank}" min="1" max="99" style="width: 45px; padding: 2px; text-align: center;">
-            </div>
-          </div>
-        </div>
-
-      </div>
-  `;
-
-  html += `
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  `;
-
-  return html;
+// Dialogo de opcoes do CV, com os valores em uso nesta montagem do painel.
+function generateSectionToggles(o) {
+  return window.JCRReportUtils.dialogoOpcoesHTML({ ids: IDS_OPCOES_CV, o, comPeriodo: true });
 }
-
-
 
 function setAttributes(elem, attrs) {
   for (const key of Object.keys(attrs)) {

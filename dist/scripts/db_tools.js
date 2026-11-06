@@ -26,6 +26,19 @@ window.JCRDBTools = {
     isUnlocked: true,
     autoSave: false,
     reportFiltersCollapsed: false,
+    // Opcoes globais da extensao (JCRReportUtils.OPCOES_CHAVE), como gravadas.
+    opcoesGlobais: null,
+    // Ids dos controles do dialogo de opcoes no relatorio. Os de limiar, filtro e
+    // rank sao os do antigo bloco "Limiares e Filtros", que o recalculo ja le.
+    IDS_OPCOES_RELATORIO: {
+        dialogo: 'rep-opcoes-dialogo', abrir: 'btn-report-opcoes',
+        high: 'inp-high-jcr', low: 'inp-low-jcr', custom: 'inp-custom-years',
+        rank: 'inp-target-author-rank', rotuloRank: 'lbl-auth-first',
+        jcr: { high: 'chk-jcr-high', mid: 'chk-jcr-mid', low: 'chk-jcr-low', none: 'chk-jcr-none' },
+        cor: { high: 'inp-cor-high', mid: 'inp-cor-mid', low: 'inp-cor-low', none: 'inp-cor-none' },
+        autor: { first: 'chk-auth-first', last: 'chk-auth-last', others: 'chk-auth-others', gc: 'chk-auth-gc' },
+        periodo: 'rep-periodo', restaurar: 'rep-opcoes-restaurar', lembrar: 'rep-opcoes-lembrar'
+    },
     // Estado (recolhido = true) de cada bloco do relatorio, por chave derivada do titulo.
     // E global: vale para todos os relatorios abertos depois, ate mudar de novo.
     reportCollapsed: {},
@@ -1609,7 +1622,33 @@ window.JCRDBTools = {
         };
     },
 
+    // Le as opcoes globais e passa a acompanhar mudancas feitas em outra aba (o CV
+    // Lattes, outro relatorio): o relatorio aberto adota os novos valores na proxima
+    // remontagem.
+    carregarOpcoesGlobais: async function () {
+        this.opcoesGlobais = await window.JCRReportUtils.lerOpcoes();
+        if (this._ouvindoOpcoes) return;
+        try {
+            chrome.storage.onChanged.addListener((mudancas, area) => {
+                const m = mudancas[window.JCRReportUtils.OPCOES_CHAVE];
+                if (area !== 'local' || !m) return;
+                this.opcoesGlobais = m.newValue || {};
+                const st = this.reportState;
+                if (!st) return;
+                const o = window.JCRReportUtils.opcoesEfetivas(this.opcoesGlobais);
+                Object.assign(st, { highJcr: o.highJcr, lowJcr: o.lowJcr, customYears: o.customYears, targetAuthorRank: o.targetAuthorRank });
+                if (o.lembrarFiltros) Object.assign(st, {
+                    showHighJcr: o.filtros.jcr.high, showMidJcr: o.filtros.jcr.mid, showLowJcr: o.filtros.jcr.low, showNoJcr: o.filtros.jcr.none,
+                    showAuthorFirst: o.filtros.author.first, showAuthorLast: o.filtros.author.last,
+                    showAuthorOthers: o.filtros.author.others, showAuthorGc: o.filtros.author.gc
+                });
+            });
+            this._ouvindoOpcoes = true;
+        } catch (e) { /* sem chrome.storage (testes) */ }
+    },
+
     loadSettings: async function () {
+        await this.carregarOpcoesGlobais();
         return new Promise((resolve) => {
             try {
                 if (!chrome.runtime?.id) { resolve(); return; }
@@ -2356,6 +2395,7 @@ window.JCRDBTools = {
     },
 
     viewDB: async function (existingTab = null, options = null) {
+        await this.carregarOpcoesGlobais();
         if (options !== null && options !== undefined) {
             if (typeof options === 'boolean') {
                 options = { processOnly: options };
@@ -4676,6 +4716,7 @@ window.JCRDBTools = {
                     </div>
                     <div id="proc-header-actions" class="no-print" style="flex: 0 0 320px; width: 320px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: flex-end;">
                         ${procNavHTML}
+                        ${hasGroupCvs ? `<button id="btn-report-opcoes" class="no-print" style="padding: 8px 12px; background: #ffffff; color: #1565C0; border: 1px solid #90CAF9; border-radius: 4px; cursor: pointer; font-weight: bold; " title="Opções: limiares de JCR, período customizado, rank do autor, cores e filtros (valem também no CV Lattes)">⚙️</button>` : ''}
                         <button id="btn-print-report" style="padding: 8px 15px; background: #7f8c8d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">🖨️ Imprimir</button>
                         <button id="btn-back-proc-db" style="padding: 8px 15px; background: #ffffff; color: #1565C0; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">⬅️ Voltar às Propostas</button>
                         ${prioridadeHTML}
@@ -4695,12 +4736,16 @@ window.JCRDBTools = {
         }
 
         const currentYear = new Date().getFullYear();
+        // Limiares, periodo customizado, rank, cores e filtros sao as opcoes globais da
+        // extensao (as mesmas do CV Lattes), e nao mais os limiares gravados em cada CV.
+        const opcoesG = window.JCRReportUtils.opcoesEfetivas(this.opcoesGlobais);
+        window.JCRReportUtils.aplicarCores(opcoesG.cores);
         if (!this.reportState) {
             this.reportState = {
-                highJcr: parseFloat(cvData.highJcr || 7.0),
-                lowJcr: parseFloat(cvData.lowJcr || 1.5),
-                customYears: 1,
-                targetAuthorRank: 1,
+                highJcr: opcoesG.highJcr,
+                lowJcr: opcoesG.lowJcr,
+                customYears: opcoesG.customYears,
+                targetAuthorRank: opcoesG.targetAuthorRank,
                 pubListYears: 5,
                 pubListOrdem: 'ano',
                 pubListNumerar: false,
@@ -4711,14 +4756,14 @@ window.JCRDBTools = {
                 supListReiniciar: false,
                 journalYears: 5,
                 minJournalPapers: 1,
-                showHighJcr: true,
-                showMidJcr: true,
-                showLowJcr: true,
-                showNoJcr: true,
-                showAuthorFirst: true,
-                showAuthorLast: true,
-                showAuthorOthers: true,
-                showAuthorGc: true,
+                showHighJcr: opcoesG.filtros.jcr.high,
+                showMidJcr: opcoesG.filtros.jcr.mid,
+                showLowJcr: opcoesG.filtros.jcr.low,
+                showNoJcr: opcoesG.filtros.jcr.none,
+                showAuthorFirst: opcoesG.filtros.author.first,
+                showAuthorLast: opcoesG.filtros.author.last,
+                showAuthorOthers: opcoesG.filtros.author.others,
+                showAuthorGc: opcoesG.filtros.author.gc,
                 showPubListJcr: true,
                 showPubListDoi: true,
                 showPubListCitations: true
@@ -4779,11 +4824,6 @@ window.JCRDBTools = {
             }
         }
 
-        // Renderiza ja com o estado salvo para nao haver salto de layout; o passe geral
-        // logo apos o render confirma o mesmo valor.
-        // Sem estado salvo, o bloco abre recolhido.
-        const filtersCollapsed = (this.reportCollapsed || {})[this._chaveColapso('Limiares e Filtros')] !== false;
-
         // Linha-resumo dos filtros, impressa no lugar do bloco interativo
         const jcrHidden = [];
         if (!state.showHighJcr) jcrHidden.push('Alto');
@@ -4811,6 +4851,7 @@ window.JCRDBTools = {
                     </div>
                     <div>
                         ${navButtonsHTML}
+                        <button id="btn-report-opcoes" class="no-print" style="padding: 8px 12px; background: #ffffff; color: #1565C0; border: 1px solid #90CAF9; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="Opções: limiares de JCR, período customizado, rank do autor, cores e filtros (valem também no CV Lattes)">⚙️</button>
                         <button id="btn-print-report" style="padding: 8px 15px; background: #7f8c8d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px;" title="Imprime as seções abertas, com tabelas e listas em toda a extensão">🖨️ Imprimir</button>
                         <button id="btn-back-db" style="padding: 8px 15px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">⬅️ Voltar</button>
                     </div>
@@ -4821,40 +4862,15 @@ window.JCRDBTools = {
         const reportFiltersHTML = `
             <div id="print-filters-summary" style="display: none; color: #555; font-size: 0.85em; margin: 8px 0; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px;">${printFiltersSummary}</div>
 
-            <div class="collapsible-section" id="sec-report-filters">
-                <div class="collapsible-header" id="header-report-filters">
-                    <h3>Limiares e Filtros</h3>
-                    <span class="toggle-icon">${filtersCollapsed ? '[+]' : '[-]'}</span>
-                </div>
-                <div class="collapsible-content" id="content-report-filters"${filtersCollapsed ? ' style="display: none;"' : ''}>
-                    <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9em;">
-                        <div style="flex: 1; min-width: 200px; border-right: 1px solid #ddd; padding-right: 15px;">
-                            <div style="font-weight: bold; margin-bottom: 8px;">JCR Limiares:</div>
-                            <div style="margin-bottom: 5px;">Alto >= <input type="number" id="inp-high-jcr" value="${state.highJcr}" step="0.5" style="width: 50px;"></div>
-                            <div>Médio >= <input type="number" id="inp-low-jcr" value="${state.lowJcr}" step="0.5" style="width: 50px;"></div>
-                            <div style="margin-top: 10px; font-weight: bold;">Mostrar/Ocultar JCR:</div>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-high" ${state.showHighJcr ? 'checked' : ''}> Alto</label><br>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-mid" ${state.showMidJcr ? 'checked' : ''}> Médio</label><br>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-low" ${state.showLowJcr ? 'checked' : ''}> Baixo</label><br>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-jcr-none" ${state.showNoJcr ? 'checked' : ''}> Sem JCR</label>
-                        </div>
-
-                        <div style="flex: 1; min-width: 200px; border-right: 1px solid #ddd; padding-right: 15px;">
-                            <div style="font-weight: bold; margin-bottom: 8px;">Filtro de Autoria:</div>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-first" ${state.showAuthorFirst ? 'checked' : ''}> <span id="lbl-auth-first">${targetRank}º Autor</span></label><br>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-last" ${state.showAuthorLast ? 'checked' : ''}> Último Autor</label><br>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-others" ${state.showAuthorOthers ? 'checked' : ''}> Outros</label><br>
-                            <label style="cursor:pointer;"><input type="checkbox" id="chk-auth-gc" ${state.showAuthorGc ? 'checked' : ''}> Grandes Colaborações (et al)</label>
-                            <div style="margin-top: 8px; font-weight: bold;">Rank do Autor: <input type="number" id="inp-target-author-rank" value="${targetRank}" min="1" max="99" style="width: 45px; text-align: center;"></div>
-                        </div>
-
-                        <div style="flex: 1; min-width: 200px;">
-                            <div style="font-weight: bold; margin-bottom: 8px;">Período Customizado:</div>
-                            <div title="${this._esc(window.JCRReportUtils.descricaoPeriodo(state.customYears, currentYear))}. A carreira toda já tem coluna própria na tabela.">Anos: <input type="number" id="inp-custom-years" value="${state.customYears}" min="0" style="width: 50px;"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            ${window.JCRReportUtils.dialogoOpcoesHTML({ ids: this.IDS_OPCOES_RELATORIO, comPeriodo: false, o: {
+                highJcr: state.highJcr, lowJcr: state.lowJcr, customYears: state.customYears, targetAuthorRank: targetRank,
+                cores: opcoesG.cores, lembrarFiltros: opcoesG.lembrarFiltros,
+                filtros: {
+                    jcr: { high: state.showHighJcr, mid: state.showMidJcr, low: state.showLowJcr, none: state.showNoJcr },
+                    author: { first: state.showAuthorFirst, last: state.showAuthorLast, others: state.showAuthorOthers, gc: state.showAuthorGc },
+                    period: 'all'
+                }
+            } })}
         `;
 
         const getSoftColor = window.JCRReportUtils.getSoftColor.bind(window.JCRReportUtils);
@@ -6364,6 +6380,8 @@ window.JCRDBTools = {
         }
 
         const reRender = () => {
+            const ids = this.IDS_OPCOES_RELATORIO;
+            if (!doc.getElementById(ids.high)) return;
             state.highJcr = parseFloat(doc.getElementById('inp-high-jcr').value) || 7.0;
             state.lowJcr = parseFloat(doc.getElementById('inp-low-jcr').value) || 1.5;
             const customYearsVal = parseInt(doc.getElementById('inp-custom-years').value, 10);
@@ -6378,7 +6396,23 @@ window.JCRDBTools = {
             state.showAuthorLast = doc.getElementById('chk-auth-last').checked;
             state.showAuthorOthers = doc.getElementById('chk-auth-others').checked;
             state.showAuthorGc = doc.getElementById('chk-auth-gc').checked;
-            
+
+            // As opcoes sao da extensao inteira: grava, para o CV Lattes e os proximos
+            // relatorios usarem as mesmas. Os filtros so vao junto com "lembrar" ligado.
+            const lembrar = doc.getElementById(ids.lembrar).checked;
+            const cor = (k) => doc.getElementById(ids.cor[k]).value;
+            const parcial = {
+                highJcr: state.highJcr, lowJcr: state.lowJcr, customYears: state.customYears,
+                targetAuthorRank: state.targetAuthorRank, lembrarFiltros: lembrar,
+                colors: { high: cor('high'), mid: cor('mid'), low: cor('low'), none: cor('none') }
+            };
+            if (lembrar) parcial.toggles = {
+                jcr: { high: state.showHighJcr, mid: state.showMidJcr, low: state.showLowJcr, none: state.showNoJcr },
+                author: { first: state.showAuthorFirst, last: state.showAuthorLast, others: state.showAuthorOthers, gc: state.showAuthorGc }
+            };
+            this.opcoesGlobais = window.JCRReportUtils.mesclarOpcoes(this.opcoesGlobais, parcial);
+            window.JCRReportUtils.salvarOpcoes(parcial);
+
             this.renderCVReport(cvData, newTab, sortedDb, parentGroupData);
         };
 
@@ -6387,11 +6421,13 @@ window.JCRDBTools = {
             if (el) el.addEventListener('change', reRender);
         });
 
-        ['chk-jcr-high', 'chk-jcr-mid', 'chk-jcr-low', 'chk-jcr-none', 
-         'chk-auth-first', 'chk-auth-last', 'chk-auth-others', 'chk-auth-gc'].forEach(id => {
+        ['chk-jcr-high', 'chk-jcr-mid', 'chk-jcr-low', 'chk-jcr-none',
+         'chk-auth-first', 'chk-auth-last', 'chk-auth-others', 'chk-auth-gc',
+         'inp-cor-high', 'inp-cor-mid', 'inp-cor-low', 'inp-cor-none', 'rep-opcoes-lembrar'].forEach(id => {
             const chkEl = doc.getElementById(id);
             if (chkEl) chkEl.addEventListener('change', reRender);
         });
+        window.JCRReportUtils.ligarDialogoOpcoes(doc, this.IDS_OPCOES_RELATORIO);
 
         // Impede que cliques nos controles dentro do cabeçalho colapsável o abram/fechem
         // (antes era onclick="event.stopPropagation()" inline, bloqueado pela CSP em db.html)
