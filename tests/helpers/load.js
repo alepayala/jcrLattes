@@ -23,5 +23,7 @@ module.exports = {
     // calculateReportStats). No manifest ele vem antes; aqui tambem.
     banco: () => { carregar('report_utils.js'); return carregar('db_tools.js').JCRDBTools; },
     lattes: () => carregar('lattes_parser.js').JCRLattesParser,
+    // o leitor do Lattes novo usa as funcoes puras do leitor antigo
+    lattesNovo: () => { carregar('lattes_parser.js'); return carregar('lattes_parser_novo.js').JCRLattesParserNovo; },
     picc: () => carregar('picc_parser.js').JCRPiccParser
 };
