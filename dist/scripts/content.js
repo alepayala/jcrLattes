@@ -351,6 +351,7 @@ async function processLattesPage(nameLink) {
   let targetAuthorRank = saved?.targetAuthorRank ?? 1;
   const rankInput = document.getElementById('target-author-rank-input');
   if (rankInput && !isNaN(parseInt(rankInput.value))) targetAuthorRank = parseInt(rankInput.value);
+  targetAuthorRank = window.JCRReportUtils.rankAlvoEfetivo(targetAuthorRank);
 
   // Wrap updates in updateSafe to prevent infinite loop
   await updateSafe(async () => {
@@ -579,19 +580,27 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
     // authorCountStr e apresentacao, nao dado: leva HTML dentro. Fica aqui, fora do
     // leitor, ate a proxima etapa decidir o que fazer com ele (hoje vai parar no banco).
     // lista cortada pelo site novo ("et.al"): o numero e so o que foi listado
-    pubInfo.authorCountStr = `${pubInfo.authorsTruncated ? '≥ ' : ''}${pubInfo.authorCount} autor${pubInfo.authorCount !== 1 ? 'es' : ''}`;
-    if (pubInfo.hasEtAl) {
-      pubInfo.authorCountStr += ' + et al.';
+    // Cada parte so aparece se o dado esta liberado (JCRReportUtils.*_ATIVO/_ATIVA):
+    // numero de autores, posicao fora do 1o lugar e ultimo autor estao desligados
+    // enquanto o Lattes novo nao permite confirma-los. "Primeiro" vale sempre.
+    const U = window.JCRReportUtils;
+    const partesAutoria = [];
+    if (U.NUMERO_DE_AUTORES_ATIVO) {
+      partesAutoria.push(`${pubInfo.authorsTruncated ? '≥ ' : ''}${pubInfo.authorCount} autor${pubInfo.authorCount !== 1 ? 'es' : ''}${pubInfo.hasEtAl && U.GRANDES_COLABORACOES_ATIVAS ? ' + et al.' : ''}`);
+    } else if (pubInfo.hasEtAl && U.GRANDES_COLABORACOES_ATIVAS) {
+      partesAutoria.push('grande colaboração');
     }
-    if (pubInfo.authorRank !== -1) {
-      let rankLabel = `, ordem: ${pubInfo.authorRank}`;
-      if (pubInfo.isFirstAuthor) {
-        rankLabel = `, <span style="color: ${COLORS.midJcr}; font-weight: bold;">Primeiro</span>`;
-      } else if (pubInfo.isLastAuthor) {
-        rankLabel = `, <span style="color: ${COLORS.highJcr}; font-weight: bold;">Último</span>`;
-      }
-      pubInfo.authorCountStr += rankLabel;
+    if (pubInfo.isFirstAuthor) {
+      partesAutoria.push(`<span style="color: ${COLORS.midJcr}; font-weight: bold;">Primeiro</span>`);
+    } else if (pubInfo.isLastAuthor && U.ULTIMO_AUTOR_ATIVO) {
+      partesAutoria.push(`<span style="color: ${COLORS.highJcr}; font-weight: bold;">Último</span>`);
+    } else if (U.POSICAO_DE_AUTOR_ATIVA && pubInfo.authorRank !== -1) {
+      partesAutoria.push(`ordem: ${pubInfo.authorRank}`);
+    } else if (U.POSICAO_DE_AUTOR_ATIVA && pubInfo.authorsTruncated) {
+      // lista com "et.al" no Lattes novo: fora do 1o lugar a posicao nao e confiavel
+      partesAutoria.push('ordem: indeterminada');
     }
+    pubInfo.authorCountStr = partesAutoria.join(', ');
 
     if (isNaN(pubInfo.year)) continue;
 
@@ -858,7 +867,7 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
             <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgTotal};" title="Quantidade total de artigos">Qtd<br><label style="display:inline-block;margin-top:6px;font-weight:normal;font-size:0.9em;cursor:pointer;" title="Recalcular as estatísticas com base nos filtros selecionados"><input type="checkbox" id="tbl-chk-filtrar" style="margin:0 2px 0 0;vertical-align:middle;"><span style="vertical-align:middle;">Filtrar</span></label></th>
             <th class="jcr-main-header-extra" colspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: #ffffff;" title="Métricas de Fator de Impacto (JCR)">JCR</th>
             <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Estatísticas de Autoria">Autores</th>
-            <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; vertical-align: middle; text-align: center;" title="Grandes Colaborações (et al. ou COLLABORATION)">GC</th>
+            <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; vertical-align: middle; text-align: center;" title="${window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS ? 'Grandes Colaborações (et al. ou COLLABORATION)' : window.JCRReportUtils.TEXTO_DESABILITADO}">GC</th>
             <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgHigh};" title="Artigos com Fator de Impacto Alto">
               JCR Alto (≥ ${highJcr})
             </th>
@@ -875,8 +884,8 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
             <th style="padding: 4px; text-align: center; background-color: #ffffff;" title="Média do Fator de Impacto (Soma / Artigos com JCR)">μ</th>
             
             <th id="th-author-rank-header" style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Quantidade de artigos como ${targetAuthorRank}º Autor">${targetAuthorRank}o</th>
-            <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Quantidade de artigos como Último Autor">Últ</th>
-            <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Média de autores por artigo (exclui Grandes Colaborações)">μ</th>
+            <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="${window.JCRReportUtils.ULTIMO_AUTOR_ATIVO ? 'Quantidade de artigos como Último Autor' : window.JCRReportUtils.TEXTO_DESABILITADO}">Últ</th>
+            <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="${window.JCRReportUtils.MEDIA_DE_AUTORES_ATIVA ? 'Média de autores por artigo (exclui Grandes Colaborações)' : 'Temporariamente desabilitado'}">μ</th>
             <!-- High Sub-headers -->
             <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgHigh};" title="Quantidade de artigos nesta faixa">Qtd</th>
             <th style="padding: 4px; text-align: center; background-color: ${bgHigh};" title="Soma do Fator de Impacto nesta faixa">Σ</th>
@@ -1183,8 +1192,9 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       year: yearStr ? parseInt(yearStr) : NaN,
       authorRank: rankStr ? parseInt(rankStr) : -1,
       isFirst: el.getAttribute('data-is-first') === 'true',
-      isLast: el.getAttribute('data-is-last') === 'true',
-      isGc: el.getAttribute('data-is-gc') === 'true'
+      // "ultimo autor" desligado: ninguem e ultimo para os filtros (vira "outras posicoes")
+      isLast: window.JCRReportUtils.ULTIMO_AUTOR_ATIVO && el.getAttribute('data-is-last') === 'true',
+      isGc: window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS && el.getAttribute('data-is-gc') === 'true'
     };
   });
 
@@ -1448,7 +1458,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       const matchesPeriod = isNaN(pub.year) || pub.year >= cutoffYear;
 
       let matchesRole = false;
-      const targetRank = parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1;
+      const targetRank = window.JCRReportUtils.rankAlvoEfetivo(parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1);
       if (pub.isGc) {
         // GC papers are controlled independently by the GC checkbox
         matchesRole = selectedRoles.gc;
@@ -1539,14 +1549,14 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       let tableStats = stats;
 
       if (isTableFiltered) {
-        const targetRank = parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1;
+        const targetRank = window.JCRReportUtils.rankAlvoEfetivo(parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1);
         const filteredForStats = lattesInfo.filter(pub => {
           const impactFactorStr = window.JCRReportUtils.valorJcr(pub);
           const category = window.JCRReportUtils.faixaDeJcr(impactFactorStr, highJcr, lowJcr);
           const ifVal = category === 'noJcr' ? 0 : parseFloat(impactFactorStr);
 
           let passesRole = false;
-          if (pub.hasEtAl) {
+          if (pub.hasEtAl && window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS) {
             passesRole = selectedRoles.gc;
           } else {
             let isTargetRank = false;
@@ -1556,6 +1566,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
               isTargetRank = pub.authorRank === targetRank;
             }
             let isLast = pub.isLastAuthor !== undefined ? pub.isLastAuthor : (pub.authorRank === pub.authorCount && pub.authorCount > 1 && !pub.hasEtAl);
+            if (!window.JCRReportUtils.ULTIMO_AUTOR_ATIVO) isLast = false;
             if (isTargetRank && selectedRoles.first) passesRole = true;
             if (isLast && selectedRoles.last) passesRole = true;
             const isOther = !isTargetRank && !isLast;

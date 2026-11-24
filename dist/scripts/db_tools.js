@@ -394,6 +394,9 @@ window.JCRDBTools = {
         if (!cv) return '';
         if (key === 'teamCount') return this._contarParticipantes(cv);
         if (key === 'reviewCount') return this._contarPareceres(cv);
+        // "ultimo autor" desligado: a coluna fica, com tracos
+        if (key === 'lastAuthorCount' && !window.JCRReportUtils.ULTIMO_AUTOR_ATIVO) return '—';
+        if (key === 'gcCount' && !window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS) return '—';
         return cv[key];
     },
 
@@ -466,7 +469,7 @@ window.JCRDBTools = {
     _filtrarPublicacoes: function (publications, estado) {
         const lista = Array.isArray(publications) ? publications : [];
         const st = estado || {};
-        const rankAlvo = parseInt(st.targetAuthorRank, 10) || 1;
+        const rankAlvo = window.JCRReportUtils.rankAlvoEfetivo(st.targetAuthorRank);
 
         return lista.filter(pub => {
             if (!pub) return false;
@@ -490,10 +493,12 @@ window.JCRDBTools = {
                 : pub.authorRank === rankAlvo;
             // Ultimo autor exige mais de um autor e NAO vale em grande colaboracao,
             // onde o "et al" esconde quem fecha a lista.
-            const ehUltimo = pub.isLastAuthor !== undefined
+            // Com "ultimo autor" desligado (JCRReportUtils.ULTIMO_AUTOR_ATIVO) ninguem e
+            // ultimo: esses artigos contam como "outras posicoes".
+            const ehUltimo = !window.JCRReportUtils.ULTIMO_AUTOR_ATIVO ? false : pub.isLastAuthor !== undefined
                 ? pub.isLastAuthor
                 : (pub.authorRank === pub.authorCount && !pub.hasEtAl && pub.authorCount > 1);
-            const ehGc = !!pub.hasEtAl;
+            const ehGc = window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS && !!pub.hasEtAl;
             // "Outros" e o complemento: quem nao e primeiro, nem ultimo, nem GC.
             const ehOutro = !ehPrimeiro && !ehUltimo && !ehGc;
 
@@ -2786,7 +2791,7 @@ window.JCRDBTools = {
             theadHtml += `<th style="width: 30px; text-align: center;"><input type="checkbox" id="selectAllCheckbox" title="Selecionar Todos"></th>`;
             const proposalAllowedKeys = ['name', 'prioridade', 'faixa', 'fellowshipString', 'instituicaoExecutora', 'teamCount', 'reviewCount'];
             const processOnlyKeys = ['prioridade', 'faixa', 'instituicaoExecutora', 'teamCount', 'reviewCount'];
-            const targetRank = (this.reportState && this.reportState.targetAuthorRank) ? parseInt(this.reportState.targetAuthorRank) : 1;
+            const targetRank = window.JCRReportUtils.rankAlvoEfetivo(this.reportState && this.reportState.targetAuthorRank);
             this.METRICS_CONFIG.forEach(m => {
                 if (isProcessoOnly && !proposalAllowedKeys.includes(m.key)) return;
                 if (!isProcessoOnly && processOnlyKeys.includes(m.key)) return;
@@ -2797,6 +2802,8 @@ window.JCRDBTools = {
                     label = `${targetRank}º Autor`;
                     title = `Total de artigos como ${targetRank}º autor`;
                 }
+                if ((m.key === 'lastAuthorCount' && !window.JCRReportUtils.ULTIMO_AUTOR_ATIVO) ||
+                    (m.key === 'gcCount' && !window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS)) title = window.JCRReportUtils.TEXTO_DESABILITADO;
                 const titleAttr = title ? ` title="${title}"` : '';
                 let classes = ['sortable-header'];
                 if (m.division) classes.push('division-left');
@@ -3733,7 +3740,7 @@ window.JCRDBTools = {
             newTab.document.getElementById('gstat-membros').innerText = groupCvs.length;
             newTab.document.getElementById('gstat-total').innerText = stats.all.total.count;
             newTab.document.getElementById('gstat-jcr').innerText = stats.all.total.countWithJcr;
-            newTab.document.getElementById('gstat-gc').innerText = stats.all.total.gcCount;
+            newTab.document.getElementById('gstat-gc').innerText = window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS ? stats.all.total.gcCount : '—';
             newTab.document.getElementById('gstat-citacoes').innerText = stats.all.citations.wos.sum;
             newTab.document.getElementById('gstat-hindex').innerText = stats.all.citations.wos.hIndex;
             
@@ -4982,7 +4989,7 @@ window.JCRDBTools = {
             }
             this._periodoProducoesAjustado = true;
         }
-        const targetRank = parseInt(state.targetAuthorRank) || 1;
+        const targetRank = window.JCRReportUtils.rankAlvoEfetivo(state.targetAuthorRank);
         const startYearRecent = currentYear - 5;
         const startYearLast10 = currentYear - 10;
         const startYearCustom = currentYear - state.customYears;
@@ -5083,7 +5090,7 @@ window.JCRDBTools = {
                         <th rowspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgTotal};">Total</th>
                         <th colspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center;">Impacto (Σ)</th>
                         <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgTotal};">Autoria</th>
-                        <th rowspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center;">GC</th>
+                        <th rowspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center;"${window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS ? '' : ` title="${window.JCRReportUtils.TEXTO_DESABILITADO}"`}>GC</th>
                         <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgHigh};">Alto (≥${state.highJcr})</th>
                         <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgMid};">Médio</th>
                         <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgLow};">Baixo (<${state.lowJcr})</th>
@@ -5093,8 +5100,8 @@ window.JCRDBTools = {
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center;">Soma</th>
                         <th style="padding: 4px; text-align: center;">Média</th>
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};">${targetRank}o</th>
-                        <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};">Últ.</th>
-                        <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};">N Aut</th>
+                        <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};"${window.JCRReportUtils.ULTIMO_AUTOR_ATIVO ? '' : ` title="${window.JCRReportUtils.TEXTO_DESABILITADO}"`}>Últ.</th>
+                        <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};"${window.JCRReportUtils.MEDIA_DE_AUTORES_ATIVA ? '' : ` title="${window.JCRReportUtils.TEXTO_DESABILITADO}"`}>N Aut</th>
                         
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgHigh};">Qtd</th>
                         <th style="padding: 4px; text-align: center; background-color: ${bgHigh};">Soma</th>

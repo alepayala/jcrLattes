@@ -1,5 +1,5 @@
 'use strict';
-const { test, describe } = require('node:test');
+const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert');
 const B = require('./helpers/load.js').banco();
 
@@ -663,6 +663,16 @@ describe('_quadroDaEquipe', () => {
 // Este filtro define TODOS os numeros do relatorio: um erro aqui nao da erro, da
 // um relatorio com o total errado. Saiu de dentro de renderCVReport.
 describe('_filtrarPublicacoes', () => {
+    // Ultimo autor, posicao fora do 1o lugar e grandes colaboracoes estao desligados
+    // (JCRReportUtils.*_ATIVO/_ATIVA) enquanto o Lattes novo nao permite confirma-los.
+    // Os testes abaixo descrevem a regra completa, entao ligam tudo durante o bloco;
+    // o ultimo teste cobre o estado desligado.
+    const U = globalThis.JCRReportUtils;
+    const CHAVES = ['ULTIMO_AUTOR_ATIVO', 'POSICAO_DE_AUTOR_ATIVA', 'GRANDES_COLABORACOES_ATIVAS'];
+    const comoEstava = {};
+    before(() => CHAVES.forEach(k => { comoEstava[k] = U[k]; U[k] = true; }));
+    after(() => CHAVES.forEach(k => { U[k] = comoEstava[k]; }));
+
     const tudoLigado = {
         highJcr: 7, lowJcr: 1.5,
         showHighJcr: true, showMidJcr: true, showLowJcr: true, showNoJcr: true,
@@ -720,6 +730,24 @@ describe('_filtrarPublicacoes', () => {
         const meio = pub(3, 2);                      // 2o de 3 autores
         assert.strictEqual(B._filtrarPublicacoes([meio], est({ showAuthorOthers: false })).length, 0);
         assert.strictEqual(B._filtrarPublicacoes([meio], est()).length, 1);
+    });
+
+    test('desligados, ultimo autor e GC viram "outros" e o rank alvo vale 1', () => {
+        CHAVES.forEach(k => { U[k] = false; });
+        try {
+            const ultimo = pub(3, 3);                                    // 3o de 3
+            const gc = { jif: 9, authorRank: 3, authorCount: 3, hasEtAl: true };
+            // os filtros de ultimo e de GC nao tiram ninguem...
+            assert.strictEqual(B._filtrarPublicacoes([ultimo, gc], est({ showAuthorLast: false, showAuthorGc: false })).length, 2);
+            // ...e os dois saem por "outras posicoes"
+            assert.strictEqual(B._filtrarPublicacoes([ultimo, gc], est({ showAuthorOthers: false })).length, 0);
+            // rank alvo 2 e ignorado: quem sai pelo filtro do alvo e o 1o autor
+            const r = B._filtrarPublicacoes([pub(3, 1), pub(3, 2)], est({ targetAuthorRank: 2, showAuthorFirst: false }));
+            assert.deepStrictEqual(r.map(p => p.authorRank), [2]);
+            assert.strictEqual(U.rankAlvoEfetivo(5), 1);
+        } finally {
+            CHAVES.forEach(k => { U[k] = true; });
+        }
     });
 
     test('le tambem o formato em memoria (impactFactor) quando nao ha jif', () => {

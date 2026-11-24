@@ -18,7 +18,6 @@ Principais Funcionalidades:
 * Histograma de Distribuição JCR: Gráfico interativo que revela o perfil de qualidade da sua produção ao longo do tempo.
 * Métricas de Produção por Ano: Visualize a evolução da sua carreira com barras empilhadas que mostram o impacto acumulado anualmente.
 * Segunda Linha de Gráficos Visualmente Rica:
-  - Histograma por Rank de Autoria: Análise da distribuição de publicações por posição de autoria (1º, 2º, 3º, ...), com colunas especiais para Último Autor (`Ult`) e Grandes Colaborações (`GC`), escala máxima fixada pelo histograma e sub-barras empilhadas de cores JCR proporcionais à altura efetiva da coluna.
   - Orientações por Ano: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde-azulado, Doutorado em Azul, Mestrado em Laranja), complementado por colunas especiais ao final para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
 * Tabelas Estatísticas Dinâmicas: Tabelas com Somatórios (Sigma) e Médias (Mu) automáticas para períodos de 5 anos, 10 anos ou intervalos customizados (ex: triênio/quadriênio de avaliação).
 * Citação e Índice H: Consolidação automática do Índice H e número de citações para Web of Science e Scopus.
@@ -37,23 +36,21 @@ Principais Funcionalidades:
 * Backup e Portabilidade: Exporte todo o seu banco de dados em formato JSON para restaurá-lo em outros dispositivos ou exporte os dados tabulados em CSV para análise no Microsoft Excel ou ferramentas estatísticas. Na importação, o sistema compara automaticamente as versões e mantém sempre o registro mais recente.
 
 3. Análise de Autoria, Patentes, Orientações e Eventos:
-* Seletor de Rank de Autoria Customizado: Defina a posição de autoria desejada (1º, 2º, etc.) para contagem e métricas de autoria na tabela do Lattes, no Gerenciador de Banco de Dados e nos relatórios de grupo, atualizando dinamicamente os cabeçalhos das tabelas (ex: 2º Autor, 3º Autor).
-* Análise Avançada de Autoria: Identificação automatizada do papel do pesquisador como Primeiro Autor (1º), Autor em Rank Específico ou Último Autor (`Ult`) em cada publicação.
-* Média Real de Coautores: Cálculo da média de coautores por artigo, com opção de desconsiderar Grandes Colaborações (artigos com "et al." ou consórcios multicêntricos) para evitar distorções estatísticas.
+* Análise Avançada de Autoria: Identificação automatizada do papel do pesquisador como Primeiro Autor (1º) em cada publicação.
 * Portfólio de Inovação e Patentes: Gestão e contagem estruturada de patentes classificadas por status (Depósito, Concessão, etc.).
 * Painel de Orientações Detalhado: Resumo consolidado e gráfico de orientações concluídas e em andamento divididas por nível acadêmico (Pós-doutorado, Doutorado, Mestrado, Iniciação Científica, etc.).
 * Participação em Eventos: Extração e compilação de dados sobre participação em eventos, ativada automaticamente caso o currículo seja aberto utilizando a opção "Carregar informações complementares".
 
 4. Usabilidade e Apresentação:
 * Divisão Cronológica Visual: Insere separadores anuais elegantes na lista de publicações do currículo Lattes para facilitar a leitura.
-* Filtros Interativos Rápidos: Oculte seções inteiras ou filtre publicações por faixa de JCR, papel de autoria ou grandes colaborações com apenas um clique.
+* Filtros Interativos Rápidos: Oculte seções inteiras ou filtre publicações por faixa de JCR ou papel de autoria com apenas um clique.
 * Relatório Individual com Um Clique: Ícone dedicado no cabeçalho do currículo abre instantaneamente o relatório completo do CV em exibição, sem passar pelo banco de dados.
 * Lista de Publicações Detalhada: Cada publicação exibe JCR, DOI e número de citações (Web of Science/Scopus) lado a lado, com checkboxes para mostrar/ocultar cada informação conforme a necessidade. A lista pode ser ordenada por ano, JCR ou citações.
 * Listas Prontas para Documentos: As listas de publicações e de orientações são copiadas em texto puro com um clique, com numeração opcional — contínua ou reiniciada a cada ano ou categoria.
 * Períodos Padronizados: Todos os campos de período seguem a regra dos editais — N anos completos mais o ano corrente —, com a opção "Toda a carreira" e o intervalo exato indicado ao passar o mouse. As seções se atualizam sozinhas ao mudar o período.
 * Versão de Impressão: Botão de impressão nos relatórios individuais e de grupo. As seções abertas são impressas por completo (listas e tabelas sem cortes de rolagem), com gráficos coloridos, linha-resumo dos limiares/filtros aplicados e cabeçalhos de tabela repetidos a cada página. A tabela do banco de CVs também tem impressão otimizada, com seletor de orientação (paisagem/retrato).
 * Cabeçalho Compacto: Controles do currículo convertidos em ícones com estado ligado/desligado. As caixas de listas e tabelas do relatório podem ser redimensionadas na vertical.
-* Opções Unificadas (⚙️): Um só diálogo, aberto pela engrenagem no cabeçalho do currículo e dos relatórios, reúne limiares de JCR, período customizado, rank do autor, cores das faixas (com botão para voltar à paleta para daltônicos) e filtros. As opções valem em toda a extensão, e os filtros podem ser lembrados entre telas e sessões.
+* Opções Unificadas (⚙️): Um só diálogo, aberto pela engrenagem no cabeçalho do currículo e dos relatórios, reúne limiares de JCR, período customizado, cores das faixas (com botão para voltar à paleta para daltônicos) e filtros. As opções valem em toda a extensão, e os filtros podem ser lembrados entre telas e sessões.
 * Design Premium: Interface moderna, limpa e responsiva que se integra de maneira nativa e elegante ao layout da Plataforma Lattes.
 
 Privacidade e Segurança Absoluta:

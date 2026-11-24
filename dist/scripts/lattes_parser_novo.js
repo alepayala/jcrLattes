@@ -112,6 +112,13 @@
      * cortada, authorCount é só o que foi listado (um mínimo) e "último autor" fica
      * desconhecido. Grande colaboração, só com a palavra COLLABORATION ou com a lista
      * chegando ao tamanho que a define.
+     *
+     * Posição nas listas com "et.al": só "é o 1º autor" vale. Conferido pelo DOI no
+     * Crossref em 2026-11-24 (71 artigos): o site tira autores do meio da lista
+     * (real 4º de 6, mostrado 3º de 3) e põe "et.al" até quando não falta ninguém; o
+     * 1º autor estava certo em todos, a posição errada em 19. Por isso, fora do 1º
+     * lugar, authorRank fica -1 (indeterminada), que é o valor que o resto da
+     * extensão já trata como "posição desconhecida".
      */
     function _publicacaoDasPartes(partes, opcoes) {
         const p = partes || {};
@@ -157,7 +164,7 @@
 
         const autores = A._contarAutores(autoresTexto);
         const ordem = _ordemPelosApelidos(autores, op.apelidos);
-        dados.authorRank = ordem;
+        dados.authorRank = (cortada && ordem !== 1) ? -1 : ordem;
         dados.hasEtAl = /COLLABORATION/i.test(autoresTexto) || autores.length >= A.AUTORES_GRANDE_COLABORACAO;
         // primeiro autor vale sempre; último, só com a lista inteira à vista
         if (ordem === 1) dados.isFirstAuthor = true;

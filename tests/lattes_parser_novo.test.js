@@ -99,8 +99,12 @@ describe('_publicacaoDasPartes', () => {
         assert.strictEqual(r.authorsTruncated, true);
         assert.strictEqual(r.hasEtAl, false);
         assert.strictEqual(r.authorCount, 2);          // so o que foi listado
-        assert.strictEqual(r.authorRank, 2);
+        assert.strictEqual(r.authorRank, -1);          // fora do 1o lugar a posicao e indeterminada
+        assert.strictEqual(r.isFirstAuthor, false);
         assert.strictEqual(r.isLastAuthor, false);     // nao da para saber quem fecha a lista
+        // o 1o lugar vale mesmo com a lista cortada (conferido pelo DOI em 71 artigos)
+        const primeiro = N._publicacaoDasPartes(partes({ autores: 'LINS, ANA B. M. ; SOUZA, P. ; et.al . ' }), { apelidos: ['LINS, ANA B. M.'] });
+        assert.deepStrictEqual([primeiro.authorRank, primeiro.isFirstAuthor, primeiro.authorsTruncated], [1, true, true]);
         assert.strictEqual(N._publicacaoDasPartes(partes(), {}).authorsTruncated, false);
     });
 
@@ -135,7 +139,7 @@ describe('_publicacaoDasPartes', () => {
         assert.deepStrictEqual(N._desfazerOrdemDeTexto(nove), nove);
         const onze = Array.from({ length: 11 }, (_, i) => 'AUTOR, Q' + (i + 1));
         const r = N._publicacaoDasPartes(partes({ autores: onze.join(' ; ') + ' ; et.al . ' }), { apelidos: ['AUTOR, Q2'] });
-        assert.deepStrictEqual([r.authorOrderRestored, r.authorsTruncated, r.authorRank], [false, true, 2]);
+        assert.deepStrictEqual([r.authorOrderRestored, r.authorsTruncated, r.authorRank], [false, true, -1]);
     });
 
     test('100 autores: 1, 10, 100, 11, ...', () => {

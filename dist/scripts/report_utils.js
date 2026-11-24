@@ -22,6 +22,45 @@ window.JCRReportUtils = {
   // endereco qualquer (o CV congelado de uma proposta, por exemplo) volta como veio;
   // sem nada reconhecivel, ''.
   URL_CURRICULO: 'https://busca-cv-lattes.cnpq.br/curriculo/',
+
+  // Média de autores por artigo (coluna μ de "Autores" no painel do CV). Desligada em
+  // 2026-11-24: o Lattes novo corta a lista de autores de parte dos artigos ("et.al"),
+  // e a contagem deixa de ser confiável. A coluna fica, com traços. Os somatórios
+  // (sumAuthors, sumAuthorsNonGc) continuam sendo calculados e gravados.
+  MEDIA_DE_AUTORES_ATIVA: false,
+
+  // "Último autor" (coluna Últ das tabelas, barra Últ do histograma de rank, marca
+  // "Último" na anotação do artigo, filtro "Último autor"). Desligado em 2026-11-24
+  // pelo mesmo motivo: nas listas com "et.al" do Lattes novo não dá para saber quem
+  // fecha a lista. Desligado, as colunas ficam com traços, o filtro fica travado e
+  // quem é último autor conta como "outras posições". lastAuthorCount continua sendo
+  // calculado e gravado.
+  ULTIMO_AUTOR_ATIVO: false,
+
+  // Posição de autoria fora do 1º lugar ("ordem: N" na anotação do artigo, histograma
+  // "Distribuição por Rank de Autoria", campo "Rank do autor" das opções). Desligada em
+  // 2026-11-24: a posição só foi confirmada (pelo DOI) para o 1º autor. Desligada, o
+  // rank alvo vale sempre 1 e o histograma dá lugar a um aviso.
+  POSICAO_DE_AUTOR_ATIVA: false,
+
+  // Número de autores do artigo ("N autores" na anotação do artigo). Desligado em
+  // 2026-11-24: nas listas com "et.al" do Lattes novo é só um mínimo.
+  NUMERO_DE_AUTORES_ATIVO: false,
+
+  // Grandes colaborações (coluna GC das tabelas, filtro "Grandes colaborações", marca na
+  // anotação do artigo). Desligadas em 2026-11-24: no Lattes novo o "et.al" não distingue
+  // grande colaboração de lista cortada. Desligadas, a coluna fica com traços, o filtro
+  // fica travado e nenhum artigo é tratado como GC nos filtros de autoria. gcCount e
+  // hasEtAl continuam sendo calculados e gravados.
+  GRANDES_COLABORACOES_ATIVAS: false,
+
+  // Rank alvo em vigor: o pedido, ou 1 enquanto a posição de autoria está desligada.
+  rankAlvoEfetivo: function (pedido) {
+    if (!this.POSICAO_DE_AUTOR_ATIVA) return 1;
+    const n = parseInt(pedido, 10);
+    return isNaN(n) || n < 1 ? 1 : n;
+  },
+  TEXTO_DESABILITADO: 'Temporariamente desabilitado',
   urlCurriculo: function (idOuLink) {
     const t = String(idOuLink || '').trim();
     if (!t) return '';
@@ -56,7 +95,7 @@ window.JCRReportUtils = {
       highJcr: num(s.highJcr, 7),
       lowJcr: num(s.lowJcr, 1.5),
       customYears: int(s.customYears, 1, 0),
-      targetAuthorRank: int(s.targetAuthorRank, 1, 1),
+      targetAuthorRank: this.rankAlvoEfetivo(s.targetAuthorRank),
       cores: { high: cor('high'), mid: cor('mid'), low: cor('low'), none: cor('none') },
       lembrarFiltros: lembrar,
       filtros: {
@@ -165,11 +204,11 @@ window.JCRReportUtils = {
       </fieldset>
       <fieldset style="${caixa}">
         <legend style="${leg}">Autoria</legend>
-        <div style="margin: 3px 0 6px;">Rank do autor: <input type="number" id="${ids.rank}" value="${rank}" min="1" max="99" style="${num}"></div>
+        <div style="margin: 3px 0 6px;"><span${this.POSICAO_DE_AUTOR_ATIVA ? '' : ` title="${this.TEXTO_DESABILITADO}" style="color: #999;"`}>Rank do autor: <input type="number" id="${ids.rank}" value="${rank}" min="1" max="99" style="${num}"${this.POSICAO_DE_AUTOR_ATIVA ? '' : ' disabled'}></span></div>
         <label style="display: block; cursor: pointer; margin: 3px 0;"><input type="checkbox" id="${ids.autor.first}"${marc(o.filtros.author.first)}> <span id="${ids.rotuloRank}">${rank}º Autor</span></label>
-        <label style="display: block; cursor: pointer; margin: 3px 0;"><input type="checkbox" id="${ids.autor.last}"${marc(o.filtros.author.last)}> Último autor</label>
+        <label style="display: block; cursor: pointer; margin: 3px 0;${this.ULTIMO_AUTOR_ATIVO ? '' : ' color: #999;'}"${this.ULTIMO_AUTOR_ATIVO ? '' : ` title="${this.TEXTO_DESABILITADO}"`}><input type="checkbox" id="${ids.autor.last}"${marc(o.filtros.author.last)}${this.ULTIMO_AUTOR_ATIVO ? '' : ' disabled'}> Último autor</label>
         <label style="display: block; cursor: pointer; margin: 3px 0;"><input type="checkbox" id="${ids.autor.others}"${marc(o.filtros.author.others)}> Outras posições</label>
-        <label style="display: block; cursor: pointer; margin: 3px 0;"><input type="checkbox" id="${ids.autor.gc}"${marc(o.filtros.author.gc)}> Grandes colaborações (et al.)</label>
+        <label style="display: block; cursor: pointer; margin: 3px 0;${this.GRANDES_COLABORACOES_ATIVAS ? '' : ' color: #999;'}"${this.GRANDES_COLABORACOES_ATIVAS ? '' : ` title="${this.TEXTO_DESABILITADO}"`}><input type="checkbox" id="${ids.autor.gc}"${marc(o.filtros.author.gc)}${this.GRANDES_COLABORACOES_ATIVAS ? '' : ' disabled'}> Grandes colaborações (et al.)</label>
       </fieldset>
       ${periodo}
     </div>
@@ -340,7 +379,7 @@ window.JCRReportUtils = {
     let minYear = currentYear;
     let maxYear = currentYear;
 
-    const targetRank = parseInt(targetAuthorRank) || 1;
+    const targetRank = this.rankAlvoEfetivo(targetAuthorRank);
 
     if (publications && Array.isArray(publications)) {
       for (const pub of publications) {
@@ -516,9 +555,9 @@ window.JCRReportUtils = {
         <td style="padding: 8px; text-align: center; background-color: #ffffff;"><strong>${this.getAvg(data.total.sum, data.total.countWithJcr)}</strong></td>
         
         <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};"><strong>${data.total.firstAuthorCount}</strong></td>
-        <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};"><strong>${data.total.lastAuthorCount}</strong></td>
-        <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Média de Autores (exclui GC)"><strong>${this.getAvg(data.total.sumAuthorsNonGc, data.total.countNonGc)}</strong></td>
-        <td style="padding: 8px; border-left: 1px solid #ccc; text-align: center;"><strong>${data.total.gcCount}</strong></td>
+        <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};"${this.ULTIMO_AUTOR_ATIVO ? '' : ` title="${this.TEXTO_DESABILITADO}"`}><strong>${this.ULTIMO_AUTOR_ATIVO ? data.total.lastAuthorCount : '—'}</strong></td>
+        <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="${this.MEDIA_DE_AUTORES_ATIVA ? 'Média de Autores (exclui GC)' : 'Temporariamente desabilitado'}"><strong>${this.MEDIA_DE_AUTORES_ATIVA ? this.getAvg(data.total.sumAuthorsNonGc, data.total.countNonGc) : '—'}</strong></td>
+        <td style="padding: 8px; border-left: 1px solid #ccc; text-align: center;"${this.GRANDES_COLABORACOES_ATIVAS ? '' : ` title="${this.TEXTO_DESABILITADO}"`}><strong>${this.GRANDES_COLABORACOES_ATIVAS ? data.total.gcCount : '—'}</strong></td>
 
         <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgHigh};"><strong>${data.high.count}</strong></td>
         <td style="padding: 8px; text-align: center; background-color: ${bgHigh};">${this.formatNum(data.high.sum)}</td>
@@ -764,6 +803,14 @@ window.JCRReportUtils = {
   },
 
   generateAuthorRankHistogramHTML: function(publications, highVal = 7.0, lowVal = 1.5, showLast = true, showGc = true) {
+    if (!this.POSICAO_DE_AUTOR_ATIVA) {
+      return `
+        <div style="height: 100%; display: flex; flex-direction: column; padding: 15px; margin-top: 10px; background-color: ${this.COLORS.backgroundSubHeader}; border-top: 1px solid ${this.COLORS.border}; box-sizing: border-box;">
+          <div style="font-weight: bold; margin-bottom: 8px; color: ${this.COLORS.footerText};">Distribuição por Rank de Autoria</div>
+          <div style="display: flex; flex-grow: 1; align-items: center; justify-content: center; color: #666; font-size: 0.9em;">${this.TEXTO_DESABILITADO}</div>
+        </div>
+      `;
+    }
     highVal = parseFloat(highVal);
     lowVal = parseFloat(lowVal);
 
@@ -784,7 +831,11 @@ window.JCRReportUtils = {
       } else {
         let rank = pub.authorRank;
         if (rank === undefined || rank === null || rank < 1) {
-          rank = pub.isFirstAuthor ? 1 : 1;
+          // Lista com "et.al" do Lattes novo: a posição é indeterminada (-1) e o artigo
+          // fica fora do histograma. Os demais sem posição seguem contados no 1º, como
+          // sempre foi.
+          if (pub.authorsTruncated && !pub.isFirstAuthor) return;
+          rank = 1;
         }
         if (rank > maxRankFound) maxRankFound = rank;
 
@@ -831,7 +882,7 @@ window.JCRReportUtils = {
 
     const columns = [...rankColumns];
 
-    if (showLast !== false) {
+    if (showLast !== false && this.ULTIMO_AUTOR_ATIVO) {
       columns.push({
         key: 'last',
         label: 'Ult',
