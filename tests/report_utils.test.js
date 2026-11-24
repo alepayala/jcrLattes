@@ -1381,3 +1381,24 @@ describe('opcoesEfetivas / mesclarOpcoes', () => {
         assert.ok(com.includes('name="p" value="all" checked'));
     });
 });
+
+// lattes.cnpq.br/<id> foi desativado: todo link mostrado ou aberto sai de urlCurriculo.
+describe('urlCurriculo', () => {
+    const novo = 'https://busca-cv-lattes.cnpq.br/curriculo/1234567890123456';
+    test('ID de 16 digitos vira o endereco novo', () => {
+        assert.strictEqual(R.urlCurriculo('1234567890123456'), novo);
+        assert.strictEqual(R.urlCurriculo(' 1234567890123456 '), novo);
+    });
+    test('link gravado no formato antigo e convertido; o novo fica igual', () => {
+        assert.strictEqual(R.urlCurriculo('http://lattes.cnpq.br/1234567890123456'), novo);
+        assert.strictEqual(R.urlCurriculo('https://lattes.cnpq.br/1234567890123456/'), novo);
+        assert.strictEqual(R.urlCurriculo(novo), novo);
+    });
+    test('outro endereco (CV congelado) volta como veio', () => {
+        const congelado = 'http://plsql1.cnpq.br/curriculostg/prc_visualiza_cv?f_cod=1234567890123456';
+        assert.strictEqual(R.urlCurriculo(congelado), congelado);
+    });
+    test('nada reconhecivel nao vira link', () => {
+        ['', null, undefined, '123', 'javascript:alert(1)', 'Fulano de Tal'].forEach(v => assert.strictEqual(R.urlCurriculo(v), ''));
+    });
+});

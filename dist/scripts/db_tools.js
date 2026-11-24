@@ -322,6 +322,7 @@ window.JCRDBTools = {
 
         const unico = this._mesclarVersoesCv(fontes.map(f => f.cv));
         unico.lattesId = id;
+        // cvLink gravado fica no formato antigo: e identificador (ver JCRReportUtils.urlCurriculo)
         if (!unico.cvLink) unico.cvLink = 'http://lattes.cnpq.br/' + id;
         if (fontes.some(f => f.k.startsWith(cvPrefix))) unico.inGeneralDb = true;
         const destino = this._piccCvStorageKey(unico);
@@ -825,11 +826,11 @@ window.JCRDBTools = {
         return t.nivel === 'D' ? String(t.ano) : `${t.ano} (${t.nivel})`;
     },
 
-    // Endereco do CV no Lattes, ou '' sem lattesId. O id e so digitos; qualquer outra
-    // coisa no campo nao vira link.
+    // Endereco do CV no Lattes, ou '' sem lattesId valido (16 digitos; qualquer outra
+    // coisa no campo nao vira link). O endereco vem de JCRReportUtils.urlCurriculo.
     _linkLattes: function (cv) {
         const id = String((cv && cv.lattesId) || '').trim();
-        return /^\d+$/.test(id) ? `http://lattes.cnpq.br/${id}` : '';
+        return /^\d{16}$/.test(id) ? window.JCRReportUtils.urlCurriculo(id) : '';
     },
 
     // Tabela "Membros do Grupo" em HTML (so o <table>; o cabecalho da secao, com o
@@ -879,7 +880,7 @@ window.JCRDBTools = {
             const celulas = cols.map((c, i) => {
                 const v = ind[c.chave];
                 if (c.chave === 'nome') {
-                    const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
+                    const lattesLink = this._esc(this._linkLattes(cv)) || '#';
                     // quem participou do grupo so por um tempo mostra o periodo
                     const periodo = cv._periodoNoGrupo ? ` <span style="font-weight: normal; font-size: 0.8em; color: #666; white-space: nowrap;" title="Período no grupo: só a produção deste intervalo entra no relatório">(${this._esc(this._textoPeriodoNoGrupo(cv._periodoNoGrupo))})</span>` : '';
                     return `<td style="${td}"><strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(v)}</a></strong>${periodo}</td>`;
@@ -2866,7 +2867,7 @@ window.JCRDBTools = {
                                 nameHtml += ` <span style="background: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7; font-size: 0.75em; padding: 1px 5px; border-radius: 3px; font-weight: normal; margin-left: 3px;" title="Edital / Chamada">📜 ${this._esc(cv.edital)}</span>`;
                             }
                         } else {
-                            const lattesLink = cv.lattesId ? `http://lattes.cnpq.br/${this._esc(cv.lattesId)}` : '#';
+                            const lattesLink = this._esc(this._linkLattes(cv)) || '#';
                             nameHtml = `<strong><a href="${lattesLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(String(val))}</a></strong>`;
                         }
                         tbodyHtml += `<td${classAttr}>${nameHtml}</td>`;
@@ -3483,7 +3484,8 @@ window.JCRDBTools = {
                     if (!newTab.confirm(`Abrir ${selected.length} CVs de uma vez pode ser bloqueado pelo navegador. Continuar?`)) return;
                 }
                 selected.forEach(({ lattesId }) => {
-                    if (lattesId) newTab.open(`http://lattes.cnpq.br/${lattesId}`, '_blank');
+                    const urlCv = window.JCRReportUtils.urlCurriculo(lattesId);
+                    if (urlCv) newTab.open(urlCv, '_blank');
                 });
             });
         }
@@ -3492,7 +3494,8 @@ window.JCRDBTools = {
         openCvBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const lattesId = e.currentTarget.getAttribute('data-lattesid');
-                if (lattesId) newTab.open(`http://lattes.cnpq.br/${lattesId}`, '_blank');
+                const urlCv = window.JCRReportUtils.urlCurriculo(lattesId);
+                if (urlCv) newTab.open(urlCv, '_blank');
             });
         });
 
@@ -4576,8 +4579,8 @@ window.JCRDBTools = {
                 const isExcluded = excludedCvKeys.includes(memberKey) || excludedCvKeys.includes(member.name);
                 const isIncluded = !isExcluded;
 
-                const memberLattes = member.lattesId ? `http://lattes.cnpq.br/${this._esc(member.lattesId)}` : (member.cvLink || '#');
-                // No modo "Backup Local" o clique abre a cópia salva do CV em vez do lattes.cnpq.br
+                const memberLattes = this._esc(this._linkLattes(member) || window.JCRReportUtils.urlCurriculo(member.cvLink)) || '#';
+                // No modo "Backup Local" o clique abre a cópia salva do CV em vez do site do Lattes
                 const cvLinkAttrs = `class="cv-lattes-link" data-cv-key="${this._esc(this._memberCvBlobKey(member.lattesId, member.name))}" data-proc-id="${this._esc(proc.processId || '')}"`;
                 const cvBolsa = memberCv ? (memberCv.fellowshipString || memberCv.bolsa) : '';
                 const displayBolsa = (cvBolsa && cvBolsa !== '-') ? cvBolsa : (member.bolsa || '-');
@@ -5031,7 +5034,7 @@ window.JCRDBTools = {
                     <div>
                         <h2 style="margin: 0; color: ${COLORS.footerText};">Relatório: ${this._esc(cvData.name)}${cvData._periodoNoGrupo ? ` <span style="font-size: 0.6em; font-weight: normal; color: #666;" title="Aberto a partir do relatório do grupo: só a produção do período de participação">(no grupo: ${this._esc(this._textoPeriodoNoGrupo(cvData._periodoNoGrupo))})</span>` : ''}</h2>
                         <div style="margin-top: 4px; color: #666; font-size: 0.85em;">
-                            ${(cvData.name.startsWith('Grupo:') || !cvData.lattesId) ? '' : `ID Lattes: <a href="http://lattes.cnpq.br/${this._esc(cvData.lattesId)}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(cvData.lattesId)}</a> &nbsp;&middot;&nbsp; `}Sincronizado em: ${new Date(cvData.dateAdded).toLocaleDateString()}
+                            ${(cvData.name.startsWith('Grupo:') || !cvData.lattesId) ? '' : `ID Lattes: <a href="${this._esc(this._linkLattes(cvData) || '#')}" target="_blank" style="color: #1565C0; text-decoration: none;">${this._esc(cvData.lattesId)}</a> &nbsp;&middot;&nbsp; `}Sincronizado em: ${new Date(cvData.dateAdded).toLocaleDateString()}
                         </div>
                     </div>
                     <div>
@@ -5541,7 +5544,7 @@ window.JCRDBTools = {
         });
 
         // Modo "Backup Local": se houver cópia salva do CV, o link abre a cópia local;
-        // se não houver, o link segue normalmente para o lattes.cnpq.br — apenas o ícone
+        // se não houver, o link segue normalmente para o site do Lattes — apenas o ícone
         // avisa que não existe cópia local. As cópias são pré-carregadas aqui para que o
         // clique seja síncrono (abrir uma aba depois de um await pode ser bloqueado).
         const cvLinks = Array.from(doc.querySelectorAll('.cv-lattes-link'));

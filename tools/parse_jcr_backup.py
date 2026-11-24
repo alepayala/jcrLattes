@@ -213,7 +213,8 @@ def load_backup(file_path: str) -> BackupContents:
             continue
 
         if lattes_id:
-            link = f"http://lattes.cnpq.br/{lattes_id}"
+            # lattes.cnpq.br/<id> foi desativado; o curriculo abre neste endereco
+            link = f"https://busca-cv-lattes.cnpq.br/curriculo/{lattes_id}"
         else:
             link = entry.get('cvLink') or name_link.get('link') or 'No Link'
 

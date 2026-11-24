@@ -1039,7 +1039,7 @@ describe('_explicacaoPeriodoMembros', () => {
 describe('_planilhaMembros: link do CV Lattes', () => {
     test('nome com link e coluna CV Lattes no fim', () => {
         const L = B._planilhaMembros([{ name: 'Ana', lattesId: '1234567890123456' }], null, 2026, 7, 1.5);
-        const url = 'http://lattes.cnpq.br/1234567890123456';
+        const url = 'https://busca-cv-lattes.cnpq.br/curriculo/1234567890123456';
         assert.deepStrictEqual(L[2][0], { texto: 'Ana', link: url });
         assert.deepStrictEqual(L[2][16], { texto: url, link: url });
     });

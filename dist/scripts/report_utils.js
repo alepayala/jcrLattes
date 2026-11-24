@@ -11,6 +11,26 @@ window.JCRReportUtils = {
   CORES_PADRAO: { high: '#009988', mid: '#0077BB', low: '#EE7733', none: '#CC3311' },
   CORES_PADRAO_ANTIGAS: { high: '#3daa43', mid: '#a838ca', low: '#e65100', none: '#e03535' },
 
+  // ---- Endereco do curriculo ----
+  // http://lattes.cnpq.br/<id> foi desativado pelo CNPq (nov/2026); o curriculo abre em
+  // https://busca-cv-lattes.cnpq.br/curriculo/<id>. Todo link que a extensao MOSTRA ou
+  // ABRE sai daqui. O que fica GRAVADO nos registros (cvLink) continua no formato antigo:
+  // la ele e identificador, casado por expressoes regulares na leitura das propostas, e
+  // os bancos ja existentes estao cheios dele.
+  //
+  // Aceita o ID de 16 digitos ou um link de curriculo (formato antigo ou novo). Outro
+  // endereco qualquer (o CV congelado de uma proposta, por exemplo) volta como veio;
+  // sem nada reconhecivel, ''.
+  URL_CURRICULO: 'https://busca-cv-lattes.cnpq.br/curriculo/',
+  urlCurriculo: function (idOuLink) {
+    const t = String(idOuLink || '').trim();
+    if (!t) return '';
+    if (/^\d{16}$/.test(t)) return this.URL_CURRICULO + t;
+    const m = t.match(/^https?:\/\/(?:www\.)?(?:lattes\.cnpq\.br|busca-cv-lattes\.cnpq\.br\/curriculo)\/(\d{16})\/?$/i);
+    if (m) return this.URL_CURRICULO + m[1];
+    return /^https?:\/\//i.test(t) ? t : '';
+  },
+
   // ---- Opcoes da extensao ----
   // Limiares de JCR, periodo customizado, rank do autor, cores e filtros sao UMA
   // configuracao, compartilhada pelo painel do CV Lattes e pelos relatorios, gravada

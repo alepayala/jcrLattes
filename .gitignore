@@ -30,3 +30,6 @@ test_pages/
 # Claude Code: settings.json e hooks/ sao versionados (config do projeto);
 # settings.local.json e pessoal de cada maquina
 .claude/settings.local.json
+
+# Estado da sessao de trabalho (continuidade entre maquinas); nao e parte do projeto
+ESTADO.md
