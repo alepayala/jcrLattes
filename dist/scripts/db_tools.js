@@ -2147,6 +2147,13 @@ window.JCRDBTools = {
                 this.currentCvData.customId = '';
             }
             if (existing.idPeriodos) this.currentCvData.idPeriodos = existing.idPeriodos;
+            // O Lattes novo ainda nao informa a bolsa (fellowshipUnknown): um CV lido de
+            // la nao apaga a bolsa que o banco ja conhece.
+            const semBolsaNaFonte = !!(this.lastArgs && this.lastArgs.nameLink && this.lastArgs.nameLink.fellowshipUnknown);
+            if (semBolsaNaFonte && !this.currentCvData.fellowshipString && existing.fellowshipString) {
+                this.currentCvData.fellowshipString = existing.fellowshipString;
+                this.currentCvData.fellowshipText = existing.fellowshipText || '';
+            }
         } else {
             if (this.currentCvData.customId === undefined) {
                 this.currentCvData.customId = '';

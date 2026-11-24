@@ -61,7 +61,7 @@ Privacidade e Segurança Absoluta:
 
 Como Usar:
 1. Instale a extensão JCRLattes no seu navegador Google Chrome.
-2. Acesse qualquer currículo na Plataforma Lattes (https://lattes.cnpq.br/).
+2. Acesse qualquer currículo na Plataforma Lattes. A extensão funciona na nova busca de currículos (https://busca-cv-lattes.cnpq.br/) e também nas páginas do formato anterior.
 3. A extensão processará as informações automaticamente, inserindo o painel de controle e métricas no topo da página.
 4. Para salvar o currículo no seu banco de dados local ou configurar filtros, utilize o painel lateral de opções da extensão.
 

@@ -251,7 +251,9 @@
             name, link,
             researcherIdLink: rid ? rid.href : '',
             fellowshipText: '',
-            fellowshipString: ''
+            fellowshipString: '',
+            // quem grava o CV usa isto para não apagar a bolsa que já tem
+            fellowshipUnknown: true
         };
     }
 
@@ -414,6 +416,8 @@
      * os marcadores de carregamento da lista de produções sumirem. Devolve a página à
      * posição em que estava. Resolve com { secoesAbertas, artigos, completo }.
      *
+     * opcoes.secoes: data-id das seções a abrir (padrão: todas as fechadas). A
+     *                extensão pede só as que lê, para mexer o mínimo na página.
      * opcoes.espera: pausa em ms entre passos (padrão 350)
      * opcoes.limite: máximo de rolagens (padrão 40)
      */
@@ -425,22 +429,64 @@
         const janela = d.defaultView || window;
         const rolagem = { x: janela.scrollX, y: janela.scrollY };
 
+        // Espera uma condição, olhando a cada 200 ms, até o prazo. Devolve se ela valeu.
+        const ate = async (condicao, prazo) => {
+            const fim = Date.now() + prazo;
+            while (!condicao()) {
+                if (Date.now() >= fim) return false;
+                await espera(200);
+            }
+            return true;
+        };
+        const botoes = () => Array.from(d.querySelectorAll('button.accordion-header'));
+        const tempoMax = op.tempoMax || 15000;
+
+        // O acordeão é montado aos poucos: primeiro só "Identificação", as outras seções
+        // uns segundos depois (medido no site em 2026-11-24). Só começa quando a lista
+        // de seções parou de crescer; senão não haveria o que abrir e o currículo
+        // seria lido vazio.
+        let vistos = -1, desde = Date.now();
+        await ate(() => {
+            const n = botoes().length;
+            if (n !== vistos) { vistos = n; desde = Date.now(); }
+            return n > 1 && Date.now() - desde >= 1200;
+        }, tempoMax);
+
         let secoesAbertas = 0;
-        for (const botao of Array.from(d.querySelectorAll('button.accordion-header[aria-expanded="false"]'))) {
-            botao.click();
-            secoesAbertas++;
-            await espera(pausa);
+        const pedidas = Array.isArray(op.secoes) ? op.secoes : null;
+        const abertas = [];
+        for (const botao of botoes()) {
+            const id = botao.getAttribute('data-id');
+            if (pedidas && !pedidas.includes(id)) continue;
+            if (botao.getAttribute('aria-expanded') === 'false') {
+                botao.click();
+                secoesAbertas++;
+                await espera(pausa);
+            }
+            abertas.push(id);
         }
+        // Cada seção busca o conteúdo ao abrir: espera os painéis terem algo. Um prazo só
+        // para todos, porque uma seção vazia pode nunca ganhar conteúdo.
+        const temConteudo = (id) => { const p = d.getElementById(id + '-panel'); return !!(p && p.childElementCount && p.textContent.trim()); };
+        await ate(() => abertas.every(temConteudo), tempoMax / 2);
 
         const pendente = () => Array.from(d.querySelectorAll('[appintersectionsentinel]')).find(s => parseFloat(s.style.height) > 0);
-        let voltas = 0, completo = false;
+        let voltas = 0, completo = false, semPendente = 0;
         const limite = op.limite || 40;
-        // as seções recém-abertas ainda estão buscando o conteúdo: dá tempo de os
-        // marcadores aparecerem antes de concluir que não há nada a rolar
-        await espera(pausa * 3);
+        // Só conclui depois de três olhadas seguidas sem marcador de carregamento: entre
+        // um lote e outro o marcador some por um instante.
         while (voltas < limite) {
             const s = pendente();
-            if (!s) { completo = true; break; }
+            if (!s) {
+                if (++semPendente >= 3) { completo = true; break; }
+                await espera(pausa);
+                continue;
+            }
+            semPendente = 0;
+            // O site carrega o lote seguinte por IntersectionObserver, que não dispara em
+            // aba oculta: insistir seria só esperar. Quem chamou tenta de novo quando a
+            // aba ficar visível (completo = false).
+            if (d.hidden) break;
             s.scrollIntoView({ block: 'start' });
             voltas++;
             await espera(pausa * 2.5);
@@ -449,13 +495,23 @@
         return { secoesAbertas, artigos: elementosDeArtigos(d).length, completo };
     }
 
+    // A página está no site do Lattes novo? (content.js escolhe o leitor por aqui.)
+    function ehSiteNovo(local) {
+        return !!local && local.hostname === 'busca-cv-lattes.cnpq.br';
+    }
+
     // O endereço é do currículo novo?
     function ehPaginaDoCurriculo(endereco) {
         return /^https?:\/\/busca-cv-lattes\.cnpq\.br\/curriculo\/\d{16}\/?(?:[?#].*)?$/.test(String(endereco || ''));
     }
 
+    // Seções que a extensão lê (ver as funções ler*).
+    const SECOES_LIDAS = ['identificacao', 'formacao', 'producoes', 'patentes', 'eventos', 'orientacoes'];
+
     raiz.JCRLattesParserNovo = {
         SELETOR_ARTIGO: SELETOR_ARTIGO,
+        SECOES_LIDAS: SECOES_LIDAS,
+        ehSiteNovo: ehSiteNovo,
         ehPaginaDoCurriculo: ehPaginaDoCurriculo,
         prepararPagina: prepararPagina,
         elementosDeArtigos: elementosDeArtigos,

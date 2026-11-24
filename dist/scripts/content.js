@@ -2,6 +2,53 @@
 let COLORS = window.JCRReportUtils.COLORS;
 let GRAPH_COLORS = window.JCRReportUtils.GRAPH_COLORS;
 
+// ---------------------------------------------------------------------------
+// Este script roda nos DOIS sites do Lattes, e quem decide e o endereco:
+//   antigo  buscatextual.cnpq.br/.../visualizacv.do   -> lattes_parser.js
+//   novo    busca-cv-lattes.cnpq.br/curriculo/<id>    -> lattes_parser_novo.js
+// LEITOR e o leitor do formato; PAGINA reune o que muda no DOM de um para o outro
+// (onde estao os artigos, onde entra a anotacao, onde entra o painel). O resto do
+// arquivo nao sabe em qual dos dois esta.
+// ---------------------------------------------------------------------------
+// (lattes_parser_novo.js so e carregado no site novo; ver manifest.json)
+const LATTES_NOVO = !!(window.JCRLattesParserNovo && window.JCRLattesParserNovo.ehSiteNovo(location));
+const LEITOR = LATTES_NOVO ? window.JCRLattesParserNovo : window.JCRLattesParser;
+const PAGINA = LATTES_NOVO ? {
+  seletorArtigo: LEITOR.SELETOR_ARTIGO,
+  seletorArtigoAnotado: LEITOR.SELETOR_ARTIGO,
+  raizArtigos: () => document.getElementById('producoes-panel') || document,
+  // a anotacao entra depois do <p> do artigo, dentro do <li>
+  ancoraDaAnotacao: (pub) => pub.querySelector(':scope > p'),
+  // o painel entra acima do corpo do CV, na largura toda da pagina
+  inserirPainel: (painel) => {
+    const corpo = document.querySelector('.cv-layout');
+    if (!corpo || !corpo.parentElement) return false;
+    corpo.parentElement.insertBefore(painel, corpo);
+    return true;
+  },
+  // o site novo ja tem as suas secoes recolhiveis
+  secoesRecolhiveis: false,
+  salvarHtml: false
+} : {
+  seletorArtigo: "div[class='artigo-completo']",
+  seletorArtigoAnotado: '.artigo-completo',
+  // Os artigos moram em #artigos-completos; a secao "Educacao e Popularizacao de C & T"
+  // repete, com a mesma classe .artigo-completo, artigos que ja estao ali — varrer a
+  // pagina inteira contava esses repetidos (e o JCR deles) de novo. So se o container
+  // nao existir a busca cai para o documento todo.
+  raizArtigos: () => document.getElementById('artigos-completos') || document,
+  ancoraDaAnotacao: (pub) => pub.querySelector('[cvuri]'),
+  inserirPainel: (painel) => {
+    // ausente na versao impressa do CV
+    const principal = document.getElementsByClassName('main-content')[0];
+    if (!principal) return false;
+    principal.insertBefore(painel, principal.firstChild);
+    return true;
+  },
+  secoesRecolhiveis: true,
+  salvarHtml: true
+};
+
 
 let observer;
 const observerConfig = {
@@ -88,18 +135,64 @@ async function loadSettings() {
   });
 }
 
+// Busca das métricas no ResearcherID / Web of Science (aba oculta aberta pelo
+// background, ação 'fetch_rid_stats'). Desligada por enquanto, a pedido (2026-11-24):
+// com false nada é pedido ao background e o painel segue só com os dados do currículo.
+// Para religar, basta voltar a true.
+const BUSCAR_RID = false;
+
 (async () => await main())();
 
+// O Lattes novo e uma aplicacao de pagina unica: o script entra em qualquer endereco
+// do site e o curriculo pode aparecer depois, sem recarregar. Espera o endereco ser
+// o de um curriculo e o cabecalho estar montado; depois abre as secoes que a extensao
+// le e rola ate a lista de artigos ficar completa (LEITOR.prepararPagina).
+async function esperarCurriculoNovo() {
+  const espera = (ms) => new Promise(r => setTimeout(r, ms));
+  while (!(LEITOR.ehPaginaDoCurriculo(location.href) && document.querySelector('h1.nome') &&
+           document.querySelector('button.accordion-header'))) {
+    await espera(500);
+  }
+  const endereco = location.href;
+  showLoading();
+  // A lista de artigos passa de 200 em lotes que o site so carrega com a aba visivel.
+  // Se ficou incompleta com a aba oculta (aberta em segundo plano), espera ela aparecer
+  // e tenta de novo, para nao ler nem gravar um curriculo pela metade.
+  const abaVisivel = () => new Promise((resolve) => {
+    if (!document.hidden) { resolve(); return; }
+    const aoMudar = () => {
+      if (document.hidden) return;
+      document.removeEventListener('visibilitychange', aoMudar);
+      resolve();
+    };
+    document.addEventListener('visibilitychange', aoMudar);
+  });
+  let pronta = await LEITOR.prepararPagina(document, { secoes: LEITOR.SECOES_LIDAS });
+  for (let tentativa = 0; !pronta.completo && tentativa < 3; tentativa++) {
+    await abaVisivel();
+    pronta = await LEITOR.prepararPagina(document, { secoes: LEITOR.SECOES_LIDAS });
+  }
+  if (!pronta.completo) {
+    console.warn('JCR Lattes: a lista de artigos pode estar incompleta (' + pronta.artigos + ' lidos).');
+  }
+
+  // Trocar de curriculo (ou sair dele) nao recarrega a pagina, e o painel ficaria com
+  // os dados do anterior. Recarregar e o jeito simples e seguro de recomecar limpo.
+  setInterval(() => { if (location.href !== endereco) location.reload(); }, 1000);
+}
+
 async function main() {
+  if (LATTES_NOVO) await esperarCurriculoNovo();
+
   // attempt to get CV name and link from Lattes page
-  const nameLink = window.JCRLattesParser.lerIdentificacao(document);
+  const nameLink = LEITOR.lerIdentificacao(document);
 
   // check whether name and link were not found (if not this is not a CV Lattes!)
-  if (!nameLink['name']) return;
+  if (!nameLink['name']) { hideLoading(true); return; }
 
   // maior titulacao concluida e o ano ({ nivel: 'D'|'M'|'E'|'G', ano }), para a
   // tabela de membros da equipe
-  nameLink.titulacao = window.JCRLattesParser.lerTitulacao(document);
+  nameLink.titulacao = LEITOR.lerTitulacao(document);
 
   // Abort if this is the Capitcha page
   if (document.querySelector('.tituloCaptcha') || document.getElementById('idSecaoCaptcha')) {
@@ -156,6 +249,9 @@ async function main() {
     // Only trigger if mutation is relevant (child list changes or JCR/CVURI attributes)
     const isRelevant = mutations.some(m => {
       if (m.target && m.target.closest && m.target.closest('.jcr-lattes-year-separator')) return false;
+      // nossas proprias anotacoes nao contam (so o site novo chega aqui com elas:
+      // la o Angular pode redesenhar a lista enquanto a anotamos)
+      if (m.target && m.target.closest && m.target.closest('.jcr-lattes-annotation')) return false;
       return m.type === 'childList' ||
       (m.type === 'attributes' && (
         m.target.classList.contains('ajaxJCR') ||
@@ -169,13 +265,13 @@ async function main() {
     }
   });
 
-  const articlesDiv = document.getElementById('artigos-completos');
-  if (articlesDiv) {
-    observer.observe(articlesDiv, observerConfig);
-  } else {
-    // Fallback if articles div is not yet present - use body
-    observer.observe(document.body, observerConfig);
-  }
+  observer.observe(raizObservada(), observerConfig);
+}
+
+// O que o observador vigia: a lista de artigos; sem ela (ainda nao montada), o corpo.
+function raizObservada() {
+  const raiz = PAGINA.raizArtigos();
+  return raiz && raiz !== document ? raiz : document.body;
 }
 
 // Helper to safely update DOM without triggering observer loop
@@ -184,14 +280,7 @@ async function updateSafe(callback) {
   try {
     await callback();
   } finally {
-    if (observer) {
-      const articlesDiv = document.getElementById('artigos-completos');
-      if (articlesDiv) {
-        observer.observe(articlesDiv, observerConfig);
-      } else {
-        observer.observe(document.body, observerConfig);
-      }
-    }
+    if (observer) observer.observe(raizObservada(), observerConfig);
   }
 }
 
@@ -267,12 +356,12 @@ async function processLattesPage(nameLink) {
   await updateSafe(async () => {
     try {
       // Annotate Lattes page and return annotated Lattes info
-      const authorNames = window.JCRLattesParser.lerApelidos(document);
+      const authorNames = LEITOR.lerApelidos(document);
       const lattesInfo = annotateLattesPage(highJcr, lowJcr, authorNames);
       // A leitura destas secoes mora em lattes_parser.js, junto com a das publicacoes.
-      const supervisions = window.JCRLattesParser.lerOrientacoes(document);
-      const patents = window.JCRLattesParser.lerPatentes(document);
-      const events = window.JCRLattesParser.lerEventos(document);
+      const supervisions = LEITOR.lerOrientacoes(document);
+      const patents = LEITOR.lerPatentes(document);
+      const events = LEITOR.lerEventos(document);
 
       // inject report table into Lattes page
       if (lattesInfo) {
@@ -438,19 +527,16 @@ async function checkAndUpdateProponenteLattesId(nameLink, finalStats = null, sup
   }
 }
 
-// Onde procurar os artigos. Eles moram em #artigos-completos; a secao "Educacao e
-// Popularizacao de C & T" repete, com a mesma classe .artigo-completo, artigos que ja
-// estao ali — varrer a pagina inteira contava esses repetidos (e o JCR deles) de novo.
-// So se o container nao existir a busca cai para o documento todo.
+// Onde procurar os artigos: depende do formato da pagina (ver PAGINA).
 function articlesRoot() {
-  return document.getElementById('artigos-completos') || document;
+  return PAGINA.raizArtigos();
 }
 
 // Annotate and extract journal info form Lattes page
 function annotateLattesPage(highJcr, lowJcr, authorNames) {
   console.log('Searching for journal publications...');
 
-  const pubElems = articlesRoot().querySelectorAll("div[class='artigo-completo']");
+  const pubElems = articlesRoot().querySelectorAll(PAGINA.seletorArtigo);
 
   if (pubElems.length === 0) return [];
 
@@ -474,8 +560,8 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
 
     // A LEITURA mora em lattes_parser.js; aqui fica só o que desenha a página.
     // Quando o Lattes mudar de formato, e a mudanca esta anunciada, o ajuste e la.
-    const pubInfo = window.JCRLattesParser
-      ? window.JCRLattesParser.lerPublicacao(pubElem, { apelidos: authorNames })
+    const pubInfo = LEITOR
+      ? LEITOR.lerPublicacao(pubElem, { apelidos: authorNames })
       : null;
     if (!pubInfo) {
       console.warn('[JCRLattes] Leitor de publicações indisponível (lattes_parser.js).');
@@ -492,7 +578,8 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
 
     // authorCountStr e apresentacao, nao dado: leva HTML dentro. Fica aqui, fora do
     // leitor, ate a proxima etapa decidir o que fazer com ele (hoje vai parar no banco).
-    pubInfo.authorCountStr = `${pubInfo.authorCount} autor${pubInfo.authorCount !== 1 ? 'es' : ''}`;
+    // lista cortada pelo site novo ("et.al"): o numero e so o que foi listado
+    pubInfo.authorCountStr = `${pubInfo.authorsTruncated ? '≥ ' : ''}${pubInfo.authorCount} autor${pubInfo.authorCount !== 1 ? 'es' : ''}`;
     if (pubInfo.hasEtAl) {
       pubInfo.authorCountStr += ' + et al.';
     }
@@ -515,7 +602,7 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
     pubElem.setAttribute('data-is-gc', pubInfo.hasEtAl);
     pubElem.setAttribute('data-author-rank', pubInfo.authorRank);
 
-    const pubElemLastItem = pubElem.querySelector('[cvuri]');
+    const pubElemLastItem = PAGINA.ancoraDaAnotacao(pubElem);
     if (pubElemLastItem) {
       injectJournalAnnotation(
         pubElemLastItem,
@@ -1026,13 +1113,6 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
 }
 
 async function injectReportTable(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank = 1) {
-  // get main content div (absent na versão impressa do CV)
-  const mainContentDiv = document.getElementsByClassName('main-content')[0];
-  if (!mainContentDiv) {
-    console.log('JCR Lattes: div .main-content não encontrada. Relatório não será injetado.');
-    return;
-  }
-
   const painelHTML = montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCustom,
     customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank);
 
@@ -1043,10 +1123,15 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
     setAttributes(alertDiv, {
       class: 'max-width min-width', // Removed main-content class as it is now nested
       id: 'annotation-alert-div',
-      style: `margin-bottom: 10px; border-bottom: 4px double ${COLORS.alertBorder}; padding-bottom: 10px;`
+      // color-scheme: o Lattes novo declara esquema escuro quando o sistema está em modo
+      // escuro, e os campos do painel (fundo branco) ficariam pretos com texto invisível.
+      style: `margin-bottom: 10px; border-bottom: 4px double ${COLORS.alertBorder}; padding-bottom: 10px; color-scheme: light;`
     });
-    // inject alert div into Lattes page as the first child of the main content div
-    mainContentDiv.insertBefore(alertDiv, mainContentDiv.firstChild);
+    // onde o painel entra depende do formato da pagina (ver PAGINA)
+    if (!PAGINA.inserirPainel(alertDiv)) {
+      console.log('JCR Lattes: lugar do painel não encontrado. Relatório não será injetado.');
+      return;
+    }
   }
 
   const prevDbMount = document.getElementById('jcr-db-tools-mount');
@@ -1061,7 +1146,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   const reportContent = alertDiv.querySelector('#jcr-report-content');
 
   // --- Section Toggles ---
-  const sections = getSections();
+  const sections = PAGINA.secoesRecolhiveis ? getSections() : [];
   sections.forEach(s => {
     s.element.style.display = '';
     if (s.footerElement) s.footerElement.style.display = '';
@@ -1089,7 +1174,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   reportContent.appendChild(toggleContainer);
 
   // --- Cache DB Elements ---
-  const cachedPubElems = Array.from(articlesRoot().querySelectorAll('.artigo-completo')).map(el => {
+  const cachedPubElems = Array.from(articlesRoot().querySelectorAll(PAGINA.seletorArtigoAnotado)).map(el => {
     const yearStr = el.getAttribute('data-year');
     const rankStr = el.getAttribute('data-author-rank');
     return {
@@ -1293,7 +1378,9 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
   // Botão de salvar o CV em HTML: sob demanda, nunca automático
   const saveCvHtmlBtn = document.getElementById('btn-save-cv-html');
-  if (saveCvHtmlBtn) {
+  // salvar o CV em HTML ainda nao foi adaptado ao site novo
+  if (saveCvHtmlBtn && !PAGINA.salvarHtml) saveCvHtmlBtn.style.display = 'none';
+  if (saveCvHtmlBtn && PAGINA.salvarHtml) {
     saveCvHtmlBtn.addEventListener('click', () => saveCvHtmlFile(nameLink, saveCvHtmlBtn));
   }
 
@@ -1541,7 +1628,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
           }
       };
 
-      if (nameLink.researcherIdLink) {
+      if (BUSCAR_RID && nameLink.researcherIdLink) {
           if (window.cachedRidStats) {
               const ridStatsOrNull = window.cachedRidStats._failed ? null : window.cachedRidStats;
               if (ridStatsOrNull) injectRidTable(ridStatsOrNull);
@@ -2171,6 +2258,7 @@ function hideLoading(force = false) {
 
 
 function extractDeclaredCitations() {
+  if (LATTES_NOVO) return LEITOR.lerCitacoesDeclaradas(document);
   const declared = {
     wosCitations: '',
     wosHIndex: '',

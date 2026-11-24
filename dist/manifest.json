@@ -51,6 +51,18 @@
     },
     {
       "matches": [
+        "https://busca-cv-lattes.cnpq.br/*"
+      ],
+      "js": [
+        "scripts/report_utils.js",
+        "scripts/db_tools.js",
+        "scripts/lattes_parser.js",
+        "scripts/lattes_parser_novo.js",
+        "scripts/content.js"
+      ]
+    },
+    {
+      "matches": [
         "http://efomento.cnpq.br/efomento/*",
         "https://efomento.cnpq.br/efomento/*",
         "http://anexosform.cnpq.br/doc/*",
@@ -77,6 +89,7 @@
       "matches": [
         "http://buscatextual.cnpq.br/*",
         "https://buscatextual.cnpq.br/*",
+        "https://busca-cv-lattes.cnpq.br/*",
         "http://efomento.cnpq.br/*",
         "https://efomento.cnpq.br/*",
         "http://anexosform.cnpq.br/*",
