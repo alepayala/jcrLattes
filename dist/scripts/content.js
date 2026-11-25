@@ -32,7 +32,7 @@ const PAGINA = LATTES_NOVO ? {
   // com a lista em ordem cronologica ('cron', o padrao)
   idSeletorDeOrdem: 'ordenacaoArtigos',
   ordemCronologica: () => { const s = document.getElementById('ordenacaoArtigos'); return !s || s.value === 'cron'; },
-  salvarHtml: false
+  salvarHtml: true
 } : {
   seletorArtigo: "div[class='artigo-completo']",
   seletorArtigoAnotado: '.artigo-completo',
@@ -1449,7 +1449,6 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
   // Botão de salvar o CV em HTML: sob demanda, nunca automático
   const saveCvHtmlBtn = document.getElementById('btn-save-cv-html');
-  // salvar o CV em HTML ainda nao foi adaptado ao site novo
   if (saveCvHtmlBtn && !PAGINA.salvarHtml) saveCvHtmlBtn.style.display = 'none';
   if (saveCvHtmlBtn && PAGINA.salvarHtml) {
     saveCvHtmlBtn.addEventListener('click', () => saveCvHtmlFile(nameLink, saveCvHtmlBtn));
@@ -1781,7 +1780,37 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 // Monta uma copia autossuficiente do CV: remove a interface injetada pela extensao,
 // embute imagens como data: URIs, inlineia as folhas de estilo e neutraliza scripts.
 async function buildStandaloneCvHtml() {
+  // Lattes novo: so as secoes abertas tem conteudo na pagina, e a extensao abre apenas
+  // as que le. Para a copia sair com o CV inteiro, abre todas, copia e fecha de volta
+  // as que estavam fechadas. Com a lista de artigos incompleta (aba em segundo plano)
+  // nao ha copia: sairia pela metade.
+  let abertasParaACopia = [];
+  if (LATTES_NOVO) {
+    const fechadas = Array.from(document.querySelectorAll('button.accordion-header[aria-expanded="false"]'));
+    const pronta = await LEITOR.prepararPagina(document, {});
+    if (!pronta.completo) throw new Error('a página ainda não carregou o currículo inteiro; deixe a aba visível e tente de novo');
+    abertasParaACopia = fechadas;
+  }
+
   const clone = document.documentElement.cloneNode(true);
+  abertasParaACopia.forEach(botao => {
+    if (botao.isConnected && botao.getAttribute('aria-expanded') === 'true') botao.click();
+  });
+
+  if (LATTES_NOVO) {
+    // O site novo poe <div> dentro de <p> (o balao do JCR e das citacoes). Isso existe
+    // no DOM montado por script, mas nao sobrevive a um arquivo: ao reabrir, o
+    // navegador fecha o <p> antes do <div> e o artigo perde ano, JCR e citacoes.
+    // Na copia cada um vira <span>, que pode ficar dentro de <p>.
+    Array.from(clone.querySelectorAll('p div')).reverse().forEach(div => {
+      const span = document.createElement('span');
+      Array.from(div.attributes).forEach(a => span.setAttribute(a.name, a.value));
+      while (div.firstChild) span.appendChild(div.firstChild);
+      div.replaceWith(span);
+    });
+    // artigos ocultos pelos filtros da extensao voltam a aparecer na copia
+    clone.querySelectorAll(PAGINA.seletorArtigoAnotado).forEach(li => { if (li.style.display === 'none') li.style.display = ''; });
+  }
   clone.querySelectorAll(
     '#annotation-alert-div, #jcr-lattes-loader, #jcr-db-tools-mount, #jcr-lattes-extra-info-style, #jcr-private-toast'
   ).forEach(el => el.remove());
@@ -1912,6 +1941,10 @@ async function saveCvToProposalFolders(nameLink, tentativa = 0) {
   window.__jcrCvProposalSaveEmCurso = true;
 
   try {
+    // Lattes novo com a pagina ainda incompleta (os numeros vieram da API): a copia
+    // fica para a proxima passagem, depois que a pagina completar.
+    if (curriculoPelaApi) return;
+
     const alvos = await DB.findProposalsForResearcher(lattesId, nome);
     if (!alvos || alvos.length === 0) return;   // nao pertence a nenhuma proposta: nada a fazer
 

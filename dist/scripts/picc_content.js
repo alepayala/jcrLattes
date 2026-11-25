@@ -230,7 +230,7 @@
         let lattesId = '';
 
         // 1. Check if cvLink itself contains the 16-digit Lattes ID directly
-        const directMatch = cvLink.match(/lattes\.cnpq\.br\/(\d{16})/) ||
+        const directMatch = cvLink.match(/lattes\.cnpq\.br\/(?:curriculo\/)?(\d{16})/) ||
                             cvLink.match(/id=(\d{16})/) ||
                             cvLink.match(/f_cod=(\d{16})/);
         if (directMatch) {
@@ -265,15 +265,15 @@
 
             if (htmlText) {
                 // Priority extraction: Extract Lattes ID from "Endereço para acessar este CV:http://lattes.cnpq.br/7710288371318569"
-                const addressMatch = htmlText.match(/Endere(?:&ccedil;|&#231;|&#xe7;|\u00e7|ç|.)o\s+para\s+acessar\s+este\s+CV\s*:\s*(?:<[^>]+>\s*)*https?:\/\/lattes\.cnpq\.br\/(\d{16})/i) ||
-                                     htmlText.match(/Endere[\s\S]*?para\s+acessar\s+este\s+CV[\s\S]*?lattes\.cnpq\.br\/(\d{16})/i);
+                const addressMatch = htmlText.match(/Endere(?:&ccedil;|&#231;|&#xe7;|\u00e7|ç|.)o\s+para\s+acessar\s+este\s+CV\s*:\s*(?:<[^>]+>\s*)*https?:\/\/lattes\.cnpq\.br\/(?:curriculo\/)?(\d{16})/i) ||
+                                     htmlText.match(/Endere[\s\S]*?para\s+acessar\s+este\s+CV[\s\S]*?lattes\.cnpq\.br\/(?:curriculo\/)?(\d{16})/i);
 
                 if (addressMatch) {
                     lattesId = addressMatch[1];
                     console.log(`[piccTools] Lattes ID extraído com sucesso da linha "Endereço para acessar este CV": ${lattesId}`);
                 } else {
-                    const generalMatch = htmlText.match(/https?:\/\/lattes\.cnpq\.br\/(\d{16})/i) ||
-                                         htmlText.match(/lattes\.cnpq\.br\/(\d{16})/i);
+                    const generalMatch = htmlText.match(/https?:\/\/lattes\.cnpq\.br\/(?:curriculo\/)?(\d{16})/i) ||
+                                         htmlText.match(/lattes\.cnpq\.br\/(?:curriculo\/)?(\d{16})/i);
                     if (generalMatch) {
                         lattesId = generalMatch[1];
                         console.log(`[piccTools] Lattes ID extraído do HTML do CV: ${lattesId}`);

@@ -15,11 +15,10 @@ O repositório inclui:
 ## 🚀 Principais Funcionalidades (Extensão)
 
 ### 1. Métricas de Impacto e Anotação em Tempo Real
-* **Anotação de Fator de Impacto (JCR)**: Exibe o Fator de Impacto (JCR) mais recente e a contagem de autores logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual, numa paleta padrão legível por daltônicos e personalizável.
+* **Anotação de Fator de Impacto (JCR)**: Exibe o Fator de Impacto (JCR) mais recente logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual, numa paleta padrão legível por daltônicos e personalizável.
 * **Histograma de Distribuição JCR**: Gráfico interativo que revela o perfil de qualidade da sua produção ao longo do tempo.
 * **Métricas de Produção por Ano**: Visualize a evolução da sua carreira com barras empilhadas que mostram o impacto acumulado anualmente.
 * **Segunda Linha de Gráficos**:
-  - **Distribuição por Rank de Autoria**: Histograma da distribuição por posição de autoria (`1º`, `2º`, ...), com colunas especiais para Último Autor (`Ult`) e Grandes Colaborações (`GC`), escala máxima fixada pelo histograma e barras empilhadas de cores JCR proporcionais.
   - **Orientações por Ano**: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde-azulado, Doutorado em Azul, Mestrado em Laranja), complementado por colunas para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
 * **Tabelas Estatísticas Dinâmicas**: Tabelas com Somatórios e Médias automáticas para períodos customizados.
 * **Citação e Índice H**: Consolidação automática do Índice H e número de citações para Web of Science e Scopus.
@@ -29,12 +28,12 @@ O repositório inclui:
 * **Consolidação Instantânea de Grupos**: Atribua IDs customizados (ex: siglas de laboratórios) aos currículos para compilar métricas integradas em tempo real. Quem participou do grupo só por um tempo pode ter o período (início e fim) registrado ao receber o ID, e o relatório do grupo conta apenas a produção desse intervalo; o padrão é toda a carreira, aceito com um Enter. 
 * **Deduplicação Inteligente**: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria repetidos entre os membros, gerando métricas reais da produção coletiva.
 * **Tabela de Membros do Grupo**: Indicadores de cada membro num período escolhido (artigos por faixa de JCR, soma e média do JCR, orientações de doutorado e mestrado, patentes), com índice H e citações WoS da carreira toda. Ordenável por qualquer coluna e exportável para Excel (.xlsx).
+* **Atualização em Lote sem Abrir Abas (⚡)**: Selecione vários pesquisadores no banco e atualize os currículos de uma vez, direto dos dados públicos da nova Plataforma Lattes.
 * **Backup e Portabilidade**: Exporte todo o seu banco de dados em formato JSON ou exporte os dados tabulados em CSV para análise.
 
 ### 3. Análise Acadêmica Avançada
-* **Seletor de Rank de Autoria Customizável**: Defina a posição de autoria a ser analisada (1º, 2º, etc.) com atualização dinâmica de cabeçalhos e contagens em todo o sistema.
-* **Papel de Autoria**: Identificação automatizada como Autor no Rank Selecionado ou Último Autor (`Ult`) em cada publicação.
-* **Média Real de Coautores**: Cálculo da média de coautores por artigo, com opção de desconsiderar Grandes Colaborações (consórcios).
+* **Papel de Autoria**: Identificação automatizada do Primeiro Autor (1º) em cada publicação.
+* **Recursos temporariamente desabilitados**: a nova Plataforma Lattes ainda não mostra a lista completa de autores de parte dos artigos. Enquanto isso, ficam desligados (as colunas continuam nas tabelas, com traços) o último autor, a posição de autoria além do 1º lugar, o número e a média de autores e as grandes colaborações.
 * **Portfólio de Inovação e Patentes**: Gestão de patentes classificadas por status (Depósito, Concessão).
 * **Painel de Orientações**: Resumo consolidado e gráficos de orientações (Pós-doutorado, Doutorado, Mestrado, Iniciação Científica, etc.).
 
@@ -46,7 +45,7 @@ O repositório inclui:
 2. Abra o Google Chrome e acesse `chrome://extensions/`.
 3. Ative o **Modo do desenvolvedor** no canto superior direito.
 4. Clique em **Carregar sem compactação** (Load unpacked) e selecione a pasta `dist` deste projeto.
-5. Acesse qualquer currículo na [Plataforma Lattes](https://lattes.cnpq.br/) e a extensão injetará as métricas automaticamente.
+5. Acesse qualquer currículo na Plataforma Lattes e a extensão injetará as métricas automaticamente. Funciona na [nova busca de currículos](https://busca-cv-lattes.cnpq.br/) e também nas páginas do formato anterior.
 
 ---
 

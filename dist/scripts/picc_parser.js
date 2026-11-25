@@ -434,7 +434,7 @@
         const linkMatch = combinedUrlStr.match(/https?:\/\/[^\s"'<>\)]+/i) || endItemStr.match(/https?:\/\/[^\s"'<>\)]+/i);
         if (linkMatch) {
             const urlCandidate = linkMatch[0].trim();
-            const lattesIdMatch = urlCandidate.match(/lattes\.cnpq\.br\/(\d{16})/i);
+            const lattesIdMatch = urlCandidate.match(/lattes\.cnpq\.br\/(?:curriculo\/)?(\d{16})/i);
             if (lattesIdMatch) {
                 lattesId = lattesIdMatch[1];
                 cvLink = `http://lattes.cnpq.br/${lattesId}`;
