@@ -2169,6 +2169,65 @@ window.JCRDBTools = {
         if (!silent) this.showToast('CV Salvo no Banco de Dados!');
     },
 
+    // Le um curriculo pela API do Lattes novo (window.JCRLattesApi) e o grava pelo mesmo
+    // caminho de um CV aberto na pagina: mesmas estatisticas (calculateReportStats),
+    // mesmo extractData e mesmo saveCurrentCV, com todas as protecoes de la (ID de
+    // grupo, bolsa ja conhecida, dados do ResearcherID, base do piccTools).
+    atualizarCvPelaApi: async function (idLattes) {
+        const api = window.JCRLattesApi;
+        if (!api || !api.ATIVA) throw new Error('API do Lattes desligada');
+        const cv = api.lerCurriculo(await api.buscarCurriculo(idLattes));
+        if (!cv.identificacao.name) throw new Error('currículo sem identificação');
+        const U = window.JCRReportUtils;
+        const salvas = await new Promise((resolve) => {
+            try { chrome.storage.local.get(U.OPCOES_CHAVE, (r) => resolve(r ? r[U.OPCOES_CHAVE] : null)); }
+            catch (e) { resolve(null); }
+        });
+        const o = U.opcoesEfetivas(salvas);
+        const ano = new Date().getFullYear();
+        const stats = U.calculateReportStats(cv.publications, cv.patentes, cv.eventos, cv.orientacoes, cv.citacoes,
+            ano, o.customYears, ano - 5, ano - 10, ano - o.customYears, o.highJcr, o.lowJcr, o.targetAuthorRank);
+        const nameLink = Object.assign({}, cv.identificacao, { titulacao: cv.titulacao });
+
+        // saveCurrentCV trabalha sobre o "CV atual" (lastArgs/currentCvData); guarda e
+        // devolve o que estava la para nao interferir com quem estiver usando.
+        const antes = { lastArgs: this.lastArgs, currentCvData: this.currentCvData };
+        try {
+            this.lastArgs = { nameLink, stats, lattesInfo: cv.publications, ridStats: null };
+            this.extractData(nameLink, stats, cv.publications, null);
+            await this.saveCurrentCV(true);
+            return { nome: cv.identificacao.name, artigos: cv.publications.length };
+        } finally {
+            this.lastArgs = antes.lastArgs;
+            this.currentCvData = antes.currentCvData;
+        }
+    },
+
+    // Varios curriculos, um de cada vez, com uma pausa entre eles para nao sobrecarregar
+    // o servico. Para na terceira falha seguida: e sinal de que a API saiu do ar ou
+    // passou a recusar, e insistir so geraria mais recusas.
+    atualizarCvsPelaApi: async function (ids, aoAvancar) {
+        const validos = (Array.isArray(ids) ? ids : []).filter(id => /^\d{16}$/.test(String(id || '')));
+        const r = { atualizados: 0, semId: (Array.isArray(ids) ? ids.length : 0) - validos.length, falhas: [] };
+        let seguidas = 0;
+        for (let i = 0; i < validos.length; i++) {
+            try {
+                await this.atualizarCvPelaApi(validos[i]);
+                r.atualizados++;
+                seguidas = 0;
+            } catch (e) {
+                r.falhas.push({ id: validos[i], erro: String(e && e.message || e) });
+                if (++seguidas >= 3) {
+                    validos.slice(i + 1).forEach(id => r.falhas.push({ id, erro: 'não tentado (API falhando)' }));
+                    break;
+                }
+            }
+            if (typeof aoAvancar === 'function') aoAvancar(i + 1, validos.length);
+            if (i < validos.length - 1) await new Promise(res => setTimeout(res, 400));
+        }
+        return r;
+    },
+
     showAlert: function (msg, targetTab = null) {
         if (targetTab && !targetTab.closed && typeof targetTab.alert === 'function') {
             targetTab.alert(msg);
@@ -2843,6 +2902,7 @@ window.JCRDBTools = {
                     ${isProcessoOnly ? `<button id="bulk-btn-proclist" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Lista dos números de processo para colar no campo &quot;Processos&quot; da planilha do piccTools (os selecionados ou, sem seleção, todos os da tabela)">📋</button>` : ''}
                     <button id="bulk-btn-delete" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="${isProcessoOnly ? 'Excluir Propostas Selecionadas' : 'Excluir Selecionados'}">🗑️</button>
                     ${isProcessoOnly ? '' : `<button id="bulk-btn-open" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Abrir CVs selecionados no Lattes para atualizar">🔄</button>`}
+                    ${isProcessoOnly || !(window.JCRLattesApi && window.JCRLattesApi.ATIVA) ? '' : `<button id="bulk-btn-api" style="border:1px solid #ccc; border-radius:3px; cursor:pointer; background:#fff; padding:2px 4px;" title="Atualizar os CVs selecionados direto do Lattes, sem abrir abas">⚡</button>`}
                 </div>
             </th></tr>`;
 
@@ -3501,6 +3561,28 @@ window.JCRDBTools = {
                     const urlCv = window.JCRReportUtils.urlCurriculo(lattesId);
                     if (urlCv) newTab.open(urlCv, '_blank');
                 });
+            });
+        }
+
+        // Atualiza os marcados pela API do Lattes novo, um de cada vez, sem abrir abas.
+        const bulkBtnApi = newTab.document.getElementById('bulk-btn-api');
+        if (bulkBtnApi) {
+            bulkBtnApi.addEventListener('click', async () => {
+                const selected = selectedCheckboxData();
+                if (selected.length === 0) {
+                    this.showToast('Nenhum CV selecionado.', '#e67e22');
+                    return;
+                }
+                bulkBtnApi.disabled = true;
+                const r = await this.atualizarCvsPelaApi(selected.map(s => s.lattesId),
+                    (feitos, total) => { bulkBtnApi.textContent = `${feitos}/${total}`; });
+                const partes = [`${r.atualizados} atualizado(s)`];
+                if (r.semId) partes.push(`${r.semId} sem ID Lattes`);
+                if (r.falhas.length) partes.push(`${r.falhas.length} com falha`);
+                if (r.falhas.length) console.warn('[JCRLattes] Falhas ao atualizar pela API:', r.falhas);
+                await this.viewDB(newTab, { processOnly: isProcessoOnly });
+                this.showToast(partes.join(', ') + (r.falhas.length ? '. Abra esses CVs no Lattes para atualizar.' : '.'),
+                    r.falhas.length ? '#e67e22' : '#4CAF50');
             });
         }
 

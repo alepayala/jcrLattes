@@ -177,6 +177,13 @@ describe('orientacoes e eventos', () => {
         assert.strictEqual(N._categoriaDeOrientacao('Tese de doutorado'), 'Tese de doutorado');
         assert.strictEqual(N._categoriaDeOrientacao('Supervisão de pós-doutorado'), 'Supervisão de pós-doutorado');
     });
+    // pos-doutorado vem sem parenteses: a instituicao e o que segue o travessao
+    test('sem area entre parenteses, a instituicao vem depois do travessao', () => {
+        assert.deepStrictEqual(
+            N._areaEInstituicao('Fulano de Tal. 2026. Supervisão de pós-doutorado – Universidade Federal Exemplo, Agência de Fomento. (Orientador).'),
+            { area: '', institution: 'Universidade Federal Exemplo' });
+    });
+
     test('instituicao da orientacao vem depois do travessao', () => {
         assert.deepStrictEqual(
             N._areaEInstituicao('Fulano de Tal. Um titulo. 2026. Dissertação (Mestrado em Física). – Universidade Federal Exemplo, Agência de Fomento. (Orientador).'),

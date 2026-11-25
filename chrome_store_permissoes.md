@@ -19,6 +19,12 @@
 **English (Recommended for Chrome Web Store Developer Console Form):**
 > * `buscatextual.cnpq.br` — the Lattes CV pages themselves. The extension annotates the
 >   impact factor of each article directly in the CV the user is already viewing.
+> * `busca-cv-lattes.cnpq.br` — the new Lattes CV pages (the platform's new address). Same
+>   use: the extension annotates the CV the user is viewing.
+> * `busca-cv-lattes-api.cnpq.br` — the public data service that the new Lattes site itself
+>   calls to display a CV. The extension reads the same public CV data from it to refresh
+>   CVs already saved in the user's local database, when the user asks for it, without
+>   opening one tab per CV. No login, no data sent.
 > * `researcherid.com` / `webofscience.com` — read the user's public citation and h-index
 >   figures to complete the production report.
 > * `efomento.cnpq.br` — CNPq's grant management system. For users who are already
@@ -34,6 +40,12 @@
 **Português (para conferência do desenvolvedor):**
 > * `buscatextual.cnpq.br` — as próprias páginas de currículo Lattes, onde o fator de
 >   impacto é anotado.
+> * `busca-cv-lattes.cnpq.br` — as páginas de currículo do Lattes novo (novo endereço da
+>   plataforma). Mesmo uso: anotar o currículo que o usuário está vendo.
+> * `busca-cv-lattes-api.cnpq.br` — o serviço de dados públicos que o próprio site novo do
+>   Lattes consulta para mostrar um currículo. A extensão lê dele os mesmos dados públicos
+>   para atualizar currículos já salvos no banco local, a pedido do usuário, sem abrir uma
+>   aba por currículo. Sem login, sem envio de dados.
 > * `researcherid.com` / `webofscience.com` — leitura das citações e do índice h públicos.
 > * `efomento.cnpq.br` — sistema de fomento do CNPq. Para quem já é avaliador autorizado,
 >   a extensão lê a planilha de julgamento **à qual essa pessoa já tem acesso** e organiza

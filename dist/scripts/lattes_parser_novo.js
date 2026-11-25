@@ -64,6 +64,10 @@
         const t = limpo(texto);
         const m = t.match(/\(([^()]+)\)\s*\.?\s*[–—-]\s*([^,.]+)/);
         if (m) return { area: m[1].trim(), institution: m[2].trim() };
+        // Sem parênteses (pós-doutorado): "Fulano. 2026. Supervisão de pós-doutorado –
+        // Universidade X, Agência." A instituição é o que vem depois do travessão.
+        const semArea = t.match(/[–—]\s*([^,.]+)/);
+        if (semArea) return { area: '', institution: semArea[1].trim() };
         return antigo()._areaEInstituicao(t);
     }
 

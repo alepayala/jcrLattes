@@ -28,6 +28,10 @@ const PAGINA = LATTES_NOVO ? {
   },
   // o site novo ja tem as suas secoes recolhiveis
   secoesRecolhiveis: false,
+  // <select> "Ordenar artigos por" do site; os separadores de ano so fazem sentido
+  // com a lista em ordem cronologica ('cron', o padrao)
+  idSeletorDeOrdem: 'ordenacaoArtigos',
+  ordemCronologica: () => { const s = document.getElementById('ordenacaoArtigos'); return !s || s.value === 'cron'; },
   salvarHtml: false
 } : {
   seletorArtigo: "div[class='artigo-completo']",
@@ -46,6 +50,8 @@ const PAGINA = LATTES_NOVO ? {
     return true;
   },
   secoesRecolhiveis: true,
+  idSeletorDeOrdem: null,
+  ordemCronologica: () => true,
   salvarHtml: true
 };
 
@@ -141,12 +147,33 @@ async function loadSettings() {
 // Para religar, basta voltar a true.
 const BUSCAR_RID = false;
 
+// Curriculo lido pela API (window.JCRLattesApi) enquanto a pagina nao tem a lista de
+// artigos inteira; null quando nao foi preciso ou a API falhou. paginaCompletaDepois
+// resolve quando a pagina terminou de carregar e a montagem deve ser refeita.
+// (Declarados antes de main() rodar: no formato antigo main() chega a eles sem nenhum await.)
+let curriculoPelaApi = null;
+let paginaCompletaDepois = null;
+
 (async () => await main())();
 
 // O Lattes novo e uma aplicacao de pagina unica: o script entra em qualquer endereco
 // do site e o curriculo pode aparecer depois, sem recarregar. Espera o endereco ser
 // o de um curriculo e o cabecalho estar montado; depois abre as secoes que a extensao
 // le e rola ate a lista de artigos ficar completa (LEITOR.prepararPagina).
+async function lerCurriculoPelaApi() {
+  const api = window.JCRLattesApi;
+  if (!api || !api.ATIVA) return null;
+  const id = LEITOR._idLattesDoEndereco(location.pathname);
+  if (!id) return null;
+  try {
+    const cv = api.lerCurriculo(await api.buscarCurriculo(id));
+    return cv.publications.length ? cv : null;
+  } catch (e) {
+    console.warn('JCR Lattes: a API do Lattes nao respondeu; segue so com a pagina.', e && e.message);
+    return null;
+  }
+}
+
 async function esperarCurriculoNovo() {
   const espera = (ms) => new Promise(r => setTimeout(r, ms));
   while (!(LEITOR.ehPaginaDoCurriculo(location.href) && document.querySelector('h1.nome') &&
@@ -167,13 +194,26 @@ async function esperarCurriculoNovo() {
     };
     document.addEventListener('visibilitychange', aoMudar);
   });
-  let pronta = await LEITOR.prepararPagina(document, { secoes: LEITOR.SECOES_LIDAS });
-  for (let tentativa = 0; !pronta.completo && tentativa < 3; tentativa++) {
-    await abaVisivel();
-    pronta = await LEITOR.prepararPagina(document, { secoes: LEITOR.SECOES_LIDAS });
-  }
+  const completar = async () => {
+    let r = { completo: false, artigos: 0 };
+    for (let tentativa = 0; !r.completo && tentativa < 3; tentativa++) {
+      await abaVisivel();
+      r = await LEITOR.prepararPagina(document, { secoes: LEITOR.SECOES_LIDAS });
+    }
+    if (!r.completo) console.warn('JCR Lattes: a lista de artigos pode estar incompleta (' + r.artigos + ' lidos).');
+    return r;
+  };
+  const pronta = await LEITOR.prepararPagina(document, { secoes: LEITOR.SECOES_LIDAS });
   if (!pronta.completo) {
-    console.warn('JCR Lattes: a lista de artigos pode estar incompleta (' + pronta.artigos + ' lidos).');
+    // Reserva: os artigos que faltam na pagina vem da API do proprio site, para o
+    // painel e o banco ja sairem com o curriculo inteiro. Quando a aba aparecer, a
+    // pagina e completada e a montagem refeita so com ela (paginaCompletaDepois).
+    curriculoPelaApi = await lerCurriculoPelaApi();
+    if (curriculoPelaApi) {
+      paginaCompletaDepois = completar().then(() => { curriculoPelaApi = null; });
+    } else {
+      await completar();
+    }
   }
 
   // Trocar de curriculo (ou sair dele) nao recarrega a pagina, e o painel ficaria com
@@ -238,6 +278,21 @@ async function main() {
 
   // Initial processing
   processLattesPage(nameLink);
+
+  // Lattes novo: a montagem acima usou a API porque a pagina estava incompleta; quando
+  // a pagina completar (aba visivel), refaz so com ela, anotando todos os artigos.
+  if (paginaCompletaDepois) paginaCompletaDepois.then(() => processLattesPage(nameLink));
+
+  // Lattes novo: "Ordenar artigos por" muda a ordem dos artigos sem recarregar a pagina
+  // (o site move os mesmos elementos; as anotacoes vao junto, os separadores de ano
+  // nao). Refaz a montagem: fora da ordem cronologica os separadores nao entram.
+  if (LATTES_NOVO) {
+    document.addEventListener('change', (ev) => {
+      if (ev.target && ev.target.id === PAGINA.idSeletorDeOrdem) {
+        setTimeout(() => processLattesPage(nameLink), 600);
+      }
+    });
+  }
 
   // Debounced processor
   const processDebounced = debounce(() => {
@@ -358,7 +413,13 @@ async function processLattesPage(nameLink) {
     try {
       // Annotate Lattes page and return annotated Lattes info
       const authorNames = LEITOR.lerApelidos(document);
-      const lattesInfo = annotateLattesPage(highJcr, lowJcr, authorNames);
+      let lattesInfo = annotateLattesPage(highJcr, lowJcr, authorNames);
+      // Lattes novo com a lista da pagina ainda incompleta (aba em segundo plano): os
+      // numeros saem dos artigos lidos pela API; as anotacoes, dos que estao na pagina.
+      if (curriculoPelaApi && lattesInfo && curriculoPelaApi.publications.length > lattesInfo.length) {
+        console.log(`JCR Lattes: ${lattesInfo.length} artigos na pagina, ${curriculoPelaApi.publications.length} pela API; usando a API para os numeros.`);
+        lattesInfo = curriculoPelaApi.publications;
+      }
       // A leitura destas secoes mora em lattes_parser.js, junto com a das publicacoes.
       const supervisions = LEITOR.lerOrientacoes(document);
       const patents = LEITOR.lerPatentes(document);
@@ -571,7 +632,7 @@ function annotateLattesPage(highJcr, lowJcr, authorNames) {
 
     // Insert year separator if year changed and extra info is not hidden
     if (!isExtraInfoHidden && !isNaN(pubInfo.year)) {
-      if (pubInfo.year !== lastYear) {
+      if (pubInfo.year !== lastYear && PAGINA.ordemCronologica()) {
         injectYearSeparator(pubElem, pubInfo.year);
         lastYear = pubInfo.year;
       }
@@ -1086,7 +1147,7 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
       .jcr-icon-toggle input:checked ~ .jcr-icon-face { filter: grayscale(1); opacity: 0.35; }
     </style>
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 10px; background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border}; border-radius: 4px;">
-      <h2 style="margin: 0; font-size: 1.25em; color: ${COLORS.footerText}; font-weight: bold;">JCR Lattes Report <span id="jcr-report-name" style="color: #326C99; font-weight: 900; margin-left: 5px;">- ${escHtml(nameLink.name)}</span></h2>
+      <h2 style="margin: 0; font-size: 1.25em; color: ${COLORS.footerText}; font-weight: bold;">JCR Lattes Report <span id="jcr-report-name" style="color: #326C99; font-weight: normal; margin-left: 5px;">- ${escHtml(nameLink.name)}</span></h2>
       <div style="display: flex; gap: 8px; align-items: center;">
         <span id="jcr-db-tools-mount" style="display: inline-flex; gap: 8px; margin-right: 10px;"></span>
         <label class="jcr-icon-toggle" title="Mostrar/Ocultar Tabelas e Gráficos do relatório">

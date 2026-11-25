@@ -25,5 +25,7 @@ module.exports = {
     lattes: () => carregar('lattes_parser.js').JCRLattesParser,
     // o leitor do Lattes novo usa as funcoes puras do leitor antigo
     lattesNovo: () => { carregar('lattes_parser.js'); return carregar('lattes_parser_novo.js').JCRLattesParserNovo; },
+    // o leitor da API reaproveita as regras dos dois leitores de pagina
+    lattesApi: () => { carregar('lattes_parser.js'); carregar('lattes_parser_novo.js'); return carregar('lattes_api_parser.js').JCRLattesApi; },
     picc: () => carregar('picc_parser.js').JCRPiccParser
 };

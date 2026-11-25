@@ -33,6 +33,7 @@ Principais Funcionalidades:
 * Acesso Direto Integrado: Atalho flutuante injetado na tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
 * Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status na coluna de ações, com botão direto para abrir o Lattes.
 * Atualização Simplificada (Update): Um botão de atualização rápida permite abrir o currículo Lattes em uma nova aba para reprocessar e sincronizar os dados mais recentes.
+* Atualização em Lote sem Abrir Abas (⚡): Selecione vários pesquisadores no banco e atualize os currículos de uma vez, direto dos dados públicos da nova Plataforma Lattes.
 * Backup e Portabilidade: Exporte todo o seu banco de dados em formato JSON para restaurá-lo em outros dispositivos ou exporte os dados tabulados em CSV para análise no Microsoft Excel ou ferramentas estatísticas. Na importação, o sistema compara automaticamente as versões e mantém sempre o registro mais recente.
 
 3. Análise de Autoria, Patentes, Orientações e Eventos:
