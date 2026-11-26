@@ -1977,6 +1977,48 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
 // Monta uma copia autossuficiente do CV: remove a interface injetada pela extensao,
 // embute imagens como data: URIs, inlineia as folhas de estilo e neutraliza scripts.
+// Ajustes de estilo da copia salva do Lattes novo (so do arquivo, nao da pagina):
+// - o cabecalho nao fica preso ao topo (preso, repetiria em todas as paginas do PDF);
+// - o ID Lattes nao quebra no meio do numero;
+// - na impressao a pagina sai a 80% (o texto do site, de ~12pt, fica em ~9,5pt) e o
+//   cartao do pesquisador fica compacto.
+const ESTILO_DA_COPIA_SALVA = `
+app-header, app-header .lt-header { position: static !important; }
+.id-lattes-link, .id-lattes-link span { white-space: nowrap !important; line-break: auto !important; word-break: normal !important; overflow-wrap: normal !important; }
+@media print {
+  body { zoom: 0.8; }
+  app-header .lt-header { box-shadow: none !important; border-bottom: 1px solid #d5dde6; }
+  /* cartao do pesquisador compacto: no papel o site usa a coluna unica, e o cartao
+     tomaria a primeira pagina quase inteira. Foto menor a esquerda, listas em linha. */
+  app-id-card .br-card { padding: 10px 16px !important; box-shadow: none !important; border: 1px solid #d5dde6; }
+  app-id-card app-cv-avatar { float: left; margin: 0 18px 4px 0; }
+  app-id-card .img-wrapper, app-id-card .img-wrapper img { --avatar-size: 96px !important; width: 96px !important; height: 96px !important; min-width: 0 !important; min-height: 0 !important; margin: 0 !important; }
+  app-id-card .id-card, app-id-card .id-card * { text-align: left !important; justify-content: flex-start !important; }
+  app-id-card .atuacao-prof-list, app-id-card .inst-text { align-items: flex-start !important; gap: 0 !important; }
+  app-id-card .br-card > .text-left:not(.row) { clear: both; }
+  app-id-card .nome { margin: 0 0 2px !important; }
+  app-id-card .atuacao-prof-list, app-id-card .id-card { margin-bottom: 2px !important; }
+  app-id-card .br-divider { margin: 4px 0 !important; }
+  app-id-card .icone-list { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 18px; }
+  app-id-card ul.no-style { display: flex; flex-wrap: wrap; gap: 0 20px; margin: 0 !important; padding: 0 !important; }
+  app-id-card ul.no-style li a, app-id-card ul.no-style li button { padding: 2px 0 !important; margin: 0 !important; min-height: 0 !important; height: auto !important; }
+  app-id-card .contact-row { margin-bottom: 0 !important; }
+  app-id-card p.font-09 { margin: 2px 0 0 !important; }
+  /* menos espaco entre os blocos das secoes (o texto corrido fica como esta) */
+  .accordion-heading { margin: 0 !important; }
+  .accordion-header { padding-top: 6px !important; padding-bottom: 6px !important; min-height: 0 !important; }
+  .accordion-body { padding-top: 2px !important; padding-bottom: 4px !important; }
+  .accordion-body p { margin-top: 0 !important; margin-bottom: 2px !important; }
+  .accordion-body h3, .accordion-body h4, .accordion-body h5 { margin-top: 0 !important; margin-bottom: 2px !important; }
+  .accordion-body [class*="mb-"] { margin-bottom: 6px !important; }
+  .accordion-body [class*="mt-"] { margin-top: 2px !important; }
+  .accordion-body [class*="my-"] { margin-top: 2px !important; margin-bottom: 2px !important; }
+  .accordion-body [class*="pb-"], .accordion-body [class*="py-"] { padding-bottom: 2px !important; }
+  .accordion-body [class*="pt-"], .accordion-body [class*="py-"] { padding-top: 2px !important; }
+  .accordion-item .br-divider, .cv-main .br-divider { margin-top: 4px !important; margin-bottom: 4px !important; }
+}
+`;
+
 async function buildStandaloneCvHtml() {
   // Lattes novo: so as secoes abertas tem conteudo na pagina, e a extensao abre apenas
   // as que le. Para a copia sair com o CV inteiro, abre todas, copia e fecha de volta
@@ -2008,14 +2050,19 @@ async function buildStandaloneCvHtml() {
     });
     // A barra do topo do curriculo ("Voltar", os atalhos das secoes, "Recolher todas")
     // so funciona com os scripts do site: na copia sao botoes mortos, e saem.
-    // O mesmo vale para o cabecalho do site (idioma, "Entrar"), a trilha de navegacao,
-    // compartilhar, copiar o ID e os filtros/ordenacao da lista de producoes.
+    // O mesmo vale para os botoes do cabecalho do site (idioma, "Entrar"), a trilha de
+    // navegacao, compartilhar, copiar o ID e os filtros/ordenacao da lista de producoes.
+    // O cabecalho em si (marcas do CNPq e da Plataforma Lattes) FICA: e o que identifica
+    // o documento como um curriculo Lattes, na tela e no PDF.
     clone.querySelectorAll(
-      '.cv-topbar, app-header, app-breadcrumbs, a.skip-link, p-toast, app-share, app-actions-bar, .btn-copy, .filters-bar'
+      '.cv-topbar, app-header .lt-header__acoes, app-breadcrumbs, a.skip-link, p-toast, app-share, app-actions-bar, .btn-copy, .filters-bar'
     ).forEach(el => el.remove());
-    // sem o cabecalho, o curriculo nao fica colado na borda de cima
-    const corpoDaCopia = clone.querySelector('body');
-    if (corpoDaCopia) corpoDaCopia.style.paddingTop = '16px';
+    // a marca "Plataforma Lattes" aponta para a raiz do site (no arquivo, "/" nao leva a nada)
+    clone.querySelectorAll('app-header a.lt-header__lattes').forEach(a => a.setAttribute('href', location.origin + '/'));
+    const estiloDaCopia = document.createElement('style');
+    estiloDaCopia.id = 'jcr-copia-salva';
+    estiloDaCopia.textContent = ESTILO_DA_COPIA_SALVA;
+    (clone.querySelector('head') || clone).appendChild(estiloDaCopia);
     clone.querySelectorAll('#' + PAGINA.idSeletorDeOrdem).forEach(sel => (sel.closest('.controls') || sel).remove());
     // o grupo "Informações gerais" recolhido volta a aparecer na copia
     clone.querySelectorAll('.jcr-info-gerais-recolhida').forEach(el => el.classList.remove('jcr-info-gerais-recolhida'));
