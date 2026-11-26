@@ -1451,7 +1451,7 @@ describe('tabelas do ResearcherID e do Google Scholar alinhadas', () => {
     });
     test('no ResearcherID, Publicacoes e o total da Web of Science e Core Collection vem a parte', () => {
         assert.deepStrictEqual(celulas(rid), ['A-0000-2000', '35', '344', '5237', '310', '4800']);
-        assert.deepStrictEqual(celulas(gs), ['perfil', '41', '485', '6458', '180', '']);
+        assert.deepStrictEqual(celulas(gs), ['AbC', '41', '485', '6458', '180', '']);   // o codigo do usuario, nao "perfil"
         assert.match(rid, /title="Publicações na Web of Science Core Collection/);
     });
     test('as duas usam a mesma grade de colunas', () => {

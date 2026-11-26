@@ -183,6 +183,11 @@ const BUSCAR_SCHOLAR = true;
 let curriculoPelaApi = null;
 let paginaCompletaDepois = null;
 
+// Trava das montagens (ver processLattesPage). Declaradas antes de main() rodar: no
+// formato antigo main() chama processLattesPage sem nenhum await antes.
+let montagemEmCurso = false;
+let montagemPendente = false;
+
 (async () => await main())();
 
 // O Lattes novo e uma aplicacao de pagina unica: o script entra em qualquer endereco
@@ -389,7 +394,28 @@ function escHtml(str) {
   return window.JCRReportUtils._esc(str);
 }
 
+// Uma montagem de cada vez. Varias coisas pedem a remontagem quase ao mesmo tempo (a
+// resposta do ResearcherID, a do Google Scholar, uma mudanca de opcao, a lista de artigos
+// que completou). Duas montagens sobrepostas escreviam o painel uma por cima da outra e
+// ligavam os cliques duas vezes nos mesmos titulos — cada clique recolhia e expandia de
+// volta, e as setas pareciam mortas. Quem chega com uma montagem em curso so deixa o
+// pedido anotado; ao terminar, ela roda mais uma vez, ja com os dados de todos.
+// (montagemEmCurso e montagemPendente sao declaradas antes de main(), la em cima)
 async function processLattesPage(nameLink) {
+  if (montagemEmCurso) { montagemPendente = true; return; }
+  montagemEmCurso = true;
+  try {
+    await montarPaginaDoLattes(nameLink);
+  } finally {
+    montagemEmCurso = false;
+    if (montagemPendente) {
+      montagemPendente = false;
+      processLattesPage(nameLink);
+    }
+  }
+}
+
+async function montarPaginaDoLattes(nameLink) {
   showLoading();
   // Load saved settings if any
   const saved = await loadSettings();
@@ -1494,6 +1520,9 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
     const header = btn.closest('th') || btn.parentElement || btn;
     header.style.cursor = 'pointer';
     header.style.userSelect = 'none';
+    // um clique so por titulo: ligado duas vezes, ele recolhe e expande no mesmo clique
+    if (header.hasAttribute('data-jcr-clique-ligado')) return;
+    header.setAttribute('data-jcr-clique-ligado', '');
 
     header.addEventListener('click', (e) => {
       // nao interfere com os controles que ficam dentro do cabecalho

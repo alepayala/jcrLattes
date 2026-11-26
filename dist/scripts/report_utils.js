@@ -1844,6 +1844,9 @@ window.JCRReportUtils = {
     const safeLink = this._safeUrl(scholarLink);
     const v = (x) => (x !== null && x !== undefined && x !== '' ? this._esc(String(x)) : '-');
     const pubs = v(stats.publications) === '-' ? '-' : (stats.completo === false ? '≥ ' : '') + v(stats.publications);
+    // o codigo do usuario no Scholar (o "user=" do endereco), como o ResearcherID mostra o dele
+    const usuario = String(scholarLink).match(/[?&]user=([\w-]+)/);
+    const codigo = usuario ? this._esc(usuario[1]) : 'perfil';
     return this._tabelaDeBase('scholar-stats-table', [
       { html: 'Google Scholar' + this._dataDaBusca(atualizadoEm || stats.atualizadoEm, 'Google Scholar'), dica: 'Perfil do pesquisador no Google Scholar' },
       { html: 'H-Index', dica: 'Índice h no Google Scholar' },
@@ -1852,7 +1855,7 @@ window.JCRReportUtils = {
       { html: 'i10', dica: 'Índice i10 no Google Scholar: publicações com 10 citações ou mais' },
       { html: '' }
     ], [
-      safeLink ? `<a href="${safeLink}" target="_blank" rel="noopener" style="color: #1565C0; text-decoration: none;">perfil</a>` : '-',
+      safeLink ? `<a href="${safeLink}" target="_blank" rel="noopener" title="Abrir o perfil no Google Scholar" style="color: #1565C0; text-decoration: none;">${codigo}</a>` : codigo,
       v(stats.hIndex), pubs, v(stats.citations), v(stats.i10Index), ''
     ]);
   },
