@@ -979,7 +979,7 @@ function montarAreaDeGraficos(togglesHTML, lattesInfo, stats, highJcr, lowJcr) {
 // Resumo do painel compacto (Lattes novo): doze cartoes com os numeros que mais se
 // consultam, sempre a vista; o detalhe fica nas tabelas, que comecam recolhidas. Cada
 // cartao traz o total da carreira e, embaixo, o dos ultimos 5 anos ou o dado vizinho.
-function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) {
+function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank, titulacao, anoAtual) {
   const U = window.JCRReportUtils;
   const tudo = stats.all, cinco = stats.recent;
   const concluidas = (tipo) => { const l = stats.supervisions && stats.supervisions.concluded && stats.supervisions.concluded[tipo]; return Array.isArray(l) ? l.length : 0; };
@@ -996,13 +996,22 @@ function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) {
   // um cartao de dado desligado (JCRReportUtils.*_ATIVO) fica com traco, em cinza
   // (embaixo vai a forma curta, que cabe no cartao; a completa fica na dica)
   const desligado = (rotulo) => [rotulo, '—', 'Desabilitado', U.TEXTO_DESABILITADO, true];
+  // Tempo desde o doutorado (ou desde a maior titulacao, quando nao ha doutorado): e o
+  // que poe os outros numeros em escala. titulacao: { nivel: 'D'|'M'|'E'|'G', ano }.
+  const NOME_DO_NIVEL = { D: 'Doutorado', M: 'Mestrado', E: 'Especialização', G: 'Graduação' };
+  const anoTit = titulacao ? parseInt(titulacao.ano, 10) : NaN;
+  const cartaoTitulacao = (!titulacao || isNaN(anoTit) || anoTit > anoAtual)
+    ? ['Anos de doutorado', '—', 'Não informado', 'O currículo não informa o ano de conclusão do doutorado', true]
+    : titulacao.nivel === 'D'
+      ? ['Anos de doutorado', anoAtual - anoTit, `Doutorado em ${anoTit}`, 'Anos decorridos desde a conclusão do doutorado']
+      : ['Anos de titulação', anoAtual - anoTit, `${NOME_DO_NIVEL[titulacao.nivel] || 'Titulação'} em ${anoTit}`, 'Sem doutorado concluído no currículo: anos decorridos desde a maior titulação'];
   // Doze cartoes, em tres linhas de quatro na largura cheia: impacto | citacoes e
   // autoria | autoria e formacao de pessoal.
   const cartoes = [
     ['Artigos', tudo.total.count, `${periodo}: ${cinco.total.count}`, 'Artigos completos publicados em periódicos'],
     ['Soma do JCR', U.formatNum(tudo.total.sum), `${periodo}: ${U.formatNum(cinco.total.sum)}`, 'Soma dos fatores de impacto dos artigos'],
     ['JCR médio', U.getAvg(tudo.total.sum, tudo.total.countWithJcr), `${periodo}: ${U.getAvg(cinco.total.sum, cinco.total.countWithJcr)}`, 'Soma do JCR dividida pelos artigos com JCR'],
-    [`JCR alto (≥ ${stats.highJcr})`, tudo.high.count, `${periodo}: ${cinco.high.count}`, 'Artigos na faixa alta de fator de impacto'],
+    cartaoTitulacao,
     ['Índice H (WoS)', hWos, `Scopus: ${hScopus}`, 'Índice H calculado a partir das citações de cada artigo da lista (Web of Science e Scopus)'],
     ['Citações (WoS)', cWos, `Scopus: ${cScopus}`, 'Soma das citações de cada artigo da lista (Web of Science e Scopus)'],
     [`${rank}º autor`, tudo.total.firstAuthorCount, `${periodo}: ${cinco.total.firstAuthorCount}`, `Artigos como ${rank}º autor`],
@@ -1321,7 +1330,7 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
   // apaga o mount, e o re-render dos botões é assíncrono (loadSettings/RID).
   // Sem isso, os ícones somem/reaparecem a cada reprocessamento e a página "treme".
 
-  return headerHTML + (PAGINA.painelCompacto ? resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) : '') + `
+  return headerHTML + (PAGINA.painelCompacto ? resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank, nameLink && nameLink.titulacao, currentYear) : '') + `
     <div id="jcr-report-content">
       <div id="jcr-report-tables">
          ${tableHTML}
