@@ -996,7 +996,7 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
             <th class="jcr-main-header-cell" colspan="${jcrTablesState.publicacoes ? 15 : 1}" style="padding: 8px; text-align: left; vertical-align: middle;">
               <span class="toggle-table-btn" data-target="publicacoes" style="cursor: pointer; user-select: none; margin-right: 5px;">${setaRecolher(jcrTablesState.publicacoes)}</span> Publicações
             </th>
-            <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgTotal};" title="Quantidade total de artigos">Qtd<br><label style="display:inline-block;margin-top:6px;font-weight:normal;font-size:0.9em;cursor:pointer;" title="Recalcular as estatísticas com base nos filtros selecionados"><input type="checkbox" id="tbl-chk-filtrar" style="margin:0 2px 0 0;vertical-align:middle;"><span style="vertical-align:middle;">Filtrar</span></label></th>
+            <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgTotal};" title="Quantidade total de artigos">Qtd</th>
             <th class="jcr-main-header-extra" colspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: #ffffff;" title="Métricas de Fator de Impacto (JCR)">JCR</th>
             <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Estatísticas de Autoria">Autores</th>
             <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; vertical-align: middle; text-align: center;" title="${window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS ? 'Grandes Colaborações (et al. ou COLLABORATION)' : window.JCRReportUtils.TEXTO_DESABILITADO}">GC</th>
@@ -1453,12 +1453,6 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
   // Apply visibility based on JCR/Period/Author (Initial Refresh).
   // Fora do bloco de settings salvos para funcionar também na primeira execução.
-  const filtrarCbInit = document.getElementById('tbl-chk-filtrar');
-  if (filtrarCbInit) {
-    filtrarCbInit.addEventListener('change', () => {
-      refreshPubFilters(true);
-    });
-  }
 
   refreshPubFilters();
 
@@ -1473,7 +1467,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
     header.addEventListener('click', (e) => {
       // nao interfere com os controles que ficam dentro do cabecalho
-      // (ex.: limiares de JCR, caixa "Filtrar", campo de anos)
+      // (ex.: limiares de JCR, campo de anos)
       if (e.target !== header && e.target.closest && e.target.closest('input, select, label, a, button')) return;
 
       e.stopPropagation();
@@ -1587,10 +1581,10 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
 
 
   // 3. Unified Publication Filters (JCR Level + Time Span + Author Role)
-  function refreshPubFilters(isFiltrarClick = false) {
-    const filtrarCb = document.getElementById('tbl-chk-filtrar');
-    const isTableFiltered = filtrarCb ? filtrarCb.checked : false;
-
+  // A tabela de publicacoes mostra sempre o curriculo inteiro: os filtros valem para a
+  // lista de artigos e para os graficos. (Havia uma caixa "Filtrar" que recalculava a
+  // tabela com os filtros; saiu em 2026-11-25 — o relatorio individual faz isso.)
+  function refreshPubFilters() {
     const isReportHidden = document.getElementById('toggle-disable-report')?.checked ?? false;
 
     const selectedJcrLevels = {
@@ -1705,63 +1699,6 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       const showLast = selectedRoles ? selectedRoles.last !== false : true;
       const showGc = selectedRoles ? selectedRoles.gc !== false : true;
       authorRankHistogramContainer.innerHTML = window.JCRReportUtils.generateAuthorRankHistogramHTML(filteredLattesInfo, highJcr, lowJcr, showLast, showGc);
-    }
-
-    const tbody = document.getElementById('tbody-publicacoes');
-    if (tbody) {
-      const previousState = tbody.getAttribute('data-table-filtered') === 'true';
-      if (!isTableFiltered && !previousState) {
-        // Table is already showing unfiltered data; do not recalculate or replace DOM to preserve UI and reduce ops
-        return;
-      }
-      tbody.setAttribute('data-table-filtered', isTableFiltered ? 'true' : 'false');
-
-      const cyInput = document.getElementById('custom-year-input');
-      const currentCustomYears = cyInput ? cyInput.value : customYears;
-      let tableStats = stats;
-
-      if (isTableFiltered) {
-        const targetRank = window.JCRReportUtils.rankAlvoEfetivo(parseInt(document.getElementById('target-author-rank-input')?.value) || targetAuthorRank || 1);
-        const filteredForStats = lattesInfo.filter(pub => {
-          const impactFactorStr = window.JCRReportUtils.valorJcr(pub);
-          const category = window.JCRReportUtils.faixaDeJcr(impactFactorStr, highJcr, lowJcr);
-          const ifVal = category === 'noJcr' ? 0 : parseFloat(impactFactorStr);
-
-          let passesRole = false;
-          if (pub.hasEtAl && window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS) {
-            passesRole = selectedRoles.gc;
-          } else {
-            let isTargetRank = false;
-            if (targetRank === 1) {
-              isTargetRank = pub.isFirstAuthor !== undefined ? pub.isFirstAuthor : (pub.authorRank === 1);
-            } else {
-              isTargetRank = pub.authorRank === targetRank;
-            }
-            let isLast = pub.isLastAuthor !== undefined ? pub.isLastAuthor : (pub.authorRank === pub.authorCount && pub.authorCount > 1 && !pub.hasEtAl);
-            if (!window.JCRReportUtils.ULTIMO_AUTOR_ATIVO) isLast = false;
-            if (isTargetRank && selectedRoles.first) passesRole = true;
-            if (isLast && selectedRoles.last) passesRole = true;
-            const isOther = !isTargetRank && !isLast;
-            if (isOther && selectedRoles.others) passesRole = true;
-          }
-
-          let jcrLevelKey = category === 'noJcr' ? 'none' : category;
-          let passesJcr = selectedJcrLevels[jcrLevelKey];
-
-          return passesRole && passesJcr;
-        });
-
-        tableStats = window.JCRReportUtils.calculateReportStats(
-            filteredForStats, stats.patents, stats.events, stats.supervisions, stats.declaredCitations,
-            currentYear, currentCustomYears, startYearRecent, startYearLast10, startYearCustom, highJcr, lowJcr, targetRank
-        );
-      }
-
-      tbody.innerHTML = `
-        ${window.JCRReportUtils.corpoTabelaPublicacoes(tableStats,
-          { min: minYear, max: maxYear, last10: startYearLast10, recent: startYearRecent },
-          `${currentCustomYears} ${currentCustomYears == 1 || currentCustomYears == 0 ? 'ano' : 'anos'} (${startYearCustom} - ${maxYear})`)}
-      `;
     }
   }
 
