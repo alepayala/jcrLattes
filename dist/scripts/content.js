@@ -939,7 +939,7 @@ function montarAreaDeGraficos(togglesHTML, lattesInfo, stats, highJcr, lowJcr) {
     </div>`;
 }
 
-// Resumo do painel compacto (Lattes novo): oito cartoes com os numeros que mais se
+// Resumo do painel compacto (Lattes novo): doze cartoes com os numeros que mais se
 // consultam, sempre a vista; o detalhe fica nas tabelas, que comecam recolhidas. Cada
 // cartao traz o total da carreira e, embaixo, o dos ultimos 5 anos ou o dado vizinho.
 function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) {
@@ -951,23 +951,38 @@ function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) {
   const hWos = dec.wosHIndex || tudo.citations.wos.hIndex, hScopus = dec.scopusHIndex || tudo.citations.scopus.hIndex;
   const cWos = dec.wosCitations || tudo.citations.wos.sum, cScopus = dec.scopusCitations || tudo.citations.scopus.sum;
   const rank = U.rankAlvoEfetivo(targetAuthorRank);
+  const emAndamento = (stats.supervisions && stats.supervisions.inCourse) || {};
+  const totalEmAndamento = Object.values(emAndamento).reduce((s, n) => s + (n || 0), 0);
+  // um cartao de dado desligado (JCRReportUtils.*_ATIVO) fica com traco, em cinza
+  // (embaixo vai a forma curta, que cabe no cartao; a completa fica na dica)
+  const desligado = (rotulo) => [rotulo, '—', 'Desabilitado', U.TEXTO_DESABILITADO, true];
+  // Doze cartoes, em tres linhas de quatro na largura cheia: impacto | citacoes e
+  // autoria | autoria e formacao de pessoal.
   const cartoes = [
     ['Artigos', tudo.total.count, `${periodo}: ${cinco.total.count}`, 'Artigos completos publicados em periódicos'],
     ['Soma do JCR', U.formatNum(tudo.total.sum), `${periodo}: ${U.formatNum(cinco.total.sum)}`, 'Soma dos fatores de impacto dos artigos'],
     ['JCR médio', U.getAvg(tudo.total.sum, tudo.total.countWithJcr), `${periodo}: ${U.getAvg(cinco.total.sum, cinco.total.countWithJcr)}`, 'Soma do JCR dividida pelos artigos com JCR'],
-    [`${rank}º autor`, tudo.total.firstAuthorCount, `${periodo}: ${cinco.total.firstAuthorCount}`, `Artigos como ${rank}º autor`],
+    [`JCR alto (≥ ${stats.highJcr})`, tudo.high.count, `${periodo}: ${cinco.high.count}`, 'Artigos na faixa alta de fator de impacto'],
     ['Índice H (WoS)', hWos, `Scopus: ${hScopus}`, 'Índice H na Web of Science e na Scopus'],
     ['Citações (WoS)', cWos, `Scopus: ${cScopus}`, 'Citações na Web of Science e na Scopus'],
+    [`${rank}º autor`, tudo.total.firstAuthorCount, `${periodo}: ${cinco.total.firstAuthorCount}`, `Artigos como ${rank}º autor`],
+    U.ULTIMO_AUTOR_ATIVO
+      ? ['Último autor', tudo.total.lastAuthorCount, `${periodo}: ${cinco.total.lastAuthorCount}`, 'Artigos como último autor']
+      : desligado('Último autor'),
+    U.MEDIA_DE_AUTORES_ATIVA
+      ? ['Autores por artigo', U.getAvg(tudo.total.sumAuthorsNonGc, tudo.total.countNonGc), `${periodo}: ${U.getAvg(cinco.total.sumAuthorsNonGc, cinco.total.countNonGc)}`, 'Número médio de autores por artigo (sem grandes colaborações)']
+      : desligado('Autores por artigo'),
     ['Doutorados', concluidas('Tese de doutorado'), `Mestrados: ${concluidas('Dissertação de mestrado')}`, 'Orientações concluídas de doutorado e de mestrado'],
+    ['Orientações em andamento', totalEmAndamento, `Doutorado: ${emAndamento['Tese de doutorado'] || 0} · Mestrado: ${emAndamento['Dissertação de mestrado'] || 0}`, 'Orientações em andamento, de todos os tipos'],
     ['Patentes', (tudo.patents && tudo.patents.total) || 0, `Pós-doutorados: ${concluidas('Supervisão de pós-doutorado')}`, 'Patentes e supervisões de pós-doutorado concluídas']
   ];
   return `
     <div id="jcr-report-resumo" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 0 0 10px;">
-      ${cartoes.map(([rotulo, valor, embaixo, dica]) => `
-      <div title="${escHtml(dica)}" style="background: #f6f8fb; border: 1px solid #e3e8ef; border-radius: 8px; padding: 8px 10px; min-width: 0;">
-        <div style="font-size: 11px; color: #5b6675;">${escHtml(rotulo)}</div>
-        <div style="font-size: 20px; font-weight: 700; color: #1b3a6b; line-height: 1.25;">${escHtml(String(valor))}</div>
-        <div style="font-size: 11px; color: #7a8594; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escHtml(embaixo)}</div>
+      ${cartoes.map(([rotulo, valor, embaixo, dica, apagado]) => `
+      <div title="${escHtml(dica)}" style="background: #fff; border: 1px solid #d5dde6; border-radius: 8px; padding: 8px 10px; min-width: 0;">
+        <div style="font-size: 12px; color: #2f3b4a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escHtml(rotulo)}</div>
+        <div style="font-size: 20px; font-weight: 700; color: ${apagado ? '#8a94a1' : '#1b3a6b'}; line-height: 1.25;">${escHtml(String(valor))}</div>
+        <div style="font-size: 12px; color: ${apagado ? '#6b7684' : '#3d4a5c'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escHtml(embaixo)}</div>
       </div>`).join('')}
     </div>`;
 }
