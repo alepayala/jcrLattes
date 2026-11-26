@@ -1,6 +1,6 @@
 # JCRLattes
 
-**Versão 1.8.7**
+**Versão 2.0.0**
 
 O JCRLattes é a ferramenta definitiva para pesquisadores, acadêmicos, coordenadores de pós-graduação e avaliadores que buscam eficiência na análise da Plataforma Lattes. 
 
@@ -28,7 +28,6 @@ O repositório inclui:
 * **Consolidação Instantânea de Grupos**: Atribua IDs customizados (ex: siglas de laboratórios) aos currículos para compilar métricas integradas em tempo real. Quem participou do grupo só por um tempo pode ter o período (início e fim) registrado ao receber o ID, e o relatório do grupo conta apenas a produção desse intervalo; o padrão é toda a carreira, aceito com um Enter. 
 * **Deduplicação Inteligente**: O relatório de grupo remove de forma automática artigos, patentes e orientações em coautoria repetidos entre os membros, gerando métricas reais da produção coletiva.
 * **Tabela de Membros do Grupo**: Indicadores de cada membro num período escolhido (artigos por faixa de JCR, soma e média do JCR, orientações de doutorado e mestrado, patentes), com índice H e citações WoS da carreira toda. Ordenável por qualquer coluna e exportável para Excel (.xlsx).
-* **Atualização em Lote sem Abrir Abas (⚡)**: Selecione vários pesquisadores no banco e atualize os currículos de uma vez, direto dos dados públicos da nova Plataforma Lattes.
 * **Backup e Portabilidade**: Exporte todo o seu banco de dados em formato JSON ou exporte os dados tabulados em CSV para análise.
 
 ### 3. Análise Acadêmica Avançada
@@ -46,6 +45,8 @@ O repositório inclui:
 3. Ative o **Modo do desenvolvedor** no canto superior direito.
 4. Clique em **Carregar sem compactação** (Load unpacked) e selecione a pasta `dist` deste projeto.
 5. Acesse qualquer currículo na Plataforma Lattes e a extensão injetará as métricas automaticamente. Funciona na [nova busca de currículos](https://busca-cv-lattes.cnpq.br/) e também nas páginas do formato anterior.
+
+> **Dica:** fixe o JCRLattes na barra do Chrome (ícone de quebra-cabeça 🧩 → alfinete 📌 ao lado de JCRLattes). Assim o banco de CVs abre com um clique no ícone da extensão, de qualquer página, sem precisar estar num currículo.
 
 ---
 

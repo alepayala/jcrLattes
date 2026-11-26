@@ -2321,13 +2321,21 @@ window.JCRReportUtils = {
         let css = null;
         try { css = await fetchText(cssUrl); } catch (e) {}
         if (!css) continue;
+        // Endereco errado num site de pagina unica devolve a pagina inicial no lugar
+        // do CSS: embutir isso poria um documento inteiro dentro de um <style>.
+        if (this._pareceHtml(css)) continue;
         // url(...) relativas dentro do CSS passam a absolutas
         css = css.replace(/url\(\s*(["']?)([^"')]+)\1\s*\)/gi, (m, q, u) => {
           if (/^(data:|https?:)/i.test(u)) return m;
           const abs = (() => { try { return new URL(u, cssUrl).href; } catch (e) { return null; } })();
           return abs ? `url("${abs}")` : m;
         });
-        htmlText = htmlText.replace(tag, `<style data-inlined-from="${cssUrl.replace(/"/g, '&quot;')}">\n${css}\n</style>`);
+        // media="print" com onload e o truque de carregar o CSS sem travar a pagina (o
+        // script troca para "all"); sem scripts na copia, ficaria so para impressao.
+        const mediaM = tag.match(/\bmedia\s*=\s*["']([^"']+)["']/i);
+        const media = mediaM && !/\bonload\s*=/i.test(tag) && !/^\s*all\s*$/i.test(mediaM[1]) ? ` media="${mediaM[1].replace(/"/g, '&quot;')}"` : '';
+        // split/join: troca todas as ocorrencias e nao interpreta "$&" que o CSS tenha
+        htmlText = htmlText.split(tag).join(`<style${media} data-inlined-from="${cssUrl.replace(/"/g, '&quot;')}">\n${css}\n</style>`);
       }
     }
 
@@ -2345,7 +2353,34 @@ window.JCRReportUtils = {
       return data ? `${prefix}${quote}${data}${quote}` : full;
     });
 
-    return htmlText;
+    return this.deduplicarImagensEmbutidas(htmlText);
+  },
+
+  _pareceHtml: function (texto) {
+    return /^\s*(<!doctype\s+html|<html[\s>])/i.test(String(texto || '').slice(0, 300));
+  },
+
+  // Uma imagem embutida que se repete (o selo do JCR e os icones de citacao aparecem em
+  // cada artigo) e gravada UMA vez, numa regra de estilo, e cada <img> passa a apontar
+  // para ela. Num CV de 325 artigos isso tira uns 6 MB do arquivo. So mexe em data: URI
+  // repetida e de tamanho que compense; o resto fica como esta.
+  deduplicarImagensEmbutidas: function (htmlText) {
+    const html = String(htmlText || '');
+    const re = /(<img\b[^>]*?)\bsrc\s*=\s*(["'])(data:[^"']+)\2/gi;
+    const vezes = new Map();
+    let m;
+    while ((m = re.exec(html)) !== null) vezes.set(m[3], (vezes.get(m[3]) || 0) + 1);
+    const numero = new Map();
+    vezes.forEach((n, uri) => { if (n > 1 && uri.length >= 200 && !/[\\()\s]/.test(uri)) numero.set(uri, numero.size + 1); });
+    if (numero.size === 0) return html;
+    // 1 x 1 transparente: o <img> continua valido e a regra "content" poe a imagem
+    const VAZIA = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+    const saida = html.replace(re, (tudo, antes, aspas, uri) =>
+      numero.has(uri) ? `${antes}data-jcr-img="${numero.get(uri)}" src=${aspas}${VAZIA}${aspas}` : tudo);
+    let css = '';
+    numero.forEach((n, uri) => { css += `img[data-jcr-img="${n}"]{content:url("${uri}")}\n`; });
+    const estilo = `<style id="jcr-imagens-repetidas">\n${css}</style>`;
+    return /<\/head>/i.test(saida) ? saida.replace(/<\/head>/i, () => estilo + '</head>') : estilo + saida;
   },
 
   // options.fallbackStyles = false preserva a aparência original do documento

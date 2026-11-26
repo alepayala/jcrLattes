@@ -1,4 +1,4 @@
-JCRLattes - Versão 1.8.7
+JCRLattes - Versão 2.0.0
 
 Resumo:
 Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes, autoria e orientações em segundos.
@@ -32,9 +32,9 @@ Principais Funcionalidades:
 * Tabela de Membros do Grupo: Indicadores de cada membro num período escolhido (artigos por faixa de JCR, soma e média do JCR, orientações, patentes), com índice H e citações WoS da carreira toda e o ano do doutorado (ou da maior titulação, com o nível indicado). Ordenável por qualquer coluna, com link para o currículo Lattes e exportável para Excel (.xlsx).
 * Matriz de Coautoria: Quantos artigos cada par de membros do grupo publicou junto, com os pesquisadores agrupados automaticamente por colaboração e setas para reorganizar as linhas à mão.
 * Acesso Direto Integrado: Atalho flutuante injetado na tela de validação Captcha, permitindo a abertura imediata do seu Banco de Dados local sem interrupções.
+* Banco de CVs Sempre à Mão: Fixe o JCRLattes na barra do Chrome (ícone de quebra-cabeça → alfinete ao lado de JCRLattes) e abra o banco de dados com um clique no ícone da extensão, de qualquer página, sem precisar estar num currículo.
 * Indicador de Atualização por Currículo: Cada pesquisador na tabela exibe um ícone de status na coluna de ações, com botão direto para abrir o Lattes.
 * Atualização Simplificada (Update): Um botão de atualização rápida permite abrir o currículo Lattes em uma nova aba para reprocessar e sincronizar os dados mais recentes.
-* Atualização em Lote sem Abrir Abas (⚡): Selecione vários pesquisadores no banco e atualize os currículos de uma vez, direto dos dados públicos da nova Plataforma Lattes.
 * Backup e Portabilidade: Exporte todo o seu banco de dados em formato JSON para restaurá-lo em outros dispositivos ou exporte os dados tabulados em CSV para análise no Microsoft Excel ou ferramentas estatísticas. Na importação, o sistema compara automaticamente as versões e mantém sempre o registro mais recente.
 
 3. Análise de Autoria, Patentes, Orientações e Eventos:

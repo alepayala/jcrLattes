@@ -1997,6 +1997,17 @@ async function buildStandaloneCvHtml() {
       while (div.firstChild) span.appendChild(div.firstChild);
       div.replaceWith(span);
     });
+    // A barra do topo do curriculo ("Voltar", os atalhos das secoes, "Recolher todas")
+    // so funciona com os scripts do site: na copia sao botoes mortos, e saem.
+    // O mesmo vale para o cabecalho do site (idioma, "Entrar"), a trilha de navegacao,
+    // compartilhar, copiar o ID e os filtros/ordenacao da lista de producoes.
+    clone.querySelectorAll(
+      '.cv-topbar, app-header, app-breadcrumbs, a.skip-link, p-toast, app-share, .btn-copy, .filters-bar'
+    ).forEach(el => el.remove());
+    // sem o cabecalho, o curriculo nao fica colado na borda de cima
+    const corpoDaCopia = clone.querySelector('body');
+    if (corpoDaCopia) corpoDaCopia.style.paddingTop = '16px';
+    clone.querySelectorAll('#' + PAGINA.idSeletorDeOrdem).forEach(sel => (sel.closest('.controls') || sel).remove());
     // o grupo "Informações gerais" recolhido volta a aparecer na copia
     clone.querySelectorAll('.jcr-info-gerais-recolhida').forEach(el => el.classList.remove('jcr-info-gerais-recolhida'));
     // artigos ocultos pelos filtros da extensao voltam a aparecer na copia
@@ -2092,7 +2103,9 @@ async function buildStandaloneCvHtml() {
 
   const utils = window.JCRReportUtils;
   if (utils && typeof utils.embedAssets === 'function') {
-    html = await utils.embedAssets(html, location.href, viaBackground('fetch_arraybuffer'), viaBackground('fetch_url'));
+    // document.baseURI, e nao location.href: o Lattes novo tem <base href="/"> e os
+    // seus arquivos (CSS, imagens) sao relativos a ele, nao ao endereco do curriculo.
+    html = await utils.embedAssets(html, document.baseURI || location.href, viaBackground('fetch_arraybuffer'), viaBackground('fetch_url'));
   }
   if (utils && typeof utils.makeSelfContainedHtml === 'function') {
     // fallbackStyles: false preserva a aparencia original do curriculo

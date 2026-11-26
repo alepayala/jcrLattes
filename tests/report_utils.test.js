@@ -1459,3 +1459,59 @@ describe('tabelas do ResearcherID e do Google Scholar alinhadas', () => {
         assert.strictEqual(grade(rid), grade(gs));
     });
 });
+
+describe('embedAssets: folhas de estilo', () => {
+    const semImagens = async () => null;
+
+    test('endereco relativo vale em relacao a base dada (o <base> do Lattes novo)', async () => {
+        const pedidos = [];
+        const html = '<head><link rel="stylesheet" href="styles-ABC.css"></head><body></body>';
+        const saida = await R.embedAssets(html, 'https://busca-cv-lattes.cnpq.br/', semImagens,
+            async (u) => { pedidos.push(u); return 'p{color:red}'; });
+        assert.deepStrictEqual(pedidos, ['https://busca-cv-lattes.cnpq.br/styles-ABC.css']);
+        assert.ok(saida.includes('p{color:red}'));
+        assert.ok(!saida.includes('<link'));
+    });
+
+    test('resposta que e uma pagina HTML nao e embutida como CSS', async () => {
+        const html = '<head><link rel="stylesheet" href="styles-ABC.css"></head>';
+        const saida = await R.embedAssets(html, 'https://x.test/curriculo/1', semImagens,
+            async () => '<!doctype html>\n<html><head></head><body>pagina inicial</body></html>');
+        assert.strictEqual(saida, html);
+    });
+
+    test('media="print" com onload vira estilo de tela; sem onload continua de impressao', async () => {
+        const css = async () => 'a{b:c}';
+        const truque = await R.embedAssets('<link rel="stylesheet" href="a.css" media="print" onload="this.media=\'all\'">', 'https://x.test/', semImagens, css);
+        assert.ok(/<style data-inlined-from/.test(truque));
+        const impressao = await R.embedAssets('<link rel="stylesheet" href="a.css" media="print">', 'https://x.test/', semImagens, css);
+        assert.ok(/<style media="print" data-inlined-from/.test(impressao));
+    });
+
+    test('a mesma tag repetida e trocada em todas as ocorrencias', async () => {
+        const tag = '<link rel="stylesheet" href="a.css">';
+        const saida = await R.embedAssets(tag + '<p></p>' + tag, 'https://x.test/', semImagens, async () => 'a{b:"$&"}');
+        assert.ok(!saida.includes('<link'));
+        assert.strictEqual(saida.split('a{b:"$&"}').length, 3);
+    });
+});
+
+describe('deduplicarImagensEmbutidas', () => {
+    const grande = 'data:image/png;base64,' + 'A'.repeat(400);
+
+    test('imagem repetida fica uma vez so, numa regra de estilo', () => {
+        const html = `<head></head><body><img class="a" src="${grande}"><img src="${grande}"><img src="${grande}"></body>`;
+        const saida = R.deduplicarImagensEmbutidas(html);
+        assert.strictEqual(saida.split(grande).length, 2);
+        assert.strictEqual((saida.match(/data-jcr-img="1"/g) || []).length, 4);   // 3 <img> + a regra
+        assert.ok(saida.includes(`img[data-jcr-img="1"]{content:url("${grande}")}`));
+        assert.ok(saida.indexOf('jcr-imagens-repetidas') < saida.indexOf('</head>'));
+        assert.ok(saida.includes('<img class="a" data-jcr-img="1" src="data:image/gif'));
+    });
+
+    test('imagem unica, pequena ou externa fica como esta', () => {
+        const pequena = 'data:image/gif;base64,AAAA';
+        const html = `<head></head><img src="${grande}"><img src="${pequena}"><img src="${pequena}"><img src="https://x.test/a.png"><img src="https://x.test/a.png">`;
+        assert.strictEqual(R.deduplicarImagensEmbutidas(html), html);
+    });
+});
