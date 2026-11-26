@@ -2239,11 +2239,17 @@ window.JCRDBTools = {
     // Varios curriculos, um de cada vez, com uma pausa entre eles para nao sobrecarregar
     // o servico. Para na terceira falha seguida: e sinal de que a API saiu do ar ou
     // passou a recusar, e insistir so geraria mais recusas.
-    atualizarCvsPelaApi: async function (ids, aoAvancar) {
+    // deveParar (opcional): funcao consultada antes de cada curriculo; devolvendo true, o
+    // lote para ali. Os ja atualizados ficam gravados e r.cancelados conta os que faltaram.
+    atualizarCvsPelaApi: async function (ids, aoAvancar, deveParar) {
         const validos = (Array.isArray(ids) ? ids : []).filter(id => /^\d{16}$/.test(String(id || '')));
-        const r = { atualizados: 0, semId: (Array.isArray(ids) ? ids.length : 0) - validos.length, falhas: [] };
+        const r = { atualizados: 0, semId: (Array.isArray(ids) ? ids.length : 0) - validos.length, falhas: [], cancelados: 0 };
         let seguidas = 0;
         for (let i = 0; i < validos.length; i++) {
+            if (typeof deveParar === 'function' && deveParar()) {
+                r.cancelados = validos.length - i;
+                break;
+            }
             try {
                 await this.atualizarCvPelaApi(validos[i]);
                 r.atualizados++;
@@ -3643,22 +3649,40 @@ window.JCRDBTools = {
         // Atualiza os marcados pela API do Lattes novo, um de cada vez, sem abrir abas.
         const bulkBtnApi = newTab.document.getElementById('bulk-btn-api');
         if (bulkBtnApi) {
+            let apiEmAndamento = null;
             bulkBtnApi.addEventListener('click', async () => {
+                if (apiEmAndamento) { apiEmAndamento(); return; }
                 const selected = selectedCheckboxData();
                 if (selected.length === 0) {
                     this.showToast('Nenhum CV selecionado.', '#e67e22');
                     return;
                 }
-                bulkBtnApi.disabled = true;
-                const r = await this.atualizarCvsPelaApi(selected.map(s => s.lattesId),
-                    (feitos, total) => { bulkBtnApi.textContent = `${feitos}/${total}`; });
+                // Com o lote em andamento, o mesmo botao passa a cancelar: o curriculo que
+                // esta sendo lido termina e os seguintes nao sao buscados.
+                let cancelar = false;
+                apiEmAndamento = () => {
+                    cancelar = true;
+                    bulkBtnApi.disabled = true;
+                    bulkBtnApi.textContent = 'Cancelando…';
+                };
+                bulkBtnApi.title = 'Atualização em andamento. Clique para cancelar';
+                bulkBtnApi.textContent = `✖ 0/${selected.length}`;
+                let r;
+                try {
+                    r = await this.atualizarCvsPelaApi(selected.map(s => s.lattesId),
+                        (feitos, total) => { if (!cancelar) bulkBtnApi.textContent = `✖ ${feitos}/${total}`; },
+                        () => cancelar);
+                } finally {
+                    apiEmAndamento = null;
+                }
                 const partes = [`${r.atualizados} atualizado(s)`];
+                if (r.cancelados) partes.push(`${r.cancelados} não atualizado(s) (cancelado)`);
                 if (r.semId) partes.push(`${r.semId} sem ID Lattes`);
                 if (r.falhas.length) partes.push(`${r.falhas.length} com falha`);
                 if (r.falhas.length) console.warn('[JCRLattes] Falhas ao atualizar pela API:', r.falhas);
                 await this.viewDB(newTab, { processOnly: isProcessoOnly });
                 this.showToast(partes.join(', ') + (r.falhas.length ? '. Abra esses CVs no Lattes para atualizar.' : '.'),
-                    r.falhas.length ? '#e67e22' : '#4CAF50');
+                    (r.falhas.length || r.cancelados) ? '#e67e22' : '#4CAF50');
             });
         }
 

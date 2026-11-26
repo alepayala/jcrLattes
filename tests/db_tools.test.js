@@ -1507,3 +1507,30 @@ describe('_idsOrdenados', () => {
         assert.strictEqual(m.customId, 'ALFA, ZETA');
     });
 });
+
+describe('atualizarCvsPelaApi: cancelamento', () => {
+    const ids = ['1111111111111111', '2222222222222222', '3333333333333333'];
+    let original;
+    before(() => { original = B.atualizarCvPelaApi; });
+    after(() => { B.atualizarCvPelaApi = original; });
+
+    test('sem deveParar, atualiza todos e nao conta cancelados', async () => {
+        const lidos = [];
+        B.atualizarCvPelaApi = async (id) => { lidos.push(id); };
+        const r = await B.atualizarCvsPelaApi(ids);
+        assert.deepStrictEqual(lidos, ids);
+        assert.strictEqual(r.atualizados, 3);
+        assert.strictEqual(r.cancelados, 0);
+    });
+
+    test('para antes do proximo curriculo e conta os que faltaram', async () => {
+        const lidos = [];
+        let parar = false;
+        B.atualizarCvPelaApi = async (id) => { lidos.push(id); parar = true; };
+        const r = await B.atualizarCvsPelaApi(ids, null, () => parar);
+        assert.deepStrictEqual(lidos, [ids[0]]);
+        assert.strictEqual(r.atualizados, 1);
+        assert.strictEqual(r.cancelados, 2);
+        assert.strictEqual(r.falhas.length, 0);
+    });
+});
