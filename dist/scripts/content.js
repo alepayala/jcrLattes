@@ -1357,6 +1357,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   // Titulos das secoes viram controles de recolher/expandir (substituem os checkboxes)
   setupCollapsibleSections(sections);
   setupGeneralInfoGroup(sections);
+  if (LATTES_NOVO) agruparInformacoesGeraisNovo();
 
   const savedOpcoes = await loadSettings();
   const opcoes = window.JCRReportUtils.opcoesEfetivas(savedOpcoes);
@@ -1910,6 +1911,8 @@ async function buildStandaloneCvHtml() {
       while (div.firstChild) span.appendChild(div.firstChild);
       div.replaceWith(span);
     });
+    // o grupo "Informações gerais" recolhido volta a aparecer na copia
+    clone.querySelectorAll('.jcr-info-gerais-recolhida').forEach(el => el.classList.remove('jcr-info-gerais-recolhida'));
     // artigos ocultos pelos filtros da extensao voltam a aparecer na copia
     clone.querySelectorAll(PAGINA.seletorArtigoAnotado).forEach(li => { if (li.style.display === 'none') li.style.display = ''; });
   }
@@ -2313,6 +2316,93 @@ function setupGeneralInfoGroup(sections) {
   }
 
   aplicarGrupo(jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] === true);
+}
+
+// Lattes novo: o mesmo grupo "Informações gerais", para a produção poder ser a primeira
+// coisa abaixo do painel. Recolhe a biografia e todas as seções do acordeão que vêm
+// antes de "Produções" (identificação, endereço, formação, atuação, projetos...).
+//
+// As seções são do Angular e não são tiradas da página nem fechadas: ficam só ocultas
+// por CSS (atributo data-jcr-info-geral em cada uma + classe na coluna), de modo que os
+// leitores continuam achando o conteúdo de identificação e formação. A barra do grupo é
+// um elemento nosso, logo abaixo do painel. O estado é o mesmo do formato antigo
+// (jcrSectionsCollapsed[JCR_GRUPO_INFO_ID]).
+function agruparInformacoesGeraisNovo() {
+  const coluna = document.querySelector('.cv-layout .cv-main');
+  const botaoProducao = document.querySelector('button.accordion-header[data-id="producoes"]');
+  if (!coluna || !botaoProducao) return;
+  const itemProducao = botaoProducao.closest('app-accordion-item');
+  if (!itemProducao || !itemProducao.parentElement) return;
+
+  // o que entra no grupo: as secoes do acordeao antes de "Producoes" e os blocos da
+  // coluna (biografia, divisor) que vem antes do acordeao
+  const secoes = [];
+  for (let el = itemProducao.previousElementSibling; el; el = el.previousElementSibling) {
+    if (el.tagName === 'APP-ACCORDION-ITEM') secoes.unshift(el);
+  }
+  const blocoDoAcordeao = Array.from(coluna.children).find(c => c.contains(itemProducao));
+  const blocos = [];
+  for (const c of Array.from(coluna.children)) {
+    if (c === blocoDoAcordeao) break;
+    if (c.id === 'annotation-alert-div' || c.id === 'jcr-group-info-gerais') continue;
+    blocos.push(c);
+  }
+  const grupo = blocos.concat(secoes);
+  if (grupo.length === 0) return;
+  grupo.forEach(el => el.setAttribute('data-jcr-info-geral', ''));
+
+  if (!document.getElementById('jcr-info-gerais-css')) {
+    const estilo = document.createElement('style');
+    estilo.id = 'jcr-info-gerais-css';
+    estilo.textContent = '.cv-main.jcr-info-gerais-recolhida [data-jcr-info-geral] { display: none !important; }';
+    document.head.appendChild(estilo);
+  }
+
+  const nomes = secoes.map(s => { const t = s.querySelector('.accordion-header-title'); return t ? t.textContent.trim() : ''; }).filter(Boolean);
+  const aplicar = (recolhido) => {
+    coluna.classList.toggle('jcr-info-gerais-recolhida', recolhido);
+    const seta = document.getElementById('jcr-info-gerais-seta');
+    if (seta) seta.innerHTML = setaRecolher(recolhido);
+  };
+
+  let barra = document.getElementById('jcr-group-info-gerais');
+  if (!barra) {
+    barra = document.createElement('div');
+    barra.id = 'jcr-group-info-gerais';
+    barra.className = 'jcr-group-header';   // a copia do CV em HTML tira o que tem esta classe
+    barra.style.cssText = 'cursor: pointer; user-select: none; margin: 0 0 16px; padding: 10px 12px; background: #fff; border: 1px solid #e3e8ef; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); color: #1351b4; font-size: 1.05em; font-weight: 600; display: flex; align-items: baseline; gap: 8px; color-scheme: light;';
+    barra.innerHTML = '<span id="jcr-info-gerais-seta" style="display: inline-block; width: 14px;"></span><span>Informações gerais</span>'
+      + '<span id="jcr-info-gerais-lista" style="font-weight: normal; font-size: 0.82em; color: #5b6675; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;"></span>';
+    barra.addEventListener('click', () => {
+      const recolhido = !(jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] === true);
+      jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] = recolhido;
+      aplicar(recolhido);
+      saveSettings();
+    });
+    // Uma pilula de secao do topo (ou um link) que aponte para uma secao do grupo
+    // reabre o grupo: senao o clique nao levaria a lugar nenhum.
+    window.addEventListener('hashchange', () => {
+      if (jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] !== true) return;
+      const id = decodeURIComponent(location.hash.slice(1));
+      const alvo = id ? document.querySelector(`button.accordion-header[data-id="${CSS.escape(id)}"]`) : null;
+      if (alvo && alvo.closest('[data-jcr-info-geral]')) {
+        jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] = false;
+        aplicar(false);
+        saveSettings();
+        alvo.scrollIntoView({ block: 'start' });
+      }
+    });
+  }
+  // sempre logo abaixo do painel (ou no topo da coluna, se o painel nao estiver nela)
+  const painel = document.getElementById('annotation-alert-div');
+  const depoisDe = painel && painel.parentElement === coluna ? painel : null;
+  const lugarCerto = depoisDe ? depoisDe.nextElementSibling === barra : coluna.firstElementChild === barra;
+  if (!lugarCerto) coluna.insertBefore(barra, depoisDe ? depoisDe.nextSibling : coluna.firstChild);
+
+  barra.title = 'Recolher ou expandir: Biografia' + (nomes.length ? ', ' + nomes.join(', ') : '');
+  const lista = document.getElementById('jcr-info-gerais-lista');
+  if (lista) lista.textContent = `Biografia e ${nomes.length} seções antes de Produções`;
+  aplicar(jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] === true);
 }
 
 function getSections() {
