@@ -19,13 +19,22 @@ const PAGINA = LATTES_NOVO ? {
   raizArtigos: () => document.getElementById('producoes-panel') || document,
   // a anotacao entra depois do <p> do artigo, dentro do <li>
   ancoraDaAnotacao: (pub) => pub.querySelector(':scope > p'),
-  // o painel entra acima do corpo do CV, na largura toda da pagina
+  // O painel entra no topo da coluna do curriculo (.cv-main, 800 px), ao lado do cartao
+  // do pesquisador: acompanha a largura da janela junto com o resto da pagina e nao
+  // empurra o cartao para baixo. Sem a coluna, cai para cima do corpo do CV.
   inserirPainel: (painel) => {
+    const coluna = document.querySelector('.cv-layout .cv-main');
+    if (coluna) { coluna.insertBefore(painel, coluna.firstChild); return true; }
     const corpo = document.querySelector('.cv-layout');
     if (!corpo || !corpo.parentElement) return false;
     corpo.parentElement.insertBefore(painel, corpo);
     return true;
   },
+  // Painel compacto: um resumo em cartoes sempre a vista e as tabelas e os graficos em
+  // blocos que comecam recolhidos (o estado de cada bloco e lembrado, numa chave propria
+  // deste formato de pagina — ver CHAVE_TABELAS).
+  painelCompacto: true,
+  estiloDoPainel: 'margin-bottom: 16px; padding: 10px 12px; background: #fff; border: 1px solid #e3e8ef; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); color-scheme: light;',
   // o site novo ja tem as suas secoes recolhiveis
   secoesRecolhiveis: false,
   // <select> "Ordenar artigos por" do site; os separadores de ano so fazem sentido
@@ -49,6 +58,9 @@ const PAGINA = LATTES_NOVO ? {
     principal.insertBefore(painel, principal.firstChild);
     return true;
   },
+  painelCompacto: false,
+  // color-scheme: so importa no Lattes novo, mas nao atrapalha aqui
+  estiloDoPainel: null,
   secoesRecolhiveis: true,
   idSeletorDeOrdem: null,
   ordemCronologica: () => true,
@@ -67,9 +79,19 @@ const observerConfig = {
 const SETTINGS_KEY = 'jcr_lattes_settings';
 // "Opções e Filtros" abre recolhido; os demais blocos, abertos. O clique grava a escolha.
 let jcrTablesState = { publicacoes: false, citacoes: false, orientacoes: false, patentes: false, eventos: false, graficos: false };
+// No Lattes novo o painel e compacto: os blocos comecam recolhidos e o estado fica numa
+// chave propria, para nao brigar com o do formato antigo (onde comecam abertos).
+const CHAVE_TABELAS = PAGINA.painelCompacto ? 'tablesNovo' : 'tables';
+const CHAVE_TABELAS_DO_OUTRO = PAGINA.painelCompacto ? 'tables' : 'tablesNovo';
+if (PAGINA.painelCompacto) Object.keys(jcrTablesState).forEach(k => { jcrTablesState[k] = true; });
+// estado gravado do outro formato de pagina: saveSettings regrava o objeto inteiro e
+// tem de devolve-lo como encontrou
+let jcrTablesDoOutroFormato = null;
 // Secoes do CV recolhidas pelo usuario (clique no titulo). Chave = id da ancora da secao,
 // que e estavel entre curriculos, entao o estado vale para os proximos CVs abertos.
 let jcrSectionsCollapsed = {};
+// O painel inteiro recolhido (so o cabecalho a vista); vale para os dois formatos de pagina.
+let jcrPainelRecolhido = false;
 // "Lembrar os filtros de exibicao" (dialogo de opcoes); lido do que foi gravado.
 let lembrarFiltrosAtual = true;
 
@@ -90,8 +112,10 @@ async function saveSettings() {
     toggles: {
       disableReport: document.getElementById('toggle-disable-report')?.checked ?? false,
       disableExtraInfo: document.getElementById('toggle-disable-extra-info')?.checked ?? false,
-      tables: jcrTablesState,
+      [CHAVE_TABELAS]: jcrTablesState,
+      ...(jcrTablesDoOutroFormato ? { [CHAVE_TABELAS_DO_OUTRO]: jcrTablesDoOutroFormato } : {}),
       sectionsCollapsed: { ...jcrSectionsCollapsed },
+      painelRecolhido: jcrPainelRecolhido,
       jcr: {
         high: document.getElementById('toggle-jcr-high')?.checked ?? true,
         mid: document.getElementById('toggle-jcr-mid')?.checked ?? true,
@@ -180,7 +204,6 @@ async function esperarCurriculoNovo() {
            document.querySelector('button.accordion-header'))) {
     await espera(500);
   }
-  const endereco = location.href;
   showLoading();
   // A lista de artigos passa de 200 em lotes que o site so carrega com a aba visivel.
   // Se ficou incompleta com a aba oculta (aberta em segundo plano), espera ela aparecer
@@ -218,7 +241,12 @@ async function esperarCurriculoNovo() {
 
   // Trocar de curriculo (ou sair dele) nao recarrega a pagina, e o painel ficaria com
   // os dados do anterior. Recarregar e o jeito simples e seguro de recomecar limpo.
-  setInterval(() => { if (location.href !== endereco) location.reload(); }, 1000);
+  // So conta a troca do curriculo em si: as pilulas de secao do topo (Identificacao,
+  // Endereco Profissional...) tambem mexem no endereco, e recarregar por causa delas
+  // reiniciava a leitura a cada clique.
+  const idDoEndereco = () => LEITOR._idLattesDoEndereco(location.pathname);
+  const idInicial = idDoEndereco();
+  setInterval(() => { if (idDoEndereco() !== idInicial) location.reload(); }, 1000);
 }
 
 async function main() {
@@ -361,9 +389,11 @@ async function processLattesPage(nameLink) {
   // Load saved settings if any
   const saved = await loadSettings();
 
-  if (saved?.toggles?.tables) {
-    jcrTablesState = { ...jcrTablesState, ...saved.toggles.tables };
+  if (saved?.toggles?.[CHAVE_TABELAS]) {
+    jcrTablesState = { ...jcrTablesState, ...saved.toggles[CHAVE_TABELAS] };
   }
+  if (saved?.toggles?.[CHAVE_TABELAS_DO_OUTRO]) jcrTablesDoOutroFormato = saved.toggles[CHAVE_TABELAS_DO_OUTRO];
+  if (typeof saved?.toggles?.painelRecolhido === 'boolean') jcrPainelRecolhido = saved.toggles.painelRecolhido;
 
   if (saved?.toggles?.sectionsCollapsed) {
     jcrSectionsCollapsed = { ...saved.toggles.sectionsCollapsed };
@@ -757,7 +787,7 @@ function injectYearSeparator(pubElem, year) {
       <span style="font-size: 1.4em; font-weight: bold; color: #333; font-family: inherit;">${year}</span>
       <div style="display: flex; align-items: center;">
         <span style="font-size: 0.85em; color: #777; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 8px;">Publicações de ${year}</span>
-        <span class="jcr-collapse-icon" style="display: inline-block; width: 20px; font-size: 1.1em; font-weight: bold; color: ${COLORS.midJcr}; text-align: center;">${isPreviouslyCollapsed ? '[+]' : '[-]'}</span>
+        <span class="jcr-collapse-icon" style="display: inline-block; width: 20px; font-size: 1.1em; font-weight: bold; color: ${COLORS.midJcr}; text-align: center;">${setaRecolher(isPreviouslyCollapsed)}</span>
       </div>
     </div>
   `;
@@ -775,7 +805,7 @@ function injectYearSeparator(pubElem, year) {
     
     const iconSpan = separator.querySelector('.jcr-collapse-icon');
     if (iconSpan) {
-        iconSpan.innerText = newState ? '[+]' : '[-]';
+        iconSpan.innerHTML = setaRecolher(newState);
     }
 
     let nextNode = separator.nextElementSibling;
@@ -813,6 +843,14 @@ function injectYearSeparator(pubElem, year) {
 // titulo (que ocupa a largura toda quando as colunas somem) e a visibilidade do
 // corpo.
 // ---------------------------------------------------------------------------
+// Seta de recolher/expandir, a mesma em todo o painel (blocos, o painel inteiro,
+// separadores de ano, secoes do CV antigo): para baixo = aberto, para a direita =
+// recolhido, no azul dos titulos do Lattes novo. Desenhada aqui porque o formato antigo
+// nao tem a fonte de icones do site novo.
+function setaRecolher(recolhido) {
+  return `<svg class="jcr-seta" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1351b4" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align: -1px; transform: rotate(${recolhido ? -90 : 0}deg);"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+}
+
 function molduraTabelaCv({ chave, titulo, totalCols, colunas, corpo }) {
   const recolhida = !!jcrTablesState[chave];
   return `
@@ -821,7 +859,7 @@ function molduraTabelaCv({ chave, titulo, totalCols, colunas, corpo }) {
                 <thead>
                   <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
                     <th class="jcr-main-header-cell" data-total-cols="${totalCols}" colspan="${recolhida ? totalCols : 1}" style="padding: 8px; text-align: left;">
-                      <span class="toggle-table-btn" data-target="${chave}" style="cursor: pointer; user-select: none; margin-right: 5px;">${recolhida ? '[+]' : '[-]'}</span> ${titulo}
+                      <span class="toggle-table-btn" data-target="${chave}" style="cursor: pointer; user-select: none; margin-right: 5px;">${setaRecolher(recolhida)}</span> ${titulo}
                     </th>
                     ${colunas}
                   </tr>
@@ -868,7 +906,7 @@ function montarAreaDeGraficos(togglesHTML, lattesInfo, stats, highJcr, lowJcr) {
           <thead>
             <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
               <th style="padding: 8px; text-align: left;">
-                <span class="toggle-table-btn" data-target="graficos" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.graficos ? '[+]' : '[-]'}</span> Gráficos
+                <span class="toggle-table-btn" data-target="graficos" style="cursor: pointer; user-select: none; margin-right: 5px;">${setaRecolher(jcrTablesState.graficos)}</span> Gráficos
               </th>
             </tr>
           </thead>
@@ -901,6 +939,39 @@ function montarAreaDeGraficos(togglesHTML, lattesInfo, stats, highJcr, lowJcr) {
     </div>`;
 }
 
+// Resumo do painel compacto (Lattes novo): oito cartoes com os numeros que mais se
+// consultam, sempre a vista; o detalhe fica nas tabelas, que comecam recolhidas. Cada
+// cartao traz o total da carreira e, embaixo, o dos ultimos 5 anos ou o dado vizinho.
+function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) {
+  const U = window.JCRReportUtils;
+  const tudo = stats.all, cinco = stats.recent, dec = stats.declaredCitations || {};
+  const concluidas = (tipo) => { const l = stats.supervisions && stats.supervisions.concluded && stats.supervisions.concluded[tipo]; return Array.isArray(l) ? l.length : 0; };
+  const periodo = `5 anos (${startYearRecent}–${maxYear})`;
+  // citacoes e indice h: o declarado no curriculo, quando ha; senao o calculado dos artigos
+  const hWos = dec.wosHIndex || tudo.citations.wos.hIndex, hScopus = dec.scopusHIndex || tudo.citations.scopus.hIndex;
+  const cWos = dec.wosCitations || tudo.citations.wos.sum, cScopus = dec.scopusCitations || tudo.citations.scopus.sum;
+  const rank = U.rankAlvoEfetivo(targetAuthorRank);
+  const cartoes = [
+    ['Artigos', tudo.total.count, `${periodo}: ${cinco.total.count}`, 'Artigos completos publicados em periódicos'],
+    ['Soma do JCR', U.formatNum(tudo.total.sum), `${periodo}: ${U.formatNum(cinco.total.sum)}`, 'Soma dos fatores de impacto dos artigos'],
+    ['JCR médio', U.getAvg(tudo.total.sum, tudo.total.countWithJcr), `${periodo}: ${U.getAvg(cinco.total.sum, cinco.total.countWithJcr)}`, 'Soma do JCR dividida pelos artigos com JCR'],
+    [`${rank}º autor`, tudo.total.firstAuthorCount, `${periodo}: ${cinco.total.firstAuthorCount}`, `Artigos como ${rank}º autor`],
+    ['Índice H (WoS)', hWos, `Scopus: ${hScopus}`, 'Índice H na Web of Science e na Scopus'],
+    ['Citações (WoS)', cWos, `Scopus: ${cScopus}`, 'Citações na Web of Science e na Scopus'],
+    ['Doutorados', concluidas('Tese de doutorado'), `Mestrados: ${concluidas('Dissertação de mestrado')}`, 'Orientações concluídas de doutorado e de mestrado'],
+    ['Patentes', (tudo.patents && tudo.patents.total) || 0, `Pós-doutorados: ${concluidas('Supervisão de pós-doutorado')}`, 'Patentes e supervisões de pós-doutorado concluídas']
+  ];
+  return `
+    <div id="jcr-report-resumo" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 0 0 10px;">
+      ${cartoes.map(([rotulo, valor, embaixo, dica]) => `
+      <div title="${escHtml(dica)}" style="background: #f6f8fb; border: 1px solid #e3e8ef; border-radius: 8px; padding: 8px 10px; min-width: 0;">
+        <div style="font-size: 11px; color: #5b6675;">${escHtml(rotulo)}</div>
+        <div style="font-size: 20px; font-weight: 700; color: #1b3a6b; line-height: 1.25;">${escHtml(String(valor))}</div>
+        <div style="font-size: 11px; color: #7a8594; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escHtml(embaixo)}</div>
+      </div>`).join('')}
+    </div>`;
+}
+
 function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCustom, customYears, currentYear, highJcr, lowJcr, nameLink, minYear, maxYear, lattesInfo, targetAuthorRank) {
   const getSoftColor = window.JCRReportUtils.getSoftColor.bind(window.JCRReportUtils);
   const bgTotal = '#f8f9fa';
@@ -922,20 +993,20 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
       <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
         <thead>
           <tr style="background-color: ${COLORS.backgroundHeader}; border-bottom: 1px solid ${COLORS.border};">
-            <th class="jcr-main-header-cell" colspan="${jcrTablesState.publicacoes ? 18 : 1}" style="padding: 8px; text-align: left; vertical-align: middle;">
-              <span class="toggle-table-btn" data-target="publicacoes" style="cursor: pointer; user-select: none; margin-right: 5px;">${jcrTablesState.publicacoes ? '[+]' : '[-]'}</span> Publicações
+            <th class="jcr-main-header-cell" colspan="${jcrTablesState.publicacoes ? 15 : 1}" style="padding: 8px; text-align: left; vertical-align: middle;">
+              <span class="toggle-table-btn" data-target="publicacoes" style="cursor: pointer; user-select: none; margin-right: 5px;">${setaRecolher(jcrTablesState.publicacoes)}</span> Publicações
             </th>
             <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgTotal};" title="Quantidade total de artigos">Qtd<br><label style="display:inline-block;margin-top:6px;font-weight:normal;font-size:0.9em;cursor:pointer;" title="Recalcular as estatísticas com base nos filtros selecionados"><input type="checkbox" id="tbl-chk-filtrar" style="margin:0 2px 0 0;vertical-align:middle;"><span style="vertical-align:middle;">Filtrar</span></label></th>
             <th class="jcr-main-header-extra" colspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: #ffffff;" title="Métricas de Fator de Impacto (JCR)">JCR</th>
             <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="Estatísticas de Autoria">Autores</th>
             <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; vertical-align: middle; text-align: center;" title="${window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS ? 'Grandes Colaborações (et al. ou COLLABORATION)' : window.JCRReportUtils.TEXTO_DESABILITADO}">GC</th>
-            <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgHigh};" title="Artigos com Fator de Impacto Alto">
+            <th class="jcr-main-header-extra" colspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgHigh};" title="Artigos com Fator de Impacto Alto">
               JCR Alto (≥ ${highJcr})
             </th>
-            <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgMid};" title="Artigos com Fator de Impacto Médio">
+            <th class="jcr-main-header-extra" colspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgMid};" title="Artigos com Fator de Impacto Médio">
               JCR Médio (≥ ${lowJcr})
             </th>
-            <th class="jcr-main-header-extra" colspan="3" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgLow};" title="Artigos com Fator de Impacto Baixo">JCR Baixo (< ${lowJcr})</th>
+            <th class="jcr-main-header-extra" colspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgLow};" title="Artigos com Fator de Impacto Baixo">JCR Baixo (< ${lowJcr})</th>
             <th class="jcr-main-header-extra" rowspan="2" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; padding: 8px; border-left: 1px solid #ccc; vertical-align: middle; text-align: center; background-color: ${bgNone};" title="Artigos sem Fator de Impacto classificado">Sem JCR</th>
           </tr>
           <tr class="jcr-main-header-subrow" style="display: ${jcrTablesState.publicacoes ? 'none' : ''}; background-color: ${COLORS.backgroundSubHeader}; border-bottom: 2px solid ${COLORS.border}; font-size: 0.85em;">
@@ -949,15 +1020,12 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
             <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};" title="${window.JCRReportUtils.MEDIA_DE_AUTORES_ATIVA ? 'Média de autores por artigo (exclui Grandes Colaborações)' : 'Temporariamente desabilitado'}">μ</th>
             <!-- High Sub-headers -->
             <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgHigh};" title="Quantidade de artigos nesta faixa">Qtd</th>
-            <th style="padding: 4px; text-align: center; background-color: ${bgHigh};" title="Soma do Fator de Impacto nesta faixa">Σ</th>
             <th style="padding: 4px; text-align: center; background-color: ${bgHigh};" title="Média do Fator de Impacto nesta faixa">μ</th>
             <!-- Mid Sub-headers -->
             <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgMid};" title="Quantidade de artigos nesta faixa">Qtd</th>
-            <th style="padding: 4px; text-align: center; background-color: ${bgMid};" title="Soma do Fator de Impacto nesta faixa">Σ</th>
             <th style="padding: 4px; text-align: center; background-color: ${bgMid};" title="Média do Fator de Impacto nesta faixa">μ</th>
             <!-- Low Sub-headers -->
             <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgLow};" title="Quantidade de artigos nesta faixa">Qtd</th>
-            <th style="padding: 4px; text-align: center; background-color: ${bgLow};" title="Soma do Fator de Impacto nesta faixa">Σ</th>
             <th style="padding: 4px; text-align: center; background-color: ${bgLow};" title="Média do Fator de Impacto nesta faixa">μ</th>
           </tr>
         </thead>
@@ -1145,22 +1213,51 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
       .jcr-icon-toggle input { display: none; }
       /* Marcado = recurso oculto: ícone esmaecido (estado "off") */
       .jcr-icon-toggle input:checked ~ .jcr-icon-face { filter: grayscale(1); opacity: 0.35; }
+      /* botao de liga/desliga sem caixa de selecao (salvamento automatico) */
+      .jcr-icon-btn.jcr-icon-ligado { background: #e8f5e9; border-color: #4CAF50; }
+      .jcr-icon-btn.jcr-icon-desligado { filter: grayscale(1); opacity: 0.45; }
+      /* a barra: tres grupos (banco de dados | este curriculo | exibicao) */
+      .jcr-barra { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+      /* painel recolhido: fica so o cabecalho */
+      #annotation-alert-div.jcr-painel-recolhido #jcr-report-resumo,
+      #annotation-alert-div.jcr-painel-recolhido #jcr-report-content { display: none !important; }
+      #annotation-alert-div.jcr-painel-recolhido #jcr-report-header { margin-bottom: 0 !important; }
+      .jcr-barra .jcr-sep { width: 1px; height: 20px; background: #cfd6de; margin: 0 5px; }
+      #jcr-db-tools-mount { display: inline-flex; align-items: center; gap: 4px; }
+      ${PAGINA.painelCompacto ? `
+      /* painel compacto (Lattes novo): cabe na coluna do curriculo, de 800 px */
+      #annotation-alert-div #jcr-report-header { flex-wrap: wrap; gap: 6px; margin-bottom: 10px !important; padding: 8px 10px !important; }
+      #annotation-alert-div #jcr-report-header h2 { font-size: 1.05em !important; }
+      /* o nome ja esta no cartao ao lado; sem ele o cabecalho cabe numa linha */
+      #annotation-alert-div #jcr-report-name { display: none; }
+      #annotation-alert-div #jcr-db-tools-mount button, #annotation-alert-div #jcr-db-tools-mount label { white-space: nowrap; }
+      #annotation-alert-div #jcr-report-content th, #annotation-alert-div #jcr-report-tables td { padding: 5px 4px !important; font-size: 12px; }
+      /* janela estreita: a coluna encolhe; a tabela larga rola dentro do bloco e os botoes quebram de linha */
+      #annotation-alert-div #jcr-report-tables .rodape-cv { margin-top: 6px !important; overflow-x: auto; }
+      #annotation-alert-div #jcr-report-header > div { flex-wrap: wrap; row-gap: 6px; }
+      #annotation-alert-div #jcr-report-tables .jcr-main-header-cell { cursor: pointer; }
+      ` : ''}
     </style>
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 10px; background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border}; border-radius: 4px;">
-      <h2 style="margin: 0; font-size: 1.25em; color: ${COLORS.footerText}; font-weight: bold;">JCR Lattes Report <span id="jcr-report-name" style="color: #326C99; font-weight: normal; margin-left: 5px;">- ${escHtml(nameLink.name)}</span></h2>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <span id="jcr-db-tools-mount" style="display: inline-flex; gap: 8px; margin-right: 10px;"></span>
-        <label class="jcr-icon-toggle" title="Mostrar/Ocultar Tabelas e Gráficos do relatório">
+    <div id="jcr-report-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 10px; background-color: ${COLORS.backgroundHeader}; border-bottom: 2px solid ${COLORS.border}; border-radius: 4px;">
+      <h2 id="jcr-painel-toggle" title="Recolher ou expandir o painel do JCR Lattes" style="margin: 0; font-size: 1.25em; color: ${COLORS.footerText}; font-weight: bold; cursor: pointer; user-select: none;"><span id="jcr-painel-seta" style="display: inline-block; width: 18px;">${setaRecolher(jcrPainelRecolhido)}</span>JCR Lattes Report <span id="jcr-report-name" style="color: #326C99; font-weight: normal; margin-left: 5px;">- ${escHtml(nameLink.name)}</span></h2>
+      <div class="jcr-barra">
+        <!-- 1. banco de dados (preenchido por JCRDBTools.renderUI): abrir, salvar, salvamento automatico -->
+        <span id="jcr-db-tools-mount"></span>
+        <span class="jcr-sep"></span>
+        <!-- 2. este curriculo -->
+        <button id="btn-view-cv-report" class="jcr-icon-btn" title="Abrir o relatório individual deste currículo numa nova aba">📊</button>
+        <button id="btn-save-cv-html" class="jcr-icon-btn" title="Baixar uma cópia deste currículo em arquivo HTML (pasta Downloads/lattesData)">💾</button>
+        <span class="jcr-sep"></span>
+        <!-- 3. o que aparece na pagina -->
+        <label class="jcr-icon-toggle" title="Mostrar ou ocultar as tabelas e os gráficos deste painel">
           <input type="checkbox" id="toggle-disable-report">
           <span class="jcr-icon-face">📈</span>
         </label>
-        <label class="jcr-icon-toggle" title="Mostrar/Ocultar Anotações Adicionais (fator de impacto, autoria, separadores de ano)">
+        <label class="jcr-icon-toggle" title="Mostrar ou ocultar as anotações nos artigos (fator de impacto, autoria, separadores de ano)">
           <input type="checkbox" id="toggle-disable-extra-info">
           <span class="jcr-icon-face">🏷️</span>
         </label>
-        <button id="btn-view-cv-report" class="jcr-icon-btn" title="Abrir relatório individual deste CV">📊</button>
-        <button id="btn-save-cv-html" class="jcr-icon-btn" title="Salvar este CV completo num arquivo HTML (Downloads/lattesData/)">💾</button>
-        <button id="btn-jcr-opcoes" class="jcr-icon-btn" title="Opções: limiares de JCR, período customizado, rank do autor, cores e filtros">⚙️</button>
+        <button id="btn-jcr-opcoes" class="jcr-icon-btn" title="Opções: limiares de JCR, período customizado, cores e filtros">⚙️</button>
       </div>
     </div>
   `;
@@ -1169,7 +1266,7 @@ function montarPainelDoCv(stats, startYearRecent, startYearLast10, startYearCust
   // apaga o mount, e o re-render dos botões é assíncrono (loadSettings/RID).
   // Sem isso, os ícones somem/reaparecem a cada reprocessamento e a página "treme".
 
-  return headerHTML + `
+  return headerHTML + (PAGINA.painelCompacto ? resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) : '') + `
     <div id="jcr-report-content">
       <div id="jcr-report-tables">
          ${tableHTML}
@@ -1195,7 +1292,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       id: 'annotation-alert-div',
       // color-scheme: o Lattes novo declara esquema escuro quando o sistema está em modo
       // escuro, e os campos do painel (fundo branco) ficariam pretos com texto invisível.
-      style: `margin-bottom: 10px; border-bottom: 4px double ${COLORS.alertBorder}; padding-bottom: 10px; color-scheme: light;`
+      style: PAGINA.estiloDoPainel || `margin-bottom: 10px; border-bottom: 4px double ${COLORS.alertBorder}; padding-bottom: 10px; color-scheme: light;`
     });
     // onde o painel entra depende do formato da pagina (ver PAGINA)
     if (!PAGINA.inserirPainel(alertDiv)) {
@@ -1207,6 +1304,17 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   const prevDbMount = document.getElementById('jcr-db-tools-mount');
 
   alertDiv.innerHTML = painelHTML;
+  alertDiv.classList.toggle('jcr-painel-recolhido', jcrPainelRecolhido);
+  const painelToggle = alertDiv.querySelector('#jcr-painel-toggle');
+  if (painelToggle) {
+    painelToggle.addEventListener('click', () => {
+      jcrPainelRecolhido = !jcrPainelRecolhido;
+      alertDiv.classList.toggle('jcr-painel-recolhido', jcrPainelRecolhido);
+      const seta = alertDiv.querySelector('#jcr-painel-seta');
+      if (seta) seta.innerHTML = setaRecolher(jcrPainelRecolhido);
+      saveSettings();
+    });
+  }
 
   if (prevDbMount && prevDbMount.childNodes.length > 0) {
     const newMount = alertDiv.querySelector('#jcr-db-tools-mount');
@@ -1373,11 +1481,11 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       if (tbody) {
         if (tbody.style.display === 'none') {
           tbody.style.display = '';
-          btn.innerText = '[-]';
+          btn.innerHTML = setaRecolher(false);
           jcrTablesState[targetId] = false;
         } else {
           tbody.style.display = 'none';
-          btn.innerText = '[+]';
+          btn.innerHTML = setaRecolher(true);
           jcrTablesState[targetId] = true;
         }
 
@@ -1393,12 +1501,16 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
             let totalCols = parseInt(headerCell.getAttribute('data-total-cols'));
             // Special case for main table (publicacoes) where totalCols varies by settings
             if (targetId === 'publicacoes') {
-              totalCols = 18;
+              totalCols = 15;
             }
             headerCell.setAttribute('colspan', isCollapsed ? totalCols : 1);
           }
           if (subRow) subRow.style.display = isCollapsed ? 'none' : '';
           extraCells.forEach(cell => cell.style.display = isCollapsed ? 'none' : '');
+        }
+        if (targetId === 'citacoes') {
+          const ridTabela = document.getElementById('rid-stats-table');
+          if (ridTabela) ridTabela.style.display = jcrTablesState.citacoes ? 'none' : '';
         }
 
         saveSettings();
@@ -1696,6 +1808,9 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
               
               const ridHtml = window.JCRReportUtils.generateRidTableHTML(ridStats, nameLink.researcherIdLink, isUnlocked);
               citationContainer.insertAdjacentHTML('afterend', ridHtml);
+              // a tabela do ResearcherID faz parte do bloco "Citações": aparece e some com ele
+              const ridTabela = document.getElementById('rid-stats-table');
+              if (ridTabela) ridTabela.style.display = jcrTablesState.citacoes ? 'none' : '';
           }
       };
 
@@ -1708,6 +1823,14 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
               }
           } else if (!window.isFetchingRidStats) {
               window.isFetchingRidStats = true;
+
+              // Os botoes do banco de dados entram ja, sem esperar o ResearcherID (a busca
+              // la pode levar dezenas de segundos). init() sabe que o RID esta pendente: um
+              // CV novo com salvamento automatico so e gravado quando ele chegar, e o init
+              // de novo, com os dados do RID, acontece na remontagem ao fim da busca.
+              if (typeof window.JCRDBTools !== 'undefined') {
+                  window.JCRDBTools.init('jcr-db-tools-mount', nameLink, stats, lattesInfo, null);
+              }
               
               // Safety timeout: If background doesn't respond in 45s, reset the flag
               const ridTimeout = setTimeout(() => {
@@ -1851,7 +1974,7 @@ async function buildStandaloneCvHtml() {
   clone.querySelectorAll('.jcr-lattes-year-separator[data-collapsed="true"]').forEach(sep => {
     sep.setAttribute('data-collapsed', 'false');
     const icone = sep.querySelector('.jcr-collapse-icon');
-    if (icone) icone.textContent = '[-]';
+    if (icone) icone.innerHTML = setaRecolher(false);
   });
 
   // Os icones de link do Lattes (DOI, INPI, curriculo de coautor) sao sprites baixados
@@ -2107,7 +2230,7 @@ function setupCollapsibleSections(sections) {
       };
       conteudo.forEach(marcar);
       if (section.footerElement) marcar(section.footerElement);
-      icone.textContent = recolhido ? '[+]' : '[-]';
+      icone.innerHTML = setaRecolher(recolhido);
     };
 
     aplicar(jcrSectionsCollapsed[section.id] === true);
@@ -2207,7 +2330,7 @@ function setupGeneralInfoGroup(sections) {
       marcar(sec.element, recolhido);
       marcar(sec.footerElement, recolhido);
     });
-    if (icone) icone.textContent = recolhido ? '[+]' : '[-]';
+    if (icone) icone.innerHTML = setaRecolher(recolhido);
   }
 
   aplicarGrupo(jcrSectionsCollapsed[JCR_GRUPO_INFO_ID] === true);

@@ -20,6 +20,7 @@ Principais Funcionalidades:
 * Segunda Linha de Gráficos Visualmente Rica:
   - Orientações por Ano: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde-azulado, Doutorado em Azul, Mestrado em Laranja), complementado por colunas especiais ao final para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
 * Tabelas Estatísticas Dinâmicas: Tabelas com Somatórios (Sigma) e Médias (Mu) automáticas para períodos de 5 anos, 10 anos ou intervalos customizados (ex: triênio/quadriênio de avaliação).
+* Painel Compacto na Nova Plataforma Lattes: Um resumo em cartões (artigos, soma e média do JCR, índice H, citações, orientações e patentes) fica sempre à vista ao lado do cartão do pesquisador; tabelas e gráficos abrem com um clique, e a extensão lembra quais você deixou abertos.
 * Citação e Índice H: Consolidação automática do Índice H e número de citações para Web of Science e Scopus.
 
 2. Gerenciamento e Banco de Dados Local:

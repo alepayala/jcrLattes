@@ -1798,7 +1798,8 @@ window.JCRDBTools = {
                 chrome.storage.local.get(this.settingsKey, (result) => {
                     if (chrome.runtime.lastError) { resolve(); return; }
                     if (result && result[this.settingsKey]) {
-                        this.isUnlocked = result[this.settingsKey].isUnlocked !== undefined ? result[this.settingsKey].isUnlocked : true;
+                        // as ferramentas do banco nao se ocultam mais; um false gravado por versao antiga e ignorado
+                        this.isUnlocked = true;
                         this.autoSave = result[this.settingsKey].autoSave !== undefined ? result[this.settingsKey].autoSave : false;
                         this.exportIncludeHtml = result[this.settingsKey].exportIncludeHtml !== false;
                         const salvos = result[this.settingsKey].reportCollapsed;
@@ -2496,20 +2497,6 @@ window.JCRDBTools = {
 
             if (!silent) this.showToast(isProcessoOnly ? 'Banco de Propostas e CVs do piccTools limpo com sucesso!' : 'Banco de Dados de CVs e Propostas limpo com sucesso!');
         }
-    },
-
-    promptUnlock: function () {
-        this.isUnlocked = true;
-        this.saveSettings();
-        const mount = document.getElementById('jcr-db-tools-mount');
-        if (mount) this.renderUI('jcr-db-tools-mount');
-    },
-
-    lock: function () {
-        this.isUnlocked = false;
-        this.saveSettings();
-        const mount = document.getElementById('jcr-db-tools-mount');
-        if (mount) this.renderUI('jcr-db-tools-mount');
     },
 
     toggleAutoSave: function () {
@@ -5173,9 +5160,9 @@ window.JCRDBTools = {
                         <th colspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center;">Impacto (Σ)</th>
                         <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgTotal};">Autoria</th>
                         <th rowspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center;"${window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS ? '' : ` title="${window.JCRReportUtils.TEXTO_DESABILITADO}"`}>GC</th>
-                        <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgHigh};">Alto (≥${state.highJcr})</th>
-                        <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgMid};">Médio</th>
-                        <th colspan="3" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgLow};">Baixo (<${state.lowJcr})</th>
+                        <th colspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgHigh};">Alto (≥${state.highJcr})</th>
+                        <th colspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgMid};">Médio</th>
+                        <th colspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgLow};">Baixo (<${state.lowJcr})</th>
                         <th rowspan="2" style="padding: 8px; border-left: 1px solid #ccc; text-align: center; background-color: ${bgNone};">Sem JCR</th>
                     </tr>
                     <tr style="background-color: ${COLORS.backgroundSubHeader}; border-bottom: 1px solid ${COLORS.border}; font-size: 0.85em;">
@@ -5186,15 +5173,12 @@ window.JCRDBTools = {
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgTotal};"${window.JCRReportUtils.MEDIA_DE_AUTORES_ATIVA ? '' : ` title="${window.JCRReportUtils.TEXTO_DESABILITADO}"`}>N Aut</th>
                         
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgHigh};">Qtd</th>
-                        <th style="padding: 4px; text-align: center; background-color: ${bgHigh};">Soma</th>
                         <th style="padding: 4px; text-align: center; background-color: ${bgHigh};">Média</th>
                         
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgMid};">Qtd</th>
-                        <th style="padding: 4px; text-align: center; background-color: ${bgMid};">Soma</th>
                         <th style="padding: 4px; text-align: center; background-color: ${bgMid};">Média</th>
                         
                         <th style="padding: 4px; border-left: 1px solid #eee; text-align: center; background-color: ${bgLow};">Qtd</th>
-                        <th style="padding: 4px; text-align: center; background-color: ${bgLow};">Soma</th>
                         <th style="padding: 4px; text-align: center; background-color: ${bgLow};">Média</th>
                     </tr>
                 </thead>
@@ -7559,55 +7543,34 @@ window.JCRDBTools = {
         setTimeout(() => { toast.style.opacity = '0'; }, 3000);
     },
 
+    // Botoes do banco de dados no cabecalho do painel do CV. Sao icones do mesmo tamanho
+    // e estilo dos demais botoes do cabecalho (classes .jcr-icon-btn / .jcr-icon-toggle,
+    // definidas no <style> do painel, em content.js). Nao ha mais "ocultar ferramentas":
+    // o icone do arquivo abre o banco.
     renderUI: function (mountId) {
         const mount = document.getElementById(mountId);
         if (!mount) return;
 
-        // Evita re-render se a UI já reflete o estado atual: reescrever o innerHTML
-        // a cada reprocessamento faz os botões piscarem e o layout "tremer".
-        const alreadyUnlocked = !!mount.querySelector('#jcr-priv-save');
-        const alreadyLocked   = !!mount.querySelector('#jcr-priv-unlock-btn');
+        // Evita re-render se a UI ja reflete o estado atual: reescrever o innerHTML
+        // a cada reprocessamento faz os botoes piscarem e o layout "tremer".
         const autoSaveBtn = mount.querySelector('#jcr-priv-autosave');
-        const autoSaveMatches = !!autoSaveBtn && autoSaveBtn.innerText.includes(this.autoSave ? 'ON' : 'OFF');
-        if ((this.isUnlocked && alreadyUnlocked && autoSaveMatches) || (!this.isUnlocked && alreadyLocked)) return;
+        if (autoSaveBtn && autoSaveBtn.getAttribute('data-ligado') === String(!!this.autoSave)) return;
 
-        // Base styles for buttons
-        const btnStyle = 'cursor:pointer; font-size:0.85em; padding:3px 8px; border:1px solid #ccc; border-radius:4px; background:#fff; color:#333; display:inline-flex; align-items:center; height:24px; font-weight:500;';
-        
-        // Remove any existing bottom unlock button (for cleanup during transition)
-        let bottomUnlock = document.getElementById('jcr-bottom-unlock-btn');
-        if (bottomUnlock) {
-            bottomUnlock.remove();
-        }
+        // sobra de versoes antigas
+        const bottomUnlock = document.getElementById('jcr-bottom-unlock-btn');
+        if (bottomUnlock) bottomUnlock.remove();
 
-        if (!this.isUnlocked) {
-            // Locked UI - Place padlock directly in the mount
-            mount.innerHTML = `
-                <button id="jcr-priv-unlock-btn" style="${btnStyle} border-color:transparent; background:transparent; font-size:1.8em; height:auto; padding: 0 5px;" title="Ativar Ferramentas de Banco de Dados">
-                    🗄️
-                </button>
-            `;
-            document.getElementById('jcr-priv-unlock-btn').onclick = () => this.promptUnlock();
-        } else {
-            // Unlocked UI
-            const autoSaveColor = this.autoSave ? '#e8f5e9' : '#fff';
-            const autoSaveBorder = this.autoSave ? '#4CAF50' : '#ccc';
-            
-            mount.innerHTML = `
-                <div style="display:flex; gap:5px; align-items:center; background:#f0f7ff; padding:2px 5px; border-radius:6px; border:1px solid #bbdefb;">
-                    <button id="jcr-priv-autosave" style="${btnStyle} background:${autoSaveColor}; border-color:${autoSaveBorder};" title="Salvar automaticamente novos currículos">
-                        ${this.autoSave ? '✅ Auto-Save: ON' : '⏸️ Auto-Save: OFF'}
-                    </button>
-                    <button id="jcr-priv-save" style="${btnStyle}" title="Salvar/Atualizar CV atual no Banco">💾 Salvar</button>
-                    <button id="jcr-priv-view" style="${btnStyle} border-color:#2196F3; color:#1976D2;" title="Visualizar Banco de CVs">👁️ View DB</button>
-                    <button id="jcr-priv-lock" style="${btnStyle} border-color:transparent; background:transparent;" title="Ocultar ferramentas">🗄️</button>
-                </div>
-            `;
+        const dicaAuto = this.autoSave
+            ? 'Salvamento automático LIGADO: todo currículo que você abrir é salvo ou atualizado no banco de dados local. Clique para desligar.'
+            : 'Salvamento automático DESLIGADO: o currículo só entra no banco quando você clicar em "Salvar no banco". Clique para ligar.';
+        mount.innerHTML = `
+            <button id="jcr-priv-view" class="jcr-icon-btn" title="Abrir o banco de dados local: currículos salvos, grupos e relatórios">🗄️</button>
+            <button id="jcr-priv-save" class="jcr-icon-btn" title="Salvar este currículo no banco de dados local (ou atualizar, se ele já estiver lá)">📥</button>
+            <button id="jcr-priv-autosave" class="jcr-icon-btn${this.autoSave ? ' jcr-icon-ligado' : ' jcr-icon-desligado'}" data-ligado="${!!this.autoSave}" title="${dicaAuto}">🔁</button>
+        `;
 
-            document.getElementById('jcr-priv-autosave').onclick = () => this.toggleAutoSave();
-            document.getElementById('jcr-priv-save').onclick = () => this.saveCurrentCV();
-            document.getElementById('jcr-priv-view').onclick = () => this.viewDB();
-            document.getElementById('jcr-priv-lock').onclick = () => this.lock();
-        }
+        document.getElementById('jcr-priv-autosave').onclick = () => this.toggleAutoSave();
+        document.getElementById('jcr-priv-save').onclick = () => this.saveCurrentCV();
+        document.getElementById('jcr-priv-view').onclick = () => this.viewDB();
     }
 };

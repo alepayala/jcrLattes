@@ -538,6 +538,8 @@ window.JCRReportUtils = {
     ].join(String.fromCharCode(10));
   },
 
+  // Cada faixa de JCR (alto, médio, baixo) mostra quantidade e média; a soma do JCR
+  // aparece só no total. São 15 colunas — quem monta o cabeçalho tem de acompanhar.
   generateRow: function(label, data) {
     const bgTotal = '#f8f9fa';
     const bgHigh = this.getSoftColor(this.COLORS.highJcr, 0.85);
@@ -560,15 +562,12 @@ window.JCRReportUtils = {
         <td style="padding: 8px; border-left: 1px solid #ccc; text-align: center;"${this.GRANDES_COLABORACOES_ATIVAS ? '' : ` title="${this.TEXTO_DESABILITADO}"`}><strong>${this.GRANDES_COLABORACOES_ATIVAS ? data.total.gcCount : '—'}</strong></td>
 
         <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgHigh};"><strong>${data.high.count}</strong></td>
-        <td style="padding: 8px; text-align: center; background-color: ${bgHigh};">${this.formatNum(data.high.sum)}</td>
         <td style="padding: 8px; text-align: center; background-color: ${bgHigh};">${this.getAvg(data.high.sum, data.high.count)}</td>
         
         <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgMid};"><strong>${data.mid.count}</strong></td>
-        <td style="padding: 8px; text-align: center; background-color: ${bgMid};">${this.formatNum(data.mid.sum)}</td>
         <td style="padding: 8px; text-align: center; background-color: ${bgMid};">${this.getAvg(data.mid.sum, data.mid.count)}</td>
         
         <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgLow};"><strong>${data.low.count}</strong></td>
-        <td style="padding: 8px; text-align: center; background-color: ${bgLow};">${this.formatNum(data.low.sum)}</td>
         <td style="padding: 8px; text-align: center; background-color: ${bgLow};">${this.getAvg(data.low.sum, data.low.count)}</td>
         
         <td style="padding: 8px; border-left: 1px solid #eee; text-align: center; background-color: ${bgNone};"><strong>${data.noJcr}</strong></td>
