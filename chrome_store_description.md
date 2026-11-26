@@ -67,7 +67,7 @@ Como Usar:
 5. ⚠️ Atenção e Avisos Importantes:
 * Extração de Dados: O JCRLattes depende da formatação original do currículo Lattes. Preenchimentos atípicos ou informações inseridas fora do padrão pelo autor podem gerar inconsistências na extração.
 * Carregamento Dinâmico: Algumas informações do Lattes são carregadas de forma assíncrona. A extensão precisa aguardar essas atualizações em tempo real, sendo suscetível a oscilações e lentidões na conexão com os servidores do CNPq.
-* Dados do ResearcherID: As requisições de citações e publicações para o ResearcherID podem falhar dependendo das restrições de acesso da base de dados. Preferencialmente, certifique-se de estar logado na Web of Science ou de utilizar uma rede com acesso institucional liberado (CAFe).
+* Dados do ResearcherID: As requisições de citações e publicações para o ResearcherID podem falhar dependendo das restrições de acesso da base de dados. Preferencialmente, certifique-se de estar logado na Web of Science ou de utilizar uma rede com acesso institucional liberado (CAFe). A tabela mostra a data da última atualização, e os dados não são buscados de novo quando o currículo é relido no mesmo dia.
 * Relatórios em Grupo: A geração de relatórios coletivos, especialmente a deduplicação de produções, pode exigir muito processamento. Caso seu navegador mostre uma notificação alertando lentidão ou inatividade na página, selecione "Aguardar" e tenha paciência até a conclusão.
 
 --------------------------------------------------

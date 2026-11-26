@@ -3,6 +3,26 @@ const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert');
 const B = require('./helpers/load.js').banco();
 
+// Dados do ResearcherID buscados hoje nao sao buscados de novo: a decisao e esta.
+describe('_ehHoje', () => {
+    const agora = new Date(2026, 10, 25, 15, 30);   // 25/11/2026, 15h30, hora local
+    test('mesmo dia, em qualquer hora', () => {
+        assert.strictEqual(B._ehHoje(new Date(2026, 10, 25, 0, 5).toISOString(), agora), true);
+        assert.strictEqual(B._ehHoje(new Date(2026, 10, 25, 23, 50).toISOString(), agora), true);
+    });
+    test('ontem, amanha e o mesmo dia de outro mes ou ano nao contam', () => {
+        assert.strictEqual(B._ehHoje(new Date(2026, 10, 24, 23, 59).toISOString(), agora), false);
+        assert.strictEqual(B._ehHoje(new Date(2026, 10, 26, 0, 1).toISOString(), agora), false);
+        assert.strictEqual(B._ehHoje(new Date(2026, 9, 25, 15, 30).toISOString(), agora), false);
+        assert.strictEqual(B._ehHoje(new Date(2025, 10, 25, 15, 30).toISOString(), agora), false);
+    });
+    test('sem data ou data invalida (registro antigo) nao e hoje', () => {
+        assert.strictEqual(B._ehHoje('', agora), false);
+        assert.strictEqual(B._ehHoje(undefined, agora), false);
+        assert.strictEqual(B._ehHoje('nao e data', agora), false);
+    });
+});
+
 describe('_chaveMembro', () => {
     test('ignora caixa e espacos em volta', () => {
         assert.strictEqual(B._chaveMembro('  Maria DA Silva '), 'maria da silva');

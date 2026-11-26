@@ -1735,6 +1735,8 @@ window.JCRDBTools = {
             ridSumOfTimesCitedWithoutSelf: ridStats?.sumOfTimesCitedWithoutSelf !== undefined && ridStats.sumOfTimesCitedWithoutSelf !== null ? ridStats.sumOfTimesCitedWithoutSelf : '',
             ridBeamplotPercentile: ridStats?.beamplotPercentile !== undefined && ridStats.beamplotPercentile !== null ? ridStats.beamplotPercentile : '',
             ridStats: ridStats || {},
+            // quando os dados do ResearcherID foram buscados (ISO); '' se nunca foram
+            ridUpdatedAt: ridStats ? (ridStats.atualizadoEm || new Date().toISOString()) : '',
             supervisions: stats.supervisions || {},
             patents: stats.all.patents || { total: 0, statusCounts: {} },
             totalPatents: stats.all.patents?.total || 0,
@@ -2104,7 +2106,7 @@ window.JCRDBTools = {
             const ridFields = [
                 'ridHIndex', 'ridPublications', 'ridWosPublications', 'ridSumOfTimesCited', 
                 'ridSumOfTimesCitedWithoutSelf', 'ridBeamplotPercentile', 
-                'ridStats'
+                'ridStats', 'ridUpdatedAt'
             ];
 
             // Define JCR/WoS fields that we want to protect if the new extraction results in zeros
@@ -2227,6 +2229,29 @@ window.JCRDBTools = {
             if (i < validos.length - 1) await new Promise(res => setTimeout(res, 400));
         }
         return r;
+    },
+
+    // A data ISO cai no dia de hoje (no fuso do navegador)?
+    _ehHoje: function (iso, agora) {
+        if (!iso) return false;
+        const d = new Date(iso), h = agora || new Date();
+        if (isNaN(d.getTime())) return false;
+        return d.getFullYear() === h.getFullYear() && d.getMonth() === h.getMonth() && d.getDate() === h.getDate();
+    },
+
+    // Dados do ResearcherID ja gravados HOJE para este pesquisador, ou null. A busca no
+    // ResearcherID abre uma aba oculta no Web of Science e leva dezenas de segundos:
+    // nao vale repeti-la a cada leitura do curriculo no mesmo dia.
+    ridGravadoHoje: async function (name, lattesId) {
+        try {
+            const cv = this._acharPesquisador(await this.getDB(false), name, lattesId, c => !c.isProcesso);
+            if (!cv || !this._ehHoje(cv.ridUpdatedAt)) return null;
+            const r = cv.ridStats;
+            if (!r || r.hIndex === undefined || r.hIndex === null) return null;
+            return Object.assign({}, r, { atualizadoEm: cv.ridUpdatedAt });
+        } catch (e) {
+            return null;
+        }
     },
 
     showAlert: function (msg, targetTab = null) {
@@ -5203,7 +5228,7 @@ window.JCRDBTools = {
         const isGroup = cvData.name.startsWith('Grupo:');
         const citationTableHTML = window.JCRReportUtils.generateCitationTableHTML(stats);
         const ridTableHTML = (cvData.ridStats && cvData.researcherIdLink && !isGroup) ? 
-            window.JCRReportUtils.generateRidTableHTML(cvData.ridStats, cvData.researcherIdLink, this.isUnlocked) : '';
+            window.JCRReportUtils.generateRidTableHTML(cvData.ridStats, cvData.researcherIdLink, this.isUnlocked, cvData.ridUpdatedAt) : '';
         const supervisionTableHTML = window.JCRReportUtils.generateSupervisionTableHTML(stats, state.customYears);
         const patentTableHTML = window.JCRReportUtils.generatePatentTableHTML(stats, state.customYears);
         const eventTableHTML = window.JCRReportUtils.generateEventTableHTML(stats, state.customYears);

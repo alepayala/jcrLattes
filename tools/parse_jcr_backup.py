@@ -57,6 +57,12 @@ class CVData:
     id_periods: Dict[str, Dict[str, Optional[int]]] = field(default_factory=dict)
 
     @property
+    def rid_updated_at(self) -> str:
+        """Quando os dados do ResearcherID foram buscados (ISO, campo ridUpdatedAt); '' se
+        nunca foram ou se o registro e anterior a esse campo."""
+        return str(self.raw_data.get('ridUpdatedAt') or '')
+
+    @property
     def key(self) -> str:
         """Identificador do pesquisador: o ID Lattes; sem ele, o nome normalizado."""
         return f"id:{self.lattes_id}" if self.lattes_id else f"nm:{normalize_name(self.name)}"

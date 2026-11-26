@@ -1790,6 +1790,22 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
                   window.JCRDBTools.init('jcr-db-tools-mount', nameLink, stats, lattesInfo, null);
               }
               
+              // Se o ResearcherID deste pesquisador ja foi buscado hoje (data gravada no
+              // banco), reaproveita: a busca abre uma aba oculta no Web of Science e nao
+              // vale repeti-la a cada leitura do curriculo no mesmo dia.
+              const idLattesDoCv = ((nameLink.link || '').match(/\b\d{16}\b/) || [''])[0];
+              const jaBuscadoHoje = (typeof window.JCRDBTools !== 'undefined' && typeof window.JCRDBTools.ridGravadoHoje === 'function')
+                  ? window.JCRDBTools.ridGravadoHoje(nameLink.name, idLattesDoCv) : Promise.resolve(null);
+              jaBuscadoHoje.then((gravado) => {
+              if (gravado) {
+                  console.log('[RID Extraction Content Script] ResearcherID já atualizado hoje; usando os dados do banco.');
+                  window.cachedRidStats = gravado;
+                  window.isFetchingRidStats = false;
+                  hideLoading();
+                  processLattesPage(nameLink);
+                  return;
+              }
+
               // Safety timeout: If background doesn't respond in 45s, reset the flag
               const ridTimeout = setTimeout(() => {
                   if (window.isFetchingRidStats) {
@@ -1810,7 +1826,8 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
                       console.log(`[RID Extraction Content Script] Received response from background:`, response);
                       window.isFetchingRidStats = false;
                       if (response && response.success) {
-                          window.cachedRidStats = response.stats;
+                          // a data da busca acompanha os dados e vai para o banco (ridUpdatedAt)
+                          window.cachedRidStats = Object.assign({}, response.stats, { atualizadoEm: new Date().toISOString() });
                       } else {
                           console.warn(`[RID Extraction Content Script] Fetch failed or no success flag:`, response);
                           window.cachedRidStats = { _failed: true };
@@ -1824,6 +1841,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
                       processLattesPage(nameLink);
                   }
               );
+              });
           } else {
               // Currently fetching in the background. Init JCRDBTools so UI is rendered.
               // It will be re-initialized when the fetch completes.

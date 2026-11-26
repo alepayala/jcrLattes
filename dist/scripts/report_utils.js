@@ -1793,8 +1793,13 @@ window.JCRReportUtils = {
     `;
   },
 
-  generateRidTableHTML: function(ridStats, researcherIdLink, isUnlocked) {
+  // atualizadoEm: quando os dados foram buscados no ResearcherID (ISO); na falta dele
+  // vale ridStats.atualizadoEm. Registros antigos nao tem a data e saem sem ela.
+  generateRidTableHTML: function(ridStats, researcherIdLink, isUnlocked, atualizadoEm) {
     if (!ridStats || !researcherIdLink) return '';
+
+    const quando = new Date(atualizadoEm || ridStats.atualizadoEm || '');
+    const dataRid = isNaN(quando.getTime()) ? '' : quando.toLocaleDateString('pt-BR');
 
     const safeLink = this._safeUrl(researcherIdLink);
     const ridId = this._esc(String(researcherIdLink).split('/').pop());
@@ -1804,7 +1809,7 @@ window.JCRReportUtils = {
         <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
           <thead>
             <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
-              <th style="padding: 8px; text-align: left;" title="Web of Science ResearcherID Profile">ResearcherID</th>
+              <th style="padding: 8px; text-align: left;" title="Web of Science ResearcherID Profile">ResearcherID${dataRid ? ` <span style="font-weight: normal; font-size: 0.9em;" title="Data em que estes dados foram buscados no ResearcherID">(atualizado em ${dataRid})</span>` : ''}</th>
               <th style="padding: 8px; text-align: center;" title="Web of Science H-Index">H-Index</th>
               <th style="padding: 8px; text-align: center;" title="Web of Science Core Collection publications">CC Pubs</th>
               <th style="padding: 8px; text-align: center;" title="Publications indexed in Web of Science">WoS Pubs</th>
