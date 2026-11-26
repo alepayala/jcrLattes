@@ -114,13 +114,14 @@ describe('_titulacaoDoXml', () => {
 });
 
 describe('_citacoesDeclaradas', () => {
-    test('WoS com indice h no campo proprio, Scopus com o h no argumento', () => {
+    // O "argumento" e texto livre do pesquisador: um "H-Index: N" escrito ali nao e lido.
+    test('indice h so do campo proprio; o texto do argumento nao conta', () => {
         const r = API._citacoesDeclaradas([
             { codBaseBibliog: 1, nroCitacoes: 5237, nroIndiceH: 35 },
             { codBaseBibliog: 4, nroCitacoes: 6458, txtArgumento: 'H-Index: 41 - endereco' },
             { codBaseBibliog: 3, nroCitacoes: 5186, nroIndiceH: null, txtArgumento: 'H-Index: 34 - AU-ID(1)' }
         ]);
-        assert.deepStrictEqual(r, { wosCitations: 5237, wosHIndex: 35, scopusCitations: 5186, scopusHIndex: 34 });
+        assert.deepStrictEqual(r, { wosCitations: 5237, wosHIndex: 35, scopusCitations: 5186, scopusHIndex: '' });
     });
     test('sem resposta, tudo vazio', () => {
         assert.deepStrictEqual(API._citacoesDeclaradas(null), { wosCitations: '', wosHIndex: '', scopusCitations: '', scopusHIndex: '' });

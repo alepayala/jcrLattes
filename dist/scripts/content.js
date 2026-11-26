@@ -950,12 +950,15 @@ function montarAreaDeGraficos(togglesHTML, lattesInfo, stats, highJcr, lowJcr) {
 // cartao traz o total da carreira e, embaixo, o dos ultimos 5 anos ou o dado vizinho.
 function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) {
   const U = window.JCRReportUtils;
-  const tudo = stats.all, cinco = stats.recent, dec = stats.declaredCitations || {};
+  const tudo = stats.all, cinco = stats.recent;
   const concluidas = (tipo) => { const l = stats.supervisions && stats.supervisions.concluded && stats.supervisions.concluded[tipo]; return Array.isArray(l) ? l.length : 0; };
   const periodo = `5 anos (${startYearRecent}–${maxYear})`;
-  // citacoes e indice h: o declarado no curriculo, quando ha; senao o calculado dos artigos
-  const hWos = dec.wosHIndex || tudo.citations.wos.hIndex, hScopus = dec.scopusHIndex || tudo.citations.scopus.hIndex;
-  const cWos = dec.wosCitations || tudo.citations.wos.sum, cScopus = dec.scopusCitations || tudo.citations.scopus.sum;
+  // Citacoes e indice H: sempre os CALCULADOS das citacoes que o Lattes traz, direto das
+  // bases, em cada artigo da lista. Os "declarados" dependem de o pesquisador preencher
+  // os indicadores de Scopus e ResearcherID, o que muitos nao fazem; continuam na tabela
+  // "Citacoes", na linha "Declarado".
+  const hWos = tudo.citations.wos.hIndex, hScopus = tudo.citations.scopus.hIndex;
+  const cWos = tudo.citations.wos.sum, cScopus = tudo.citations.scopus.sum;
   const rank = U.rankAlvoEfetivo(targetAuthorRank);
   const emAndamento = (stats.supervisions && stats.supervisions.inCourse) || {};
   const totalEmAndamento = Object.values(emAndamento).reduce((s, n) => s + (n || 0), 0);
@@ -969,8 +972,8 @@ function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank) {
     ['Soma do JCR', U.formatNum(tudo.total.sum), `${periodo}: ${U.formatNum(cinco.total.sum)}`, 'Soma dos fatores de impacto dos artigos'],
     ['JCR médio', U.getAvg(tudo.total.sum, tudo.total.countWithJcr), `${periodo}: ${U.getAvg(cinco.total.sum, cinco.total.countWithJcr)}`, 'Soma do JCR dividida pelos artigos com JCR'],
     [`JCR alto (≥ ${stats.highJcr})`, tudo.high.count, `${periodo}: ${cinco.high.count}`, 'Artigos na faixa alta de fator de impacto'],
-    ['Índice H (WoS)', hWos, `Scopus: ${hScopus}`, 'Índice H na Web of Science e na Scopus'],
-    ['Citações (WoS)', cWos, `Scopus: ${cScopus}`, 'Citações na Web of Science e na Scopus'],
+    ['Índice H (WoS)', hWos, `Scopus: ${hScopus}`, 'Índice H calculado a partir das citações de cada artigo da lista (Web of Science e Scopus)'],
+    ['Citações (WoS)', cWos, `Scopus: ${cScopus}`, 'Soma das citações de cada artigo da lista (Web of Science e Scopus)'],
     [`${rank}º autor`, tudo.total.firstAuthorCount, `${periodo}: ${cinco.total.firstAuthorCount}`, `Artigos como ${rank}º autor`],
     U.ULTIMO_AUTOR_ATIVO
       ? ['Último autor', tudo.total.lastAuthorCount, `${periodo}: ${cinco.total.lastAuthorCount}`, 'Artigos como último autor']

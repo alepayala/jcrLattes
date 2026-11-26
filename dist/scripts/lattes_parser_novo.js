@@ -401,6 +401,8 @@
 
     // Citações declaradas (tabela do topo de "Produções"), no formato que
     // extractDeclaredCitations devolve para o formato antigo.
+    // O indice h vem so da coluna "Indice h" da tabela; o que o pesquisador escreve no
+    // campo "Argumento" e texto livre e nao e lido.
     function lerCitacoesDeclaradas(doc) {
         const d = doc || (typeof document !== 'undefined' ? document : null);
         const r = { wosCitations: '', wosHIndex: '', scopusCitations: '', scopusHIndex: '' };
@@ -411,9 +413,8 @@
             if (!base) return;
             const nome = limpo(base.textContent).toLowerCase();
             const num = (rotulo) => { const td = tr.querySelector(`td[data-label="${rotulo}"]`); const n = td ? parseInt(td.textContent, 10) : NaN; return isNaN(n) ? '' : n; };
-            const hDoArgumento = () => { const td = tr.querySelector('td[data-label="Argumento"]'); const m = td ? td.textContent.match(/H-Index:\s*(\d+)/i) : null; return m ? parseInt(m[1], 10) : ''; };
             if (nome.includes('web of science')) { r.wosCitations = num('Citações'); r.wosHIndex = num('Índice h'); }
-            else if (nome.includes('scopus')) { r.scopusCitations = num('Citações'); const h = num('Índice h'); r.scopusHIndex = h !== '' ? h : hDoArgumento(); }
+            else if (nome.includes('scopus')) { r.scopusCitations = num('Citações'); r.scopusHIndex = num('Índice h'); }
         });
         return r;
     }

@@ -188,12 +188,10 @@
     function _citacoesDeclaradas(citacoes) {
         const r = { wosCitations: '', wosHIndex: '', scopusCitations: '', scopusHIndex: '' };
         const num = (v) => { const n = parseInt(v, 10); return isNaN(n) ? '' : n; };
-        const h = (c) => {
-            const direto = num(c.nroIndiceH);
-            if (direto !== '') return direto;
-            const m = String(c.txtArgumento || '').match(/H-Index:\s*(\d+)/i);
-            return m ? parseInt(m[1], 10) : '';
-        };
+        // O indice h declarado e so o do campo proprio. O "argumento" e texto livre do
+        // pesquisador: ler "H-Index: N" dali funcionava para quem o escrevia assim e para
+        // mais ninguem (retirado em 2026-11-26, a pedido).
+        const h = (c) => num(c.nroIndiceH);
         (Array.isArray(citacoes) ? citacoes : []).forEach(c => {
             if (!c) return;
             if (c.codBaseBibliog === BASE_WOS) { r.wosCitations = num(c.nroCitacoes); r.wosHIndex = h(c); }
