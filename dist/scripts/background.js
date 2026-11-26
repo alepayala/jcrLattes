@@ -231,6 +231,44 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
 });
 
+// Volta as opcoes ao padrao, uma unica vez, em quem ATUALIZA de uma versao anterior a
+// RESET_DE_OPCOES_NA_VERSAO: a 2.0 mudou a paleta e os limiares, e opcoes gravadas por
+// versoes antigas (cores, sobretudo) ficavam valendo por cima dos padroes novos. O
+// piccTools tambem volta a ficar desligado. So opcoes sao apagadas: curriculos,
+// propostas e a autorizacao de membro de CA nao sao tocados.
+const RESET_DE_OPCOES_NA_VERSAO = '2.0.1';
+const RESET_DE_OPCOES_CHAVE = 'jcr_reset_opcoes_2_0_1';
+
+// a < b, comparando versoes "x.y.z" numero a numero
+function versaoMenor(a, b) {
+    const pa = String(a || '').split('.').map(n => parseInt(n, 10) || 0);
+    const pb = String(b || '').split('.').map(n => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] || 0) - (pb[i] || 0);
+        if (d !== 0) return d < 0;
+    }
+    return false;
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason !== 'update') return;
+    if (!versaoMenor(details.previousVersion, RESET_DE_OPCOES_NA_VERSAO)) return;
+
+    chrome.storage.local.get([RESET_DE_OPCOES_CHAVE], (result) => {
+        if (result[RESET_DE_OPCOES_CHAVE]) return;
+        // opcoes do painel e dos relatorios (limiares, periodo, cores, filtros, layout):
+        // sem a chave, valem os padroes do codigo
+        chrome.storage.local.remove('jcr_lattes_settings', () => {
+            chrome.storage.local.set({
+                // opcoes das ferramentas do banco: padrao (isUnlocked e sempre true)
+                jcr_private_settings: { isUnlocked: true },
+                jcr_picctools_disabled: true,
+                [RESET_DE_OPCOES_CHAVE]: true
+            });
+        });
+    });
+});
+
  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'download_file' && request.url && request.filename) {
         if (!chrome.downloads) { sendResponse({ success: false, error: 'permissão "downloads" indisponível' }); return; }

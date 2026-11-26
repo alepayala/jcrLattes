@@ -2011,7 +2011,7 @@ async function buildStandaloneCvHtml() {
     // O mesmo vale para o cabecalho do site (idioma, "Entrar"), a trilha de navegacao,
     // compartilhar, copiar o ID e os filtros/ordenacao da lista de producoes.
     clone.querySelectorAll(
-      '.cv-topbar, app-header, app-breadcrumbs, a.skip-link, p-toast, app-share, .btn-copy, .filters-bar'
+      '.cv-topbar, app-header, app-breadcrumbs, a.skip-link, p-toast, app-share, app-actions-bar, .btn-copy, .filters-bar'
     ).forEach(el => el.remove());
     // sem o cabecalho, o curriculo nao fica colado na borda de cima
     const corpoDaCopia = clone.querySelector('body');

@@ -2,11 +2,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnPropostas = document.getElementById('btn-open-propostas');
     const btnCvs = document.getElementById('btn-open-cvs');
 
+    // "Ver Propostas" so aparece com as duas condicoes: autorizacao de membro de CA
+    // valida E piccTools habilitado (jcr_picctools_disabled gravado como false; sem a
+    // chave, vale o padrao, que e desabilitado). Desligado o piccTools, o botao some;
+    // as propostas guardadas continuam no banco.
     const checkCaMemberAuth = () => {
         return new Promise((resolve) => {
             if (typeof chrome === 'undefined' || !chrome.storage?.local) { resolve(false); return; }
-            chrome.storage.local.get(['jcr_ca_member_auth'], (result) => {
+            chrome.storage.local.get(['jcr_ca_member_auth', 'jcr_picctools_disabled'], (result) => {
                 if (chrome.runtime?.lastError || !result || !result['jcr_ca_member_auth']) {
+                    resolve(false);
+                    return;
+                }
+                if (result['jcr_picctools_disabled'] !== false) {
                     resolve(false);
                     return;
                 }
