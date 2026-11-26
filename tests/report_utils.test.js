@@ -1437,3 +1437,25 @@ describe('generateScholarTableHTML', () => {
         assert.strictEqual(R.generateScholarTableHTML({ hIndex: 1 }, ''), '');
     });
 });
+
+// As duas tabelas de base tem a mesma grade: o que e comparavel fica na mesma coluna.
+describe('tabelas do ResearcherID e do Google Scholar alinhadas', () => {
+    const colunas = (h) => [...h.matchAll(/<th [^>]*>(.*?)<\/th>/g)].map(m => m[1].replace(/<[^>]+>/g, '').trim());
+    const celulas = (h) => [...h.matchAll(/<td [^>]*>(.*?)<\/td>/g)].map(m => m[1].replace(/<[^>]+>/g, '').trim());
+    const rid = R.generateRidTableHTML({ hIndex: 35, publications: 310, wosPublications: 344, sumOfTimesCited: 5237, sumOfTimesCitedWithoutSelf: 4800 },
+        'http://www.researcherid.com/rid/A-0000-2000', true);
+    const gs = R.generateScholarTableHTML({ hIndex: 41, i10Index: 180, citations: 6458, publications: 485, completo: true }, 'https://scholar.google.com/citations?user=AbC');
+    test('H-Index, Publicacoes e Citacoes nas mesmas colunas; o especifico a direita', () => {
+        assert.deepStrictEqual(colunas(rid), ['ResearcherID', 'H-Index', 'Publicações', 'Citações', 'Core Collection', 'Citações (sem auto)']);
+        assert.deepStrictEqual(colunas(gs), ['Google Scholar', 'H-Index', 'Publicações', 'Citações', 'i10', '']);
+    });
+    test('no ResearcherID, Publicacoes e o total da Web of Science e Core Collection vem a parte', () => {
+        assert.deepStrictEqual(celulas(rid), ['A-0000-2000', '35', '344', '5237', '310', '4800']);
+        assert.deepStrictEqual(celulas(gs), ['perfil', '41', '485', '6458', '180', '']);
+        assert.match(rid, /title="Publicações na Web of Science Core Collection/);
+    });
+    test('as duas usam a mesma grade de colunas', () => {
+        const grade = (h) => h.match(/<colgroup>.*?<\/colgroup>/)[0];
+        assert.strictEqual(grade(rid), grade(gs));
+    });
+});

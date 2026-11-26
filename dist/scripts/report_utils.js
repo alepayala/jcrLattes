@@ -1802,35 +1802,27 @@ window.JCRReportUtils = {
     return m ? `https://scholar.google.com/citations?user=${m[1]}&hl=en&pagesize=100` : '';
   },
 
-  // Tabela do Google Scholar (índice H, i10, publicações, citações), irmã da do
-  // ResearcherID. stats: { hIndex, i10Index, citations, publications, completo };
-  // "completo" false = a lista de publicações não chegou ao fim (o número é um mínimo).
-  generateScholarTableHTML: function (stats, scholarLink, atualizadoEm) {
-    if (!stats || !scholarLink) return '';
-    const safeLink = this._safeUrl(scholarLink);
-    const quando = new Date(atualizadoEm || stats.atualizadoEm || '');
-    const data = isNaN(quando.getTime()) ? '' : quando.toLocaleDateString('pt-BR');
-    const v = (x) => (x !== null && x !== undefined && x !== '' ? this._esc(String(x)) : '-');
-    const pubs = v(stats.publications) === '-' ? '-' : (stats.completo === false ? '≥ ' : '') + v(stats.publications);
+  // As tabelas do ResearcherID e do Google Scholar têm a MESMA grade de seis colunas,
+  // para os números comparáveis ficarem um embaixo do outro: base | H-Index |
+  // Publicações | Citações | e, à direita, o que é específico de cada base (no
+  // ResearcherID: Core Collection e citações sem autocitações; no Scholar: i10).
+  _gradeDeBases: `<colgroup><col style="width: 30%;"><col style="width: 12%;"><col style="width: 14%;"><col style="width: 14%;"><col style="width: 15%;"><col style="width: 15%;"></colgroup>`,
+
+  _tabelaDeBase: function (id, cabecalhos, celulas) {
+    const th = (c, i) => `<th style="padding: 8px; text-align: ${i === 0 ? 'left' : 'center'};"${c.dica ? ` title="${this._esc(c.dica)}"` : ''}>${c.html}</th>`;
+    const td = (c, i) => `<td style="padding: 8px; text-align: ${i === 0 ? 'left' : 'center'};">${c}</td>`;
     return `
-      <div id="scholar-stats-table" class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
-        <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
+      <div id="${id}" class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
+        <table style="width: 100%; table-layout: fixed; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
+          ${this._gradeDeBases}
           <thead>
             <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
-              <th style="padding: 8px; text-align: left;" title="Perfil do pesquisador no Google Scholar">Google Scholar${data ? ` <span style="font-weight: normal; font-size: 0.9em;" title="Data em que estes dados foram buscados no Google Scholar">(atualizado em ${data})</span>` : ''}</th>
-              <th style="padding: 8px; text-align: center;" title="Índice h no Google Scholar">H-Index</th>
-              <th style="padding: 8px; text-align: center;" title="Índice i10 no Google Scholar: publicações com 10 citações ou mais">i10</th>
-              <th style="padding: 8px; text-align: center;" title="Número de publicações listadas no perfil">Publicações</th>
-              <th style="padding: 8px; text-align: center;" title="Total de citações no Google Scholar">Citações</th>
+              ${cabecalhos.map(th).join('')}
             </tr>
           </thead>
           <tbody>
             <tr style="border-bottom: 1px solid #ddd;">
-              <td style="padding: 8px; text-align: left;">${safeLink ? `<a href="${safeLink}" target="_blank" rel="noopener" style="color: #1565C0; text-decoration: none;">perfil</a>` : '-'}</td>
-              <td style="padding: 8px; text-align: center;">${v(stats.hIndex)}</td>
-              <td style="padding: 8px; text-align: center;">${v(stats.i10Index)}</td>
-              <td style="padding: 8px; text-align: center;">${pubs}</td>
-              <td style="padding: 8px; text-align: center;">${v(stats.citations)}</td>
+              ${celulas.map(td).join('')}
             </tr>
           </tbody>
         </table>
@@ -1838,43 +1830,53 @@ window.JCRReportUtils = {
     `;
   },
 
-  // atualizadoEm: quando os dados foram buscados no ResearcherID (ISO); na falta dele
-  // vale ridStats.atualizadoEm. Registros antigos nao tem a data e saem sem ela.
+  _dataDaBusca: function (iso, onde) {
+    const quando = new Date(iso || '');
+    if (isNaN(quando.getTime())) return '';
+    return ` <span style="font-weight: normal; font-size: 0.9em;" title="Data em que estes dados foram buscados no ${onde}">(atualizado em ${quando.toLocaleDateString('pt-BR')})</span>`;
+  },
+
+  // Tabela do Google Scholar. stats: { hIndex, i10Index, citations, publications,
+  // completo }; "completo" false = a lista de publicações não chegou ao fim (o número é
+  // um mínimo).
+  generateScholarTableHTML: function (stats, scholarLink, atualizadoEm) {
+    if (!stats || !scholarLink) return '';
+    const safeLink = this._safeUrl(scholarLink);
+    const v = (x) => (x !== null && x !== undefined && x !== '' ? this._esc(String(x)) : '-');
+    const pubs = v(stats.publications) === '-' ? '-' : (stats.completo === false ? '≥ ' : '') + v(stats.publications);
+    return this._tabelaDeBase('scholar-stats-table', [
+      { html: 'Google Scholar' + this._dataDaBusca(atualizadoEm || stats.atualizadoEm, 'Google Scholar'), dica: 'Perfil do pesquisador no Google Scholar' },
+      { html: 'H-Index', dica: 'Índice h no Google Scholar' },
+      { html: 'Publicações', dica: 'Número de publicações listadas no perfil' },
+      { html: 'Citações', dica: 'Total de citações no Google Scholar' },
+      { html: 'i10', dica: 'Índice i10 no Google Scholar: publicações com 10 citações ou mais' },
+      { html: '' }
+    ], [
+      safeLink ? `<a href="${safeLink}" target="_blank" rel="noopener" style="color: #1565C0; text-decoration: none;">perfil</a>` : '-',
+      v(stats.hIndex), pubs, v(stats.citations), v(stats.i10Index), ''
+    ]);
+  },
+
+  // Tabela do ResearcherID / Web of Science. atualizadoEm: quando os dados foram buscados
+  // (ISO); na falta dele vale ridStats.atualizadoEm. Registros antigos nao tem a data.
+  // "Publicações" e o total indexado na Web of Science; "Core Collection" e a parte
+  // dele que esta na colecao principal.
   generateRidTableHTML: function(ridStats, researcherIdLink, isUnlocked, atualizadoEm) {
     if (!ridStats || !researcherIdLink) return '';
-
-    const quando = new Date(atualizadoEm || ridStats.atualizadoEm || '');
-    const dataRid = isNaN(quando.getTime()) ? '' : quando.toLocaleDateString('pt-BR');
-
     const safeLink = this._safeUrl(researcherIdLink);
     const ridId = this._esc(String(researcherIdLink).split('/').pop());
-
-    return `
-      <div id="rid-stats-table" class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
-        <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
-          <thead>
-            <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
-              <th style="padding: 8px; text-align: left;" title="Web of Science ResearcherID Profile">ResearcherID${dataRid ? ` <span style="font-weight: normal; font-size: 0.9em;" title="Data em que estes dados foram buscados no ResearcherID">(atualizado em ${dataRid})</span>` : ''}</th>
-              <th style="padding: 8px; text-align: center;" title="Web of Science H-Index">H-Index</th>
-              <th style="padding: 8px; text-align: center;" title="Web of Science Core Collection publications">CC Pubs</th>
-              <th style="padding: 8px; text-align: center;" title="Publications indexed in Web of Science">WoS Pubs</th>
-              <th style="padding: 8px; text-align: center;" title="Sum of Times Cited">Citações</th>
-              <th style="padding: 8px; text-align: center;" title="Sum of Times Cited without self-citations">Citações (sem auto)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr style="border-bottom: 1px solid #ddd;">
-              <td style="padding: 8px; text-align: left;">${safeLink ? `<a href="${safeLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${ridId}</a>` : ridId}</td>
-              <td style="padding: 8px; text-align: center;">${ridStats.hIndex !== null && ridStats.hIndex !== undefined ? ridStats.hIndex : '-'}</td>
-              <td style="padding: 8px; text-align: center;">${ridStats.publications !== null && ridStats.publications !== undefined ? ridStats.publications : '-'}</td>
-              <td style="padding: 8px; text-align: center;">${ridStats.wosPublications !== null && ridStats.wosPublications !== undefined ? ridStats.wosPublications : '-'}</td>
-              <td style="padding: 8px; text-align: center;">${ridStats.sumOfTimesCited !== null && ridStats.sumOfTimesCited !== undefined ? ridStats.sumOfTimesCited : '-'}</td>
-              <td style="padding: 8px; text-align: center;">${ridStats.sumOfTimesCitedWithoutSelf !== null && ridStats.sumOfTimesCitedWithoutSelf !== undefined ? ridStats.sumOfTimesCitedWithoutSelf : '-'}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    `;
+    const v = (x) => (x !== null && x !== undefined ? this._esc(String(x)) : '-');
+    return this._tabelaDeBase('rid-stats-table', [
+      { html: 'ResearcherID' + this._dataDaBusca(atualizadoEm || ridStats.atualizadoEm, 'ResearcherID'), dica: 'Perfil do pesquisador no ResearcherID (Web of Science)' },
+      { html: 'H-Index', dica: 'Índice h na Web of Science' },
+      { html: 'Publicações', dica: 'Publicações indexadas na Web of Science (todas as coleções)' },
+      { html: 'Citações', dica: 'Soma de vezes citado na Web of Science' },
+      { html: 'Core Collection', dica: 'Publicações na Web of Science Core Collection, a coleção principal da base (subconjunto de "Publicações")' },
+      { html: 'Citações (sem auto)', dica: 'Soma de vezes citado, sem as autocitações' }
+    ], [
+      safeLink ? `<a href="${safeLink}" target="_blank" style="color: #1565C0; text-decoration: none;">${ridId}</a>` : ridId,
+      v(ridStats.hIndex), v(ridStats.wosPublications), v(ridStats.sumOfTimesCited), v(ridStats.publications), v(ridStats.sumOfTimesCitedWithoutSelf)
+    ]);
   },
 
   generateCitationTableHTML: function(stats) {
