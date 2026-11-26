@@ -14,7 +14,7 @@ Com o JCRLattes, você pode criar e gerenciar um banco de dados local com os cur
 Principais Funcionalidades:
 
 1. Métricas de Impacto e Anotação em Tempo Real:
-* Anotação de Fator de Impacto (JCR): Exibe o Fator de Impacto (JCR) mais recente e a contagem de autores logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual (Alto, Médio, Baixo, Sem JCR), numa paleta padrão legível por daltônicos e personalizável.
+* Anotação de Fator de Impacto (JCR): Exibe o Fator de Impacto (JCR) mais recente logo abaixo de cada artigo no próprio currículo Lattes. Cores dinâmicas facilitam a triagem visual (Alto, Médio, Baixo, Sem JCR), numa paleta padrão legível por daltônicos e personalizável.
 * Histograma de Distribuição JCR: Gráfico interativo que revela o perfil de qualidade da sua produção ao longo do tempo.
 * Métricas de Produção por Ano: Visualize a evolução da sua carreira com barras empilhadas que mostram o impacto acumulado anualmente.
 * Segunda Linha de Gráficos Visualmente Rica:
@@ -62,13 +62,13 @@ Como Usar:
 1. Instale a extensão JCRLattes no seu navegador Google Chrome.
 2. Acesse qualquer currículo na Plataforma Lattes. A extensão funciona na nova busca de currículos (https://busca-cv-lattes.cnpq.br/) e também nas páginas do formato anterior.
 3. A extensão processará as informações automaticamente, inserindo o painel de controle e métricas no topo da página.
-4. Para salvar o currículo no seu banco de dados local ou configurar filtros, utilize o painel lateral de opções da extensão.
+4. Para salvar o currículo no seu banco de dados local ou configurar limiares, cores e filtros, use os ícones no cabeçalho do painel (📥 salvar no banco, ⚙️ opções).
 
 5. ⚠️ Atenção e Avisos Importantes:
-* Extração de Dados: O JCRLattes depende da formatação original do currículo Lattes. Preenchimentos atípicos ou informações inseridas fora do padrão pelo autor podem gerar inconsistências na extração.
-* Carregamento Dinâmico: Algumas informações do Lattes são carregadas de forma assíncrona. A extensão precisa aguardar essas atualizações em tempo real, sendo suscetível a oscilações e lentidões na conexão com os servidores do CNPq.
-* Dados do ResearcherID: As requisições de citações e publicações para o ResearcherID podem falhar dependendo das restrições de acesso da base de dados. Preferencialmente, certifique-se de estar logado na Web of Science ou de utilizar uma rede com acesso institucional liberado (CAFe). A tabela mostra a data da última atualização, e os dados não são buscados de novo quando o currículo é relido no mesmo dia.
-* Relatórios em Grupo: A geração de relatórios coletivos, especialmente a deduplicação de produções, pode exigir muito processamento. Caso seu navegador mostre uma notificação alertando lentidão ou inatividade na página, selecione "Aguardar" e tenha paciência até a conclusão.
+* Extração de Dados: O JCRLattes lê o currículo como a Plataforma Lattes o mostra. Preenchimentos fora do padrão (artigo sem ISSN, título ou ano em campos trocados, nome em citações incompleto) podem gerar inconsistências, e mudanças do CNPq no site podem exigir uma atualização da extensão.
+* Indicadores de Autoria: A nova Plataforma Lattes ainda não mostra a lista completa de autores de parte dos artigos. Até isso ser corrigido, só a identificação de primeiro autor fica ativa; os demais indicadores (último autor, posição, número de autores, grandes colaborações) aparecem como temporariamente desabilitados.
+* Lista de Artigos Completa: Na nova Plataforma Lattes a lista de artigos é carregada aos poucos, e só por inteiro enquanto a aba está visível. Em currículos longos, mantenha a aba aberta em primeiro plano até o painel terminar de montar.
+* ResearcherID e Google Scholar: A leitura das citações nessas bases pode falhar conforme as restrições de acesso. Para o ResearcherID, prefira estar logado na Web of Science ou numa rede com acesso institucional (CAFe). Se o Google pedir uma verificação, a extensão não insiste e mantém os últimos valores guardados. As tabelas mostram a data da última atualização, e os dados não são buscados de novo quando o currículo é relido no mesmo dia.
 
 --------------------------------------------------
 
