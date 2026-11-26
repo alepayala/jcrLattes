@@ -1011,9 +1011,9 @@ function resumoDoCvHTML(stats, startYearRecent, maxYear, targetAuthorRank, titul
     ['Artigos', tudo.total.count, `${periodo}: ${cinco.total.count}`, 'Artigos completos publicados em periódicos'],
     ['Soma do JCR', U.formatNum(tudo.total.sum), `${periodo}: ${U.formatNum(cinco.total.sum)}`, 'Soma dos fatores de impacto dos artigos'],
     ['JCR médio', U.getAvg(tudo.total.sum, tudo.total.countWithJcr), `${periodo}: ${U.getAvg(cinco.total.sum, cinco.total.countWithJcr)}`, 'Soma do JCR dividida pelos artigos com JCR'],
-    cartaoTitulacao,
     ['Índice H (WoS)', hWos, `Scopus: ${hScopus}`, 'Índice H calculado a partir das citações de cada artigo da lista (Web of Science e Scopus)'],
     ['Citações (WoS)', cWos, `Scopus: ${cScopus}`, 'Soma das citações de cada artigo da lista (Web of Science e Scopus)'],
+    cartaoTitulacao,
     [`${rank}º autor`, tudo.total.firstAuthorCount, `${periodo}: ${cinco.total.firstAuthorCount}`, `Artigos como ${rank}º autor`],
     U.ULTIMO_AUTOR_ATIVO
       ? ['Último autor', tudo.total.lastAuthorCount, `${periodo}: ${cinco.total.lastAuthorCount}`, 'Artigos como último autor']
