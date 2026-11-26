@@ -442,6 +442,12 @@ async function processLattesPage(nameLink) {
   await updateSafe(async () => {
     try {
       // Annotate Lattes page and return annotated Lattes info
+      // Lattes novo: se a lista de artigos ainda tem itens por carregar (a montagem foi
+      // chamada cedo, ou o site redesenhou a lista), completa antes de ler. Em aba oculta
+      // nao ha como: ai vale a reserva pela API, logo abaixo.
+      if (LATTES_NOVO && !document.hidden && LEITOR.listaIncompleta(document)) {
+        await LEITOR.prepararPagina(document, { secoes: LEITOR.SECOES_LIDAS });
+      }
       const authorNames = LEITOR.lerApelidos(document);
       let lattesInfo = annotateLattesPage(highJcr, lowJcr, authorNames);
       // Lattes novo com a lista da pagina ainda incompleta (aba em segundo plano): os

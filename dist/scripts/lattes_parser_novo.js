@@ -481,19 +481,30 @@
         const temConteudo = (id) => { const p = d.getElementById(id + '-panel'); return !!(p && p.childElementCount && p.textContent.trim()); };
         await ate(() => abertas.every(temConteudo), tempoMax / 2);
 
-        const pendente = () => Array.from(d.querySelectorAll('[appintersectionsentinel]')).find(s => parseFloat(s.style.height) > 0);
-        let voltas = 0, completo = false, semPendente = 0;
+        const pendente = () => _marcadorPendente(d);
+        // O painel de "Produções" ganha conteúdo (títulos, tabela de citações) ANTES de a
+        // lista de artigos chegar, e sem artigos ainda não há marcador de carga. Concluir
+        // nesse intervalo lia o currículo com 0 artigos e depois com 200, sem nunca
+        // completar (visto no Chrome em 2026-11-25, ao recarregar a página). Por isso:
+        // primeiro espera aparecer o primeiro item ou um marcador (um CV sem produção
+        // esgota este prazo), e só dá a lista por completa quando não há marcador E a
+        // contagem de itens ficou parada por 1,5 s.
+        const itens = () => { const p = d.getElementById('producoes-panel'); return p ? p.querySelectorAll('li').length : 0; };
+        if (!pedidas || pedidas.includes('producoes')) await ate(() => itens() > 0 || !!pendente(), tempoMax / 2);
+
+        let voltas = 0, completo = false;
+        let contagem = itens(), paradaDesde = Date.now();
         const limite = op.limite || 40;
-        // Só conclui depois de três olhadas seguidas sem marcador de carregamento: entre
-        // um lote e outro o marcador some por um instante.
-        while (voltas < limite) {
+        const prazoFinal = Date.now() + tempoMax * 4;
+        while (voltas < limite && Date.now() < prazoFinal) {
+            const agora = itens();
+            if (agora !== contagem) { contagem = agora; paradaDesde = Date.now(); }
             const s = pendente();
             if (!s) {
-                if (++semPendente >= 3) { completo = true; break; }
-                await espera(pausa);
+                if (Date.now() - paradaDesde >= 1500) { completo = true; break; }
+                await espera(200);
                 continue;
             }
-            semPendente = 0;
             // O site carrega o lote seguinte por IntersectionObserver, que não dispara em
             // aba oculta: insistir seria só esperar. Quem chamou tenta de novo quando a
             // aba ficar visível (completo = false).
@@ -504,6 +515,20 @@
         }
         janela.scrollTo(rolagem.x, rolagem.y);
         return { secoesAbertas, artigos: elementosDeArtigos(d).length, completo };
+    }
+
+    // Marcador de carga da lista de produções ainda ativo (altura > 0): há itens por
+    // carregar. O site o consome quando ele entra na tela.
+    function _marcadorPendente(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        if (!d) return null;
+        return Array.from(d.querySelectorAll('[appintersectionsentinel]')).find(s => parseFloat(s.style.height) > 0) || null;
+    }
+
+    // A lista de produções ainda tem itens por carregar? (content.js confere antes de
+    // cada montagem, para não ler nem gravar o currículo pela metade.)
+    function listaIncompleta(doc) {
+        return !!_marcadorPendente(doc);
     }
 
     // A página está no site do Lattes novo? (content.js escolhe o leitor por aqui.)
@@ -525,6 +550,7 @@
         ehSiteNovo: ehSiteNovo,
         ehPaginaDoCurriculo: ehPaginaDoCurriculo,
         prepararPagina: prepararPagina,
+        listaIncompleta: listaIncompleta,
         elementosDeArtigos: elementosDeArtigos,
         lerPublicacao: lerPublicacao,
         lerIdentificacao: lerIdentificacao,

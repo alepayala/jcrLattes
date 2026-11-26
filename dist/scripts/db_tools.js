@@ -2850,6 +2850,16 @@ window.JCRDBTools = {
                 }
                 if ((m.key === 'lastAuthorCount' && !window.JCRReportUtils.ULTIMO_AUTOR_ATIVO) ||
                     (m.key === 'gcCount' && !window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS)) title = window.JCRReportUtils.TEXTO_DESABILITADO;
+                // Bolsa no banco de CVs: o Lattes novo (pagina e API) ainda nao informa a bolsa de
+                // produtividade, entao o valor mostrado e o da ultima leitura pelo formato antigo
+                // (saveCurrentCV o preserva) e CV novo entra sem bolsa. O aviso sai do cabecalho
+                // quando os leitores do site novo passarem a ler a bolsa (fellowshipUnknown).
+                if (m.key === 'fellowshipString' && !isProcessoOnly) {
+                    label = `${label} <span style="color:#e67e22;">⚠️</span>`;
+                    title = 'Bolsa e nível. Atenção: o novo currículo Lattes ainda não traz esta informação. '
+                        + 'O valor mostrado é o da última leitura pelo formato antigo e pode estar desatualizado; '
+                        + 'currículos adicionados só pelo site novo ficam sem bolsa.';
+                }
                 const titleAttr = title ? ` title="${title}"` : '';
                 let classes = ['sortable-header'];
                 if (m.division) classes.push('division-left');
