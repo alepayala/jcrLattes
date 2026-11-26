@@ -238,6 +238,36 @@
         return m ? m[1] : '';
     }
 
+    // Endereço do perfil do pesquisador no Google Scholar, tirado de um texto qualquer
+    // (o "argumento" da linha Google Scholar no resumo de citações por base). Só vale um
+    // endereço de perfil de verdade (scholar.google.../citations?...user=XXXX): quem
+    // escreveu ali só o nome, ou outra coisa, fica sem link.
+    function _linkDoScholar(texto) {
+        const m = String(texto || '').match(/(?:https?:\/\/)?scholar\.google\.[a-z.]+\/citations\?[^\s"'<>]*\buser=[\w-]+[^\s"'<>]*/i);
+        if (!m) return '';
+        const url = m[0].replace(/[).,;]+$/, '');
+        return /^https?:\/\//i.test(url) ? url : 'https://' + url;
+    }
+
+    // Link do Google Scholar na tabela "Resumo de citações por base": o da âncora da
+    // linha, se houver, ou o que estiver escrito no argumento.
+    function lerLinkDoScholar(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        if (!d) return '';
+        const painel = _painel(d, 'producoes') || d;
+        let achado = '';
+        painel.querySelectorAll('tr').forEach(tr => {
+            if (achado) return;
+            const base = tr.querySelector('td[data-label="Base"]');
+            if (!base || !/google\s*scholar/i.test(base.textContent)) return;
+            const arg = tr.querySelector('td[data-label="Argumento"]');
+            if (!arg) return;
+            const ancoras = Array.from(arg.querySelectorAll('a[href]')).map(a => a.getAttribute('href')).join(' ');
+            achado = _linkDoScholar(ancoras) || _linkDoScholar(arg.textContent);
+        });
+        return achado;
+    }
+
     function lerIdentificacao(doc) {
         const d = doc || (typeof document !== 'undefined' ? document : null);
         if (!d) return { name: '', link: '' };
@@ -261,6 +291,8 @@
         return {
             name, link,
             researcherIdLink: rid ? rid.href : '',
+            // '' quando o pesquisador não pôs o endereço do perfil (só o nome, por exemplo)
+            googleScholarLink: lerLinkDoScholar(d),
             fellowshipText: '',
             fellowshipString: '',
             // quem grava o CV usa isto para não apagar a bolsa que já tem
@@ -570,6 +602,8 @@
         _ordemPelosApelidos: _ordemPelosApelidos,
         _areaEInstituicao: _areaEInstituicao,
         _idLattesDoEndereco: _idLattesDoEndereco,
+        _linkDoScholar: _linkDoScholar,
+        lerLinkDoScholar: lerLinkDoScholar,
         _categoriaDeOrientacao: _categoriaDeOrientacao,
         _tipoDoEvento: _tipoDoEvento
     };

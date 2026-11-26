@@ -194,3 +194,23 @@ describe('orientacoes e eventos', () => {
         assert.strictEqual(N._tipoDoEvento('Evento sem tipo. 2021.'), 'Desconhecido');
     });
 });
+
+describe('_linkDoScholar', () => {
+    test('acha o endereco do perfil no meio de um texto', () => {
+        assert.strictEqual(N._linkDoScholar('H-Index: 41 - https://scholar.google.com.br/citations?user=zDw1aKkAAAAJ'),
+            'https://scholar.google.com.br/citations?user=zDw1aKkAAAAJ');
+        assert.strictEqual(N._linkDoScholar('perfil (http://scholar.google.com/citations?hl=en&user=AbC-123_x&view_op=list_works).'),
+            'http://scholar.google.com/citations?hl=en&user=AbC-123_x&view_op=list_works');
+    });
+    test('sem o protocolo, completa com https', () => {
+        assert.strictEqual(N._linkDoScholar('scholar.google.com/citations?user=AbC123'), 'https://scholar.google.com/citations?user=AbC123');
+    });
+    test('nome solto, busca por nome ou outro site nao sao perfil', () => {
+        assert.strictEqual(N._linkDoScholar('Ana Beatriz Lins'), '');
+        assert.strictEqual(N._linkDoScholar('https://scholar.google.com/scholar?q=Ana+Lins'), '');
+        assert.strictEqual(N._linkDoScholar('https://scholar.google.com/citations?view_op=search_authors'), '');
+        assert.strictEqual(N._linkDoScholar('https://exemplo.org/citations?user=AbC'), '');
+        assert.strictEqual(N._linkDoScholar(''), '');
+        assert.strictEqual(N._linkDoScholar(null), '');
+    });
+});

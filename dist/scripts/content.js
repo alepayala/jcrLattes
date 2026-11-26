@@ -171,6 +171,11 @@ async function loadSettings() {
 // adaptação ao Lattes novo; religada em 2026-11-25, a pedido.
 const BUSCAR_RID = true;
 
+// Busca das métricas no Google Scholar (aba em segundo plano aberta pelo background,
+// ação 'fetch_scholar_stats'): índice H, i10, citações e número de publicações do
+// perfil cujo endereço o currículo informa. Com false nada é pedido.
+const BUSCAR_SCHOLAR = true;
+
 // Curriculo lido pela API (window.JCRLattesApi) enquanto a pagina nao tem a lista de
 // artigos inteira; null quando nao foi preciso ou a API falhou. paginaCompletaDepois
 // resolve quando a pagina terminou de carregar e a montagem deve ser refeita.
@@ -1528,8 +1533,10 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
           extraCells.forEach(cell => cell.style.display = isCollapsed ? 'none' : '');
         }
         if (targetId === 'citacoes') {
-          const ridTabela = document.getElementById('rid-stats-table');
-          if (ridTabela) ridTabela.style.display = jcrTablesState.citacoes ? 'none' : '';
+          ['rid-stats-table', 'scholar-stats-table'].forEach((idTabela) => {
+            const tabela = document.getElementById(idTabela);
+            if (tabela) tabela.style.display = jcrTablesState.citacoes ? 'none' : '';
+          });
         }
 
         saveSettings();
@@ -1761,7 +1768,57 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
   });
 
   // RID Extraction and Private Tools Hook
+  // Tabela do Google Scholar, logo depois da de citações (e da do ResearcherID, se houver).
+  const injetarTabelaDoScholar = () => {
+      const anterior = document.getElementById('scholar-stats-table');
+      if (anterior) anterior.remove();
+      if (!nameLink.scholarStats) return;
+      const depoisDe = document.getElementById('rid-stats-table') || document.getElementById('tbody-citacoes')?.closest('.rodape-cv');
+      if (!depoisDe) return;
+      depoisDe.insertAdjacentHTML('afterend', window.JCRReportUtils.generateScholarTableHTML(nameLink.scholarStats, nameLink.googleScholarLink));
+      const tabela = document.getElementById('scholar-stats-table');
+      if (tabela) tabela.style.display = jcrTablesState.citacoes ? 'none' : '';
+  };
+
+  // Busca as métricas do Google Scholar uma vez por carga da página (ou reaproveita as
+  // gravadas hoje). O resultado fica em nameLink.scholarStats, que extractData grava, e
+  // a página é remontada para mostrar a tabela e salvar. Se o Google pedir verificação
+  // (captcha), a busca para: a extensão não tenta passar por ela.
+  const buscarScholar = () => {
+      const urlScholar = window.JCRReportUtils.urlDoScholar(nameLink.googleScholarLink);
+      if (!BUSCAR_SCHOLAR || !urlScholar || window.__jcrScholarPedido) return;
+      window.__jcrScholarPedido = true;
+      const idLattes = ((nameLink.link || '').match(/\b\d{16}\b/) || [''])[0];
+      const concluir = (stats) => {
+          nameLink.scholarStats = stats;
+          processLattesPage(nameLink);
+      };
+      const gravado = (typeof window.JCRDBTools !== 'undefined' && typeof window.JCRDBTools.scholarGravadoHoje === 'function')
+          ? window.JCRDBTools.scholarGravadoHoje(nameLink.name, idLattes) : Promise.resolve(null);
+      gravado.then((deHoje) => {
+          if (deHoje) {
+              console.log('[JCRLattes] Google Scholar já atualizado hoje; usando os dados do banco.');
+              concluir(deHoje);
+              return;
+          }
+          console.log(`[JCRLattes] Buscando métricas no Google Scholar: ${urlScholar}`);
+          chrome.runtime.sendMessage({ action: 'fetch_scholar_stats', url: urlScholar }, (resposta) => {
+              if (chrome.runtime.lastError || !resposta || !resposta.success) {
+                  const motivo = (chrome.runtime.lastError && chrome.runtime.lastError.message) || (resposta && resposta.error) || 'sem resposta';
+                  console.warn(`[JCRLattes] Google Scholar não lido: ${motivo}`);
+                  if (resposta && resposta.captcha && window.JCRDBTools && typeof window.JCRDBTools.showToast === 'function') {
+                      window.JCRDBTools.showToast('O Google Scholar pediu verificação ("não sou um robô"). Abra o perfil numa aba, resolva e recarregue o currículo.', '#e67e22');
+                  }
+                  return;
+              }
+              concluir(Object.assign({}, resposta.stats, { atualizadoEm: new Date().toISOString() }));
+          });
+      });
+  };
+
   const performRidExtractionAndInitPrivateTools = (isUnlocked) => {
+      injetarTabelaDoScholar();
+      buscarScholar();
       const injectRidTable = (ridStats) => {
           const citationContainer = document.getElementById('tbody-citacoes')?.closest('.rodape-cv');
           if (citationContainer) {

@@ -16,7 +16,8 @@
     "*://efomento.cnpq.br/*",
     "*://plsql1.cnpq.br/*",
     "*://anexosform.cnpq.br/*",
-    "https://busca-cv-lattes-api.cnpq.br/*"
+    "https://busca-cv-lattes-api.cnpq.br/*",
+    "https://scholar.google.com/*"
   ],
   "background": {
     "service_worker": "scripts/background.js"

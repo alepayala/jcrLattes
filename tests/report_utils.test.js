@@ -1402,3 +1402,38 @@ describe('urlCurriculo', () => {
         ['', null, undefined, '123', 'javascript:alert(1)', 'Fulano de Tal'].forEach(v => assert.strictEqual(R.urlCurriculo(v), ''));
     });
 });
+
+describe('urlDoScholar', () => {
+    test('qualquer dominio do Scholar vira o endereco padrao de leitura', () => {
+        const esperado = 'https://scholar.google.com/citations?user=zDw1aKkAAAAJ&hl=en&pagesize=100';
+        assert.strictEqual(R.urlDoScholar('https://scholar.google.com.br/citations?user=zDw1aKkAAAAJ'), esperado);
+        assert.strictEqual(R.urlDoScholar('http://scholar.google.com/citations?hl=pt-BR&user=zDw1aKkAAAAJ&view_op=list_works'), esperado);
+    });
+    test('o que nao e perfil nao tem endereco', () => {
+        assert.strictEqual(R.urlDoScholar('https://scholar.google.com/scholar?q=fulano'), '');
+        assert.strictEqual(R.urlDoScholar('https://exemplo.org/citations?user=AbC'), '');
+        assert.strictEqual(R.urlDoScholar(''), '');
+        assert.strictEqual(R.urlDoScholar(undefined), '');
+    });
+});
+
+describe('generateScholarTableHTML', () => {
+    const link = 'https://scholar.google.com/citations?user=AbC';
+    test('mostra as quatro metricas e a data da busca', () => {
+        const html = R.generateScholarTableHTML({ hIndex: 41, i10Index: 180, citations: 6458, publications: 485, completo: true }, link, new Date(2026, 10, 25, 12).toISOString());
+        assert.match(html, /id="scholar-stats-table"/);
+        assert.match(html, /atualizado em 25\/11\/2026/);
+        ['>41<', '>180<', '>485<', '>6458<'].forEach(v => assert.ok(html.includes(v), v));
+        assert.ok(html.includes('href="' + link + '"'));
+    });
+    test('lista de publicacoes incompleta sai como minimo; valor ausente vira traco', () => {
+        const html = R.generateScholarTableHTML({ hIndex: 10, i10Index: null, citations: 300, publications: 100, completo: false }, link);
+        assert.ok(html.includes('≥ 100'));
+        assert.ok(html.includes('>-<'));
+        assert.ok(!html.includes('atualizado em'));
+    });
+    test('sem dados ou sem link, nada', () => {
+        assert.strictEqual(R.generateScholarTableHTML(null, link), '');
+        assert.strictEqual(R.generateScholarTableHTML({ hIndex: 1 }, ''), '');
+    });
+});

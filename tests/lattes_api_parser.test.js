@@ -175,13 +175,24 @@ describe('lerCurriculo e buscarCurriculo', () => {
     test('monta o curriculo inteiro; secao ausente vira vazio', () => {
         const r = API.lerCurriculo(bruto);
         assert.deepStrictEqual(r.identificacao, { name: 'Ana Beatriz Lins', link: 'http://lattes.cnpq.br/' + ID,
-            researcherIdLink: 'http://www.researcherid.com/rid/X-0000-2000', fellowshipText: '', fellowshipString: '', fellowshipUnknown: true });
+            researcherIdLink: 'http://www.researcherid.com/rid/X-0000-2000', googleScholarLink: '', fellowshipText: '', fellowshipString: '', fellowshipUnknown: true });
         assert.deepStrictEqual(r.apelidos, ['LINS, ANA B. M.', 'LINS, A.']);
         assert.strictEqual(r.publications.length, 1);
         assert.strictEqual(r.publications[0].authorRank, 2);
         assert.strictEqual(r.titulacao, null);
         assert.deepStrictEqual([r.patentes, r.eventos, r.orientacoes.raw], [[], [], []]);
         assert.deepStrictEqual(API.lerCurriculo(null).publications, []);
+    });
+
+    // So interessa o endereco do perfil: quem escreve so o nome no argumento fica sem link.
+    test('link do Google Scholar: do campo proprio ou do argumento, nunca de um nome solto', () => {
+        const com = (scholar) => API.lerCurriculo(Object.assign({}, bruto, { citacoes: [scholar] })).identificacao.googleScholarLink;
+        assert.strictEqual(com({ codBaseBibliog: 4, txtArgumento: 'H-Index: 41 - https://scholar.google.com.br/citations?user=zDw1aKkAAAAJ' }),
+            'https://scholar.google.com.br/citations?user=zDw1aKkAAAAJ');
+        assert.strictEqual(com({ codBaseBibliog: 4, txtArgumento: 'Lins, Ana', txtUriPesquisadorBase: 'https://scholar.google.com/citations?hl=pt-BR&user=AbC-123' }),
+            'https://scholar.google.com/citations?hl=pt-BR&user=AbC-123');
+        assert.strictEqual(com({ codBaseBibliog: 4, txtArgumento: 'Ana Beatriz Lins' }), '');
+        assert.strictEqual(com({ codBaseBibliog: 3, txtArgumento: 'https://scholar.google.com/citations?user=AbC' }), '');   // linha de outra base
     });
 
     test('buscarCurriculo pede a producao em lotes e tolera secao que falha', async () => {

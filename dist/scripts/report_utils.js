@@ -1793,6 +1793,51 @@ window.JCRReportUtils = {
     `;
   },
 
+  // Endereço que a extensão abre para ler um perfil do Google Scholar, a partir do link
+  // que veio do currículo: sempre scholar.google.com (o único host com permissão), em
+  // inglês e com 100 artigos por página, para o "Show more" ser clicado menos vezes.
+  // '' quando o link não é de um perfil.
+  urlDoScholar: function (link) {
+    const m = String(link || '').match(/scholar\.google\.[a-z.]+\/citations\?[^\s"'<>]*\buser=([\w-]+)/i);
+    return m ? `https://scholar.google.com/citations?user=${m[1]}&hl=en&pagesize=100` : '';
+  },
+
+  // Tabela do Google Scholar (índice H, i10, publicações, citações), irmã da do
+  // ResearcherID. stats: { hIndex, i10Index, citations, publications, completo };
+  // "completo" false = a lista de publicações não chegou ao fim (o número é um mínimo).
+  generateScholarTableHTML: function (stats, scholarLink, atualizadoEm) {
+    if (!stats || !scholarLink) return '';
+    const safeLink = this._safeUrl(scholarLink);
+    const quando = new Date(atualizadoEm || stats.atualizadoEm || '');
+    const data = isNaN(quando.getTime()) ? '' : quando.toLocaleDateString('pt-BR');
+    const v = (x) => (x !== null && x !== undefined && x !== '' ? this._esc(String(x)) : '-');
+    const pubs = v(stats.publications) === '-' ? '-' : (stats.completo === false ? '≥ ' : '') + v(stats.publications);
+    return `
+      <div id="scholar-stats-table" class="rodape-cv" style="margin-top: 10px; color: ${this.COLORS.footerText}; font-size: 1.1em;">
+        <table style="width: 100%; border-collapse: collapse; text-align: center; font-family: inherit; font-size: 0.9em;">
+          <thead>
+            <tr style="background-color: ${this.COLORS.backgroundHeader}; border-bottom: 1px solid ${this.COLORS.border};">
+              <th style="padding: 8px; text-align: left;" title="Perfil do pesquisador no Google Scholar">Google Scholar${data ? ` <span style="font-weight: normal; font-size: 0.9em;" title="Data em que estes dados foram buscados no Google Scholar">(atualizado em ${data})</span>` : ''}</th>
+              <th style="padding: 8px; text-align: center;" title="Índice h no Google Scholar">H-Index</th>
+              <th style="padding: 8px; text-align: center;" title="Índice i10 no Google Scholar: publicações com 10 citações ou mais">i10</th>
+              <th style="padding: 8px; text-align: center;" title="Número de publicações listadas no perfil">Publicações</th>
+              <th style="padding: 8px; text-align: center;" title="Total de citações no Google Scholar">Citações</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 8px; text-align: left;">${safeLink ? `<a href="${safeLink}" target="_blank" rel="noopener" style="color: #1565C0; text-decoration: none;">perfil</a>` : '-'}</td>
+              <td style="padding: 8px; text-align: center;">${v(stats.hIndex)}</td>
+              <td style="padding: 8px; text-align: center;">${v(stats.i10Index)}</td>
+              <td style="padding: 8px; text-align: center;">${pubs}</td>
+              <td style="padding: 8px; text-align: center;">${v(stats.citations)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
   // atualizadoEm: quando os dados foram buscados no ResearcherID (ISO); na falta dele
   // vale ridStats.atualizadoEm. Registros antigos nao tem a data e saem sem ela.
   generateRidTableHTML: function(ridStats, researcherIdLink, isUnlocked, atualizadoEm) {

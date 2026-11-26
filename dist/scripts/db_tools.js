@@ -1652,6 +1652,10 @@ window.JCRDBTools = {
         { key: 'ridSumOfTimesCited', label: 'Citações RID', title: 'Soma de Vezes Citado (ResearcherID)', numeric: true },
         { key: 'ridSumOfTimesCitedWithoutSelf', label: 'Citações RID (sem auto)', title: 'Soma de Vezes Citado sem autocitações (ResearcherID)', numeric: true },
         { key: 'researcherIdLink', label: 'RID Link', title: 'Link para o perfil ResearcherID na Web of Science' },
+        { key: 'scholarHIndex', label: 'Índice H GS', title: 'Índice H no Google Scholar (lido do perfil)', division: true, numeric: true },
+        { key: 'scholarPublications', label: 'Pubs GS', title: 'Publicações listadas no perfil do Google Scholar', numeric: true },
+        { key: 'scholarCitations', label: 'Citações GS', title: 'Total de citações no Google Scholar', numeric: true },
+        { key: 'googleScholarLink', label: 'Scholar', title: 'Link para o perfil no Google Scholar, quando o currículo informa o endereço' },
         { key: 'customId', label: 'ID', title: 'ID ou Grupo customizado', customRender: true },
         { key: 'dateAdded', label: 'Atualizado', title: 'Data da última atualização no banco de dados', division: true }
     ],
@@ -1728,6 +1732,17 @@ window.JCRDBTools = {
             fellowshipString: nameLink.fellowshipString || '',
             titulacao: nameLink.titulacao || null,
             researcherIdLink: nameLink.researcherIdLink || '',
+            // perfil no Google Scholar ('' se o curriculo nao traz o endereco). undefined em
+            // nameLink = a fonte nao le esse dado (formato antigo): saveCurrentCV mantem o gravado
+            googleScholarLink: nameLink.googleScholarLink || '',
+            // metricas lidas do perfil no Google Scholar (nameLink.scholarStats, posto por
+            // content.js quando a busca termina); '' enquanto nao houver
+            scholarHIndex: nameLink.scholarStats && nameLink.scholarStats.hIndex != null ? nameLink.scholarStats.hIndex : '',
+            scholarI10Index: nameLink.scholarStats && nameLink.scholarStats.i10Index != null ? nameLink.scholarStats.i10Index : '',
+            scholarCitations: nameLink.scholarStats && nameLink.scholarStats.citations != null ? nameLink.scholarStats.citations : '',
+            scholarPublications: nameLink.scholarStats && nameLink.scholarStats.publications != null ? nameLink.scholarStats.publications : '',
+            scholarStats: nameLink.scholarStats || {},
+            scholarUpdatedAt: nameLink.scholarStats ? (nameLink.scholarStats.atualizadoEm || new Date().toISOString()) : '',
             ridHIndex: ridStats?.hIndex !== undefined && ridStats.hIndex !== null ? ridStats.hIndex : '',
             ridPublications: ridStats?.publications !== undefined && ridStats.publications !== null ? ridStats.publications : '',
             ridWosPublications: ridStats?.wosPublications !== undefined && ridStats.wosPublications !== null ? ridStats.wosPublications : '',
@@ -2148,6 +2163,21 @@ window.JCRDBTools = {
                 }
             });
             
+            // Metricas do Google Scholar: uma leitura sem elas (busca que falhou, CV
+            // atualizado pela API, formato antigo) nao apaga as que o banco ja tem.
+            if (this.currentCvData.scholarHIndex === '' || this.currentCvData.scholarHIndex === undefined) {
+                ['scholarHIndex', 'scholarI10Index', 'scholarCitations', 'scholarPublications', 'scholarStats', 'scholarUpdatedAt'].forEach(campo => {
+                    if (existing[campo] !== undefined && existing[campo] !== null && existing[campo] !== '') this.currentCvData[campo] = existing[campo];
+                });
+            }
+
+            // Link do Google Scholar: so o Lattes novo o informa. Lido pelo formato antigo
+            // (campo ausente em nameLink), o CV nao apaga o link que o banco ja tem.
+            const fonteLeScholar = !!(this.lastArgs && this.lastArgs.nameLink && this.lastArgs.nameLink.googleScholarLink !== undefined);
+            if (!fonteLeScholar && !this.currentCvData.googleScholarLink && existing.googleScholarLink) {
+                this.currentCvData.googleScholarLink = existing.googleScholarLink;
+            }
+
             // Preserve custom ID (e o periodo de cada ID, quando houver)
             if (existing.customId !== undefined) {
                 this.currentCvData.customId = existing.customId;
@@ -2249,6 +2279,23 @@ window.JCRDBTools = {
             const r = cv.ridStats;
             if (!r || r.hIndex === undefined || r.hIndex === null) return null;
             return Object.assign({}, r, { atualizadoEm: cv.ridUpdatedAt });
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // Metricas do Google Scholar ja gravadas HOJE para este pesquisador, ou null (mesma
+    // regra do ResearcherID: nao repetir a busca no mesmo dia).
+    scholarGravadoHoje: async function (name, lattesId) {
+        try {
+            const cv = this._acharPesquisador(await this.getDB(false), name, lattesId, c => !c.isProcesso);
+            if (!cv || !this._ehHoje(cv.scholarUpdatedAt)) return null;
+            const s = cv.scholarStats;
+            if (!s || s.hIndex === undefined || s.hIndex === null) return null;
+            // so vale reaproveitar uma leitura completa e feita pela contagem por lotes: as da
+            // primeira versao paravam em 100 publicacoes
+            if (s.metodo !== 2 || s.completo === false) return null;
+            return Object.assign({}, s, { atualizadoEm: cv.scholarUpdatedAt });
         } catch (e) {
             return null;
         }
@@ -3051,6 +3098,13 @@ window.JCRDBTools = {
                         const safeRid = this._safeUrl(val);
                         if (safeRid) {
                             tbodyHtml += `<td class="rid-link-cell"><a href="${safeRid}" target="_blank" title="ResearcherID" style="text-decoration:none; font-size:1.2em;">🔗</a></td>`;
+                        } else {
+                            tbodyHtml += `<td></td>`;
+                        }
+                    } else if (m.key === 'googleScholarLink') {
+                        const safeScholar = this._safeUrl(val);
+                        if (safeScholar) {
+                            tbodyHtml += `<td class="rid-link-cell"><a href="${safeScholar}" target="_blank" title="Perfil no Google Scholar" style="text-decoration:none; font-size:1.2em;">🎓</a></td>`;
                         } else {
                             tbodyHtml += `<td></td>`;
                         }
@@ -5229,6 +5283,8 @@ window.JCRDBTools = {
         const citationTableHTML = window.JCRReportUtils.generateCitationTableHTML(stats);
         const ridTableHTML = (cvData.ridStats && cvData.researcherIdLink && !isGroup) ? 
             window.JCRReportUtils.generateRidTableHTML(cvData.ridStats, cvData.researcherIdLink, this.isUnlocked, cvData.ridUpdatedAt) : '';
+        const scholarTableHTML = (cvData.scholarStats && cvData.scholarStats.hIndex != null && cvData.googleScholarLink && !isGroup)
+            ? window.JCRReportUtils.generateScholarTableHTML(cvData.scholarStats, cvData.googleScholarLink, cvData.scholarUpdatedAt) : '';
         const supervisionTableHTML = window.JCRReportUtils.generateSupervisionTableHTML(stats, state.customYears);
         const patentTableHTML = window.JCRReportUtils.generatePatentTableHTML(stats, state.customYears);
         const eventTableHTML = window.JCRReportUtils.generateEventTableHTML(stats, state.customYears);
@@ -5418,6 +5474,7 @@ window.JCRDBTools = {
                         </div>
                         <div class="collapsible-content">
                             ${ridTableHTML}
+                            ${scholarTableHTML}
                             ${citationTableHTML}
                         </div>
                     </div>` : ''}

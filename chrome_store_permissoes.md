@@ -25,6 +25,9 @@
 >   calls to display a CV. The extension reads the same public CV data from it to refresh
 >   CVs already saved in the user's local database, when the user asks for it, without
 >   opening one tab per CV. No login, no data sent.
+> * `scholar.google.com` — when the CV itself gives the address of the researcher's public
+>   Google Scholar profile, the extension opens that profile to read the public h-index,
+>   i10-index, citation count and number of publications. At most once a day per researcher.
 > * `researcherid.com` / `webofscience.com` — read the user's public citation and h-index
 >   figures to complete the production report.
 > * `efomento.cnpq.br` — CNPq's grant management system. For users who are already
@@ -46,6 +49,9 @@
 >   Lattes consulta para mostrar um currículo. A extensão lê dele os mesmos dados públicos
 >   para atualizar currículos já salvos no banco local, a pedido do usuário, sem abrir uma
 >   aba por currículo. Sem login, sem envio de dados.
+> * `scholar.google.com` — quando o próprio currículo informa o endereço do perfil público do
+>   pesquisador no Google Scholar, a extensão abre esse perfil para ler o índice h, o i10, as
+>   citações e o número de publicações, todos públicos. No máximo uma vez por dia por pesquisador.
 > * `researcherid.com` / `webofscience.com` — leitura das citações e do índice h públicos.
 > * `efomento.cnpq.br` — sistema de fomento do CNPq. Para quem já é avaliador autorizado,
 >   a extensão lê a planilha de julgamento **à qual essa pessoa já tem acesso** e organiza

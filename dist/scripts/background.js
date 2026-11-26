@@ -1,3 +1,72 @@
+// Roda DENTRO da aba do perfil do Google Scholar (injetada pelo 'fetch_scholar_stats').
+// Lê a tabela de citações e conta as publicações, clicando em "Show more" até o fim.
+// Se a página for a de verificação do Google ("não sou um robô"), devolve captcha: true
+// e não tenta mais nada: a extensão nunca tenta passar por essa verificação.
+async function extractScholarMetrics() {
+    const espera = (ms) => new Promise(r => setTimeout(r, ms));
+    const num = (t) => { const n = parseInt(String(t || '').replace(/[^\d]/g, ''), 10); return isNaN(n) ? null : n; };
+    if (/\/sorry\//.test(location.pathname) || document.querySelector('#gs_captcha_f, #recaptcha, form[action*="sorry"]')) {
+        return { success: false, captcha: true, error: 'O Google pediu verificação (captcha).' };
+    }
+    const tabela = document.getElementById('gsc_rsb_st');
+    if (!tabela) return { success: false, error: 'Página do perfil não reconhecida.' };
+
+    // linhas: Citations, h-index, i10-index; a primeira coluna de números é "All"
+    const linhas = Array.from(tabela.querySelectorAll('tbody tr')).map(tr => {
+        const c = tr.querySelector('td.gsc_rsb_std');
+        return c ? num(c.textContent) : null;
+    });
+
+    // Número de publicações. O perfil mostra as primeiras (até 100, com pagesize=100) e
+    // traz as outras em lotes. Em vez de clicar em "Show more" — que numa aba em segundo
+    // plano não carregou o lote seguinte (visto no Chrome em 2026-11-26: parou em 100) —,
+    // pede cada lote pelo endereço (cstart=100, 200, ...) e conta as linhas da resposta,
+    // até vir um lote incompleto. Se um pedido falhar, tenta os cliques; se nem assim
+    // chegar ao fim, completo = false e o número vale como mínimo.
+    const LOTE = 100;
+    const contar = () => document.querySelectorAll('tr.gsc_a_tr').length;
+    const mais = () => document.getElementById('gsc_bpf_more');
+    const semArtigos = !!document.querySelector('td.gsc_a_e');
+    let publicacoes = semArtigos ? 0 : contar();
+    let completo = semArtigos || !mais() || mais().disabled;
+
+    if (!completo) {
+        const usuario = new URLSearchParams(location.search).get('user');
+        let porEndereco = !!usuario;
+        for (let inicio = publicacoes, volta = 0; porEndereco && volta < 50; volta++) {
+            let html = null;
+            try {
+                const r = await fetch(`${location.origin}/citations?user=${encodeURIComponent(usuario)}&hl=en&cstart=${inicio}&pagesize=${LOTE}`, { credentials: 'include' });
+                if (r.ok && !/\/sorry\//.test(r.url)) html = await r.text();
+            } catch (e) { /* cai para os cliques */ }
+            if (html === null) { porEndereco = false; break; }
+            const noLote = /class="gsc_a_e"/.test(html) ? 0 : (html.match(/class="gsc_a_tr"/g) || []).length;
+            publicacoes += noLote;
+            inicio += LOTE;
+            if (noLote < LOTE) { completo = true; break; }
+            await espera(300);
+        }
+        if (!completo) {
+            // reserva: os cliques, contando o que estiver na página
+            for (let voltas = 0; mais() && !mais().disabled && voltas < 60; voltas++) {
+                const antes = contar();
+                mais().click();
+                for (let i = 0; i < 60 && contar() === antes && mais() && !mais().disabled; i++) await espera(250);
+                if (contar() === antes) break;
+            }
+            publicacoes = Math.max(publicacoes, contar());
+            completo = !mais() || mais().disabled;
+        }
+    }
+    return {
+        success: true,
+        url: location.href,
+        // metodo: 2 = contagem por lotes; dados gravados sem esta marca são da primeira
+        // versão (que parava em 100) e não são reaproveitados
+        stats: { citations: linhas[0], hIndex: linhas[1], i10Index: linhas[2], publications: publicacoes, completo: completo, metodo: 2 }
+    };
+}
+
 function extractMetrics() {
     const pageUrl = window.location.href;
     const pageTitle = document.title;
@@ -270,6 +339,45 @@ chrome.runtime.onInstalled.addListener((details) => {
                 console.error(`[JCRLattes ServiceWorker] Erro ao baixar binário: ${request.url}`, err);
                 sendResponse({ success: false, error: err.message });
             });
+        return true;
+    }
+
+    // Métricas do perfil no Google Scholar: abre o perfil numa aba em segundo plano, lê
+    // (extractScholarMetrics) e fecha. Só aceita endereço de perfil em scholar.google.com.
+    if (request.action === 'fetch_scholar_stats' && request.url) {
+        if (!/^https:\/\/scholar\.google\.com\/citations\?/.test(request.url)) {
+            sendResponse({ success: false, error: 'Endereço do Google Scholar inválido.' });
+            return false;
+        }
+        let abaScholar = null, respondido = false, ouvinte = null;
+        const fim = (resposta) => {
+            if (respondido) return;
+            respondido = true;
+            if (ouvinte) chrome.tabs.onUpdated.removeListener(ouvinte);
+            if (abaScholar !== null) chrome.tabs.remove(abaScholar).catch(() => {});
+            sendResponse(resposta);
+        };
+        let lendo = false;
+        ouvinte = (idAba, mudanca, aba) => {
+            if (idAba !== abaScholar || mudanca.status !== 'complete' || lendo) return;
+            const url = aba.url || '';
+            // o Google mandou para a verificação: para aqui, sem insistir
+            if (/google\.[a-z.]+\/sorry\//.test(url)) { fim({ success: false, captcha: true, error: 'O Google pediu verificação (captcha).' }); return; }
+            if (!/^https:\/\/scholar\.google\.[a-z.]+\/citations/.test(url)) return;
+            lendo = true;
+            chrome.scripting.executeScript({ target: { tabId: abaScholar }, func: extractScholarMetrics }, (resultados) => {
+                if (chrome.runtime.lastError || !resultados || !resultados[0]) {
+                    fim({ success: false, error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'Falha ao ler o perfil.' });
+                } else {
+                    fim(resultados[0].result || { success: false, error: 'Sem resultado.' });
+                }
+            });
+        };
+        chrome.tabs.onUpdated.addListener(ouvinte);
+        chrome.tabs.create({ url: request.url, active: false }, (aba) => {
+            abaScholar = aba.id;
+            setTimeout(() => fim({ success: false, error: 'Tempo esgotado (90 s).' }), 90000);
+        });
         return true;
     }
 

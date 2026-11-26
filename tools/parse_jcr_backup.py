@@ -57,6 +57,26 @@ class CVData:
     id_periods: Dict[str, Dict[str, Optional[int]]] = field(default_factory=dict)
 
     @property
+    def google_scholar_link(self) -> str:
+        '''Endereco do perfil no Google Scholar (campo googleScholarLink); '' quando o
+        curriculo nao informa o endereco ou o registro e anterior a esse campo.'''
+        return str(self.raw_data.get('googleScholarLink') or '')
+
+    @property
+    def scholar_stats(self) -> Dict[str, Any]:
+        '''Metricas lidas do perfil no Google Scholar: h_index, i10_index, citations,
+        publications e updated_at (ISO). Valores None/'' quando nunca foram buscadas.'''
+        r = self.raw_data
+        vazio = lambda v: None if v in ('', None) else v
+        return {
+            'h_index': vazio(r.get('scholarHIndex')),
+            'i10_index': vazio(r.get('scholarI10Index')),
+            'citations': vazio(r.get('scholarCitations')),
+            'publications': vazio(r.get('scholarPublications')),
+            'updated_at': str(r.get('scholarUpdatedAt') or ''),
+        }
+
+    @property
     def rid_updated_at(self) -> str:
         """Quando os dados do ResearcherID foram buscados (ISO, campo ridUpdatedAt); '' se
         nunca foram ou se o registro e anterior a esse campo."""

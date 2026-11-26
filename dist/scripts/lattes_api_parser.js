@@ -40,7 +40,7 @@
     const SUBTIPO_ARTIGO = /artigos completos/i;
     const ET_AL = /^et\.?\s?al\.?$/i;
     // códigos de base bibliográfica nas citações de cada artigo
-    const BASE_WOS = 1, BASE_SCOPUS = 3;
+    const BASE_WOS = 1, BASE_SCOPUS = 3, BASE_SCHOLAR = 4;
 
     // ------------------------------------------------------------------
     // Publicações
@@ -130,11 +130,15 @@
         const gerais = doc['DADOS-GERAIS'] || {};
         const id = limpo(doc['NUMERO-IDENTIFICADOR'] || (estrutura && estrutura.cvid) || '');
         const wos = (Array.isArray(citacoes) ? citacoes : []).find(c => c && c.codBaseBibliog === BASE_WOS);
+        const scholar = (Array.isArray(citacoes) ? citacoes : []).find(c => c && c.codBaseBibliog === BASE_SCHOLAR);
         return {
             name: limpo(gerais['NOME-COMPLETO']),
             // o mesmo identificador que os outros leitores gravam
             link: /^\d{16}$/.test(id) ? `http://lattes.cnpq.br/${id}` : '',
             researcherIdLink: wos && /researcherid\.com\/rid\//i.test(wos.txtUriPesquisadorBase || '') ? wos.txtUriPesquisadorBase : '',
+            // perfil no Google Scholar: só quando há um endereço de perfil (no campo
+            // próprio ou escrito no argumento); nome solto não serve
+            googleScholarLink: scholar ? (pagina()._linkDoScholar(scholar.txtUriPesquisadorBase) || pagina()._linkDoScholar(scholar.txtArgumento)) : '',
             // a bolsa de produtividade não vem em nenhuma resposta examinada (ver o
             // leitor da página): fica vazia e quem grava não apaga a que já conhece
             fellowshipText: '',
