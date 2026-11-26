@@ -142,10 +142,10 @@ async function loadSettings() {
 }
 
 // Busca das métricas no ResearcherID / Web of Science (aba oculta aberta pelo
-// background, ação 'fetch_rid_stats'). Desligada por enquanto, a pedido (2026-11-24):
-// com false nada é pedido ao background e o painel segue só com os dados do currículo.
-// Para religar, basta voltar a true.
-const BUSCAR_RID = false;
+// background, ação 'fetch_rid_stats'). Com false nada é pedido ao background e o painel
+// segue só com os dados do currículo. Esteve desligada em 2026-11-24, durante a
+// adaptação ao Lattes novo; religada em 2026-11-25, a pedido.
+const BUSCAR_RID = true;
 
 // Curriculo lido pela API (window.JCRLattesApi) enquanto a pagina nao tem a lista de
 // artigos inteira; null quando nao foi preciso ou a API falhou. paginaCompletaDepois
