@@ -236,7 +236,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 // versoes antigas (cores, sobretudo) ficavam valendo por cima dos padroes novos. O
 // piccTools tambem volta a ficar desligado. So opcoes sao apagadas: curriculos,
 // propostas e a autorizacao de membro de CA nao sao tocados.
-const RESET_DE_OPCOES_NA_VERSAO = '2.0.1';
+const RESET_DE_OPCOES_NA_VERSAO = '2.0.2';
 const RESET_DE_OPCOES_CHAVE = 'jcr_reset_opcoes_2_0_1';
 
 // a < b, comparando versoes "x.y.z" numero a numero

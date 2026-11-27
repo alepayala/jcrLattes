@@ -1,4 +1,4 @@
-JCRLattes - Versão 2.0.1
+JCRLattes - Versão 2.0.2
 
 Resumo:
 Injete automaticamente o Fator de Impacto (JCR) em currículos Lattes, gerencie um banco de dados local de pesquisadores, gere relatórios avançados de grupos de pesquisa e analise a produção científica, patentes, autoria e orientações em segundos.
@@ -24,7 +24,7 @@ Principais Funcionalidades:
 * Citação e Índice H: Consolidação automática do Índice H e número de citações para Web of Science e Scopus. Quando o currículo informa o endereço do perfil no Google Scholar, a extensão lê de lá o índice H, o i10, as citações e o número de publicações, mostra junto das citações e guarda no banco de dados.
 
 2. Gerenciamento e Banco de Dados Local:
-* Banco de Dados de Currículos: Salve múltiplos currículos Lattes localmente no seu navegador para consultas futuras e análises comparativas, com visualização nativa do Índice H e total de citações diretamente na listagem.
+* Banco de Dados de Currículos: Salve múltiplos currículos Lattes localmente no seu navegador para consultas futuras e análises comparativas, com visualização nativa do Índice H, do total de citações e da bolsa vigente no CNPq (com o nome completo ao passar o mouse) diretamente na listagem.
 * Consolidação Instantânea de Grupos: Atribua IDs customizados aos currículos para compilar métricas integradas em tempo real. O mesmo campo de ID filtra a tabela do banco: sem currículos marcados, digite ou escolha um ID para ver só os membros daquele grupo. Quem participou do grupo só por um tempo pode ter o período (início e fim) registrado ao receber o ID, e o relatório do grupo conta apenas a produção desse intervalo; o padrão é toda a carreira, aceito com um Enter.
 * Relatório de Seleção: Gere o resumo e o relatório consolidado apenas dos currículos marcados na tabela, sem precisar criar um ID de grupo — ideal para análises pontuais.
 * Salvamento Simultâneo Confiável: Cada currículo é armazenado individualmente no banco local. Atualize vários CVs em abas paralelas sem risco de um sobrescrever o outro.

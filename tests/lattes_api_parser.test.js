@@ -177,6 +177,20 @@ describe('lerCurriculo e buscarCurriculo', () => {
         assert.deepStrictEqual(r.identificacao, { name: 'Ana Beatriz Lins', link: 'http://lattes.cnpq.br/' + ID,
             researcherIdLink: 'http://www.researcherid.com/rid/X-0000-2000', googleScholarLink: '', fellowshipText: '', fellowshipString: '', fellowshipUnknown: true });
         assert.deepStrictEqual(r.apelidos, ['LINS, ANA B. M.', 'LINS, A.']);
+    });
+    test('bolsa vigente: sigla e categoria do bloco BOLSA, de qualquer modalidade', () => {
+        const com = (BOLSA) => API.lerCurriculo({ estrutura: { cvid: ID, cvdoc: JSON.stringify({ 'NUMERO-IDENTIFICADOR': ID, 'DADOS-GERAIS': { 'NOME-COMPLETO': 'Ana Beatriz Lins' }, BOLSA }) } }).identificacao;
+        const pq = com({ codCategoria: '1B', dscModalidade: 'Produtividade em Pesquisa', codModalidade: 'PQ' });
+        assert.strictEqual(pq.fellowshipString, 'PQ 1B');
+        assert.strictEqual(pq.fellowshipText, 'Bolsista de Produtividade em Pesquisa 1B');
+        assert.strictEqual(pq.fellowshipUnknown, false);
+        assert.strictEqual(com({ codCategoria: '2', dscModalidade: 'Pesquisador Visitante', codModalidade: 'PV' }).fellowshipString, 'PV 2');
+        assert.strictEqual(com({ codCategoria: '', dscModalidade: 'Apoio Técnico', codModalidade: '' }).fellowshipString, 'Apoio Técnico');
+        assert.strictEqual(com({ codCategoria: '', dscModalidade: 'Doutorado', codModalidade: 'GD' }).fellowshipString, 'GD');
+        assert.strictEqual(com(null).fellowshipUnknown, true);
+    });
+    test('monta o curriculo inteiro (continuacao)', () => {
+        const r = API.lerCurriculo(bruto);
         assert.strictEqual(r.publications.length, 1);
         assert.strictEqual(r.publications[0].authorRank, 2);
         assert.strictEqual(r.titulacao, null);

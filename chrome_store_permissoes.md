@@ -14,7 +14,7 @@
 
 --------------------------------------------------
 
-### 📋 TEXTOS DO FORMULÁRIO — VERSÃO 2.0.1 (cada campo aceita até 1000 caracteres)
+### 📋 TEXTOS DO FORMULÁRIO — VERSÃO 2.0.2 (cada campo aceita até 1000 caracteres)
 
 > O que vai em cada campo da aba "Práticas de privacidade" do console. "downloads" e
 > "Permissão do host" (versão curta) estão nas seções abaixo. O propósito não cita Qualis: a

@@ -268,6 +268,31 @@
         return achado;
     }
 
+    // Bolsa vigente, do texto que o site mostra no cartão do pesquisador (ex.:
+    // "Bolsista de produtividade em pesquisa 1B") para a forma curta que o banco guarda
+    // ("PQ 1B"). Não fecha em produtividade. O site escreve o nome da modalidade e, no
+    // fim, a categoria ("1B") ou, quando a bolsa não tem categoria, a sigla da própria
+    // modalidade ("Bolsista de doutorado GD"): essa sigla é o que se guarda ("GD"), o
+    // mesmo que o leitor da API entrega. Sem sigla nem nome conhecido, fica o nome que o
+    // site escreveu. Vazio sem texto.
+    function _bolsaDoCartao(texto) {
+        const t = limpo(texto);
+        if (!t) return '';
+        let corpo = t.replace(/^bolsista\s+(?:de|do|da)\s+/i, '');
+        let nivel = '';
+        const m = corpo.match(/^(.*\S)\s+(SR|[0-9][A-Z]?|[A-Z])$/);
+        if (m) { corpo = m[1]; nivel = m[2]; }
+        let sigla = '';
+        if (/produtividade\s+em\s+pesquisa/i.test(corpo)) sigla = 'PQ';
+        else if (/desenvolvimento\s+tecnol|desen\.\s*tec/i.test(corpo)) sigla = 'DT';
+        if (sigla) return nivel ? `${sigla} ${nivel}` : sigla;
+        // modalidade sem categoria: o que vem no fim, em maiúsculas, é a sigla dela
+        const siglaNoFim = corpo.match(/\s([A-Z]{2,5})$/);
+        if (!nivel && siglaNoFim) return siglaNoFim[1];
+        const nome = corpo.charAt(0).toUpperCase() + corpo.slice(1);
+        return nivel ? `${nome} ${nivel}` : nome;
+    }
+
     function lerIdentificacao(doc) {
         const d = doc || (typeof document !== 'undefined' ? document : null);
         if (!d) return { name: '', link: '' };
@@ -283,20 +308,23 @@
         const link = id ? `http://lattes.cnpq.br/${id}` : '';
 
         const rid = d.querySelector('a[href*="researcherid.com/rid/"]');
-        // Bolsa de produtividade: o site novo ainda não a mostra em campo próprio (o
-        // antigo tinha a tarja no cabeçalho). Fica vazia até aparecer. NÃO ler do texto
-        // do resumo: ali é texto livre do pesquisador, não um dado do CNPq, e pode
-        // estar desatualizado ou falar de outra coisa. Quem grava o CV não deve trocar
-        // uma bolsa já conhecida por este vazio.
+        // Bolsa vigente: o site a mostra no cartão do pesquisador (p.bolsa-vigente),
+        // dado do CNPq. NÃO ler do texto do resumo: ali é texto livre do pesquisador e
+        // pode estar desatualizado ou falar de outra coisa. Sem a linha no cartão não dá
+        // para distinguir "sem bolsa" de "o site deixou de mostrar": fica desconhecida,
+        // e quem grava o CV não troca uma bolsa já conhecida por este vazio.
+        const linhaBolsa = d.querySelector('app-id-card p.bolsa-vigente, p.bolsa-vigente');
+        const fellowshipText = linhaBolsa ? limpo(linhaBolsa.textContent) : '';
+        const fellowshipString = _bolsaDoCartao(fellowshipText);
         return {
             name, link,
             researcherIdLink: rid ? rid.href : '',
             // '' quando o pesquisador não pôs o endereço do perfil (só o nome, por exemplo)
             googleScholarLink: lerLinkDoScholar(d),
-            fellowshipText: '',
-            fellowshipString: '',
+            fellowshipText,
+            fellowshipString,
             // quem grava o CV usa isto para não apagar a bolsa que já tem
-            fellowshipUnknown: true
+            fellowshipUnknown: !fellowshipString
         };
     }
 
@@ -603,6 +631,7 @@
         _areaEInstituicao: _areaEInstituicao,
         _idLattesDoEndereco: _idLattesDoEndereco,
         _linkDoScholar: _linkDoScholar,
+        _bolsaDoCartao: _bolsaDoCartao,
         lerLinkDoScholar: lerLinkDoScholar,
         _categoriaDeOrientacao: _categoriaDeOrientacao,
         _tipoDoEvento: _tipoDoEvento

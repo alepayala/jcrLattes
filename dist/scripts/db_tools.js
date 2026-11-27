@@ -2185,8 +2185,8 @@ window.JCRDBTools = {
                 this.currentCvData.customId = '';
             }
             if (existing.idPeriodos) this.currentCvData.idPeriodos = existing.idPeriodos;
-            // O Lattes novo ainda nao informa a bolsa (fellowshipUnknown): um CV lido de
-            // la nao apaga a bolsa que o banco ja conhece.
+            // Leitura do Lattes novo sem bolsa (fellowshipUnknown): nao apaga a bolsa
+            // que o banco ja conhece.
             const semBolsaNaFonte = !!(this.lastArgs && this.lastArgs.nameLink && this.lastArgs.nameLink.fellowshipUnknown);
             if (semBolsaNaFonte && !this.currentCvData.fellowshipString && existing.fellowshipString) {
                 this.currentCvData.fellowshipString = existing.fellowshipString;
@@ -2928,15 +2928,13 @@ window.JCRDBTools = {
                 }
                 if ((m.key === 'lastAuthorCount' && !window.JCRReportUtils.ULTIMO_AUTOR_ATIVO) ||
                     (m.key === 'gcCount' && !window.JCRReportUtils.GRANDES_COLABORACOES_ATIVAS)) title = window.JCRReportUtils.TEXTO_DESABILITADO;
-                // Bolsa no banco de CVs: o Lattes novo (pagina e API) ainda nao informa a bolsa de
-                // produtividade, entao o valor mostrado e o da ultima leitura pelo formato antigo
-                // (saveCurrentCV o preserva) e CV novo entra sem bolsa. O aviso sai do cabecalho
-                // quando os leitores do site novo passarem a ler a bolsa (fellowshipUnknown).
+                // Bolsa no banco de CVs: o Lattes novo (pagina e API) informa a bolsa VIGENTE.
+                // Quando ele nao informa nenhuma, o banco mantem a ultima que conhecia
+                // (saveCurrentCV, fellowshipUnknown): nao da para distinguir "a bolsa acabou"
+                // de "o site deixou de mostrar". Dai o aviso na dica.
                 if (m.key === 'fellowshipString' && !isProcessoOnly) {
-                    label = `${label} <span style="color:#e67e22;">⚠️</span>`;
-                    title = 'Bolsa e nível. Atenção: o novo currículo Lattes ainda não traz esta informação. '
-                        + 'O valor mostrado é o da última leitura pelo formato antigo e pode estar desatualizado; '
-                        + 'currículos adicionados só pelo site novo ficam sem bolsa.';
+                    title = 'Bolsa vigente e nível, como o currículo Lattes informa. '
+                        + 'Se o currículo deixa de informar uma bolsa, o banco mantém a última conhecida, que pode estar encerrada.';
                 }
                 const titleAttr = title ? ` title="${title}"` : '';
                 let classes = ['sortable-header'];
@@ -3039,6 +3037,9 @@ window.JCRDBTools = {
                     } else if (m.key === 'fellowshipString') {
                         const isValid = (s) => s && typeof s === 'string' && s.trim() !== '' && s.trim() !== '-';
                         let bolsaVal = (cv.proponente && isValid(cv.proponente.bolsa)) ? cv.proponente.bolsa : (isValid(cv.fellowshipString) ? cv.fellowshipString : (isValid(cv.bolsa) ? cv.bolsa : ''));
+                        // Dica da celula: a bolsa por extenso, como o curriculo a escreve
+                        // ("Bolsista de doutorado GD"), do mesmo registro de onde veio a sigla.
+                        let bolsaPorExtenso = (isValid(bolsaVal) && bolsaVal === cv.fellowshipString && isValid(cv.fellowshipText)) ? cv.fellowshipText : '';
                         
                         if (!isValid(bolsaVal)) {
                             const propName = cv.name || (cv.proponente && cv.proponente.name);
@@ -3046,6 +3047,7 @@ window.JCRDBTools = {
                             const matchingCv = allCvRecords.find(c => !c.isProcesso && this.cvMatches(c, propName, propLattes));
                             if (matchingCv && isValid(matchingCv.fellowshipString)) {
                                 bolsaVal = matchingCv.fellowshipString;
+                                if (isValid(matchingCv.fellowshipText)) bolsaPorExtenso = matchingCv.fellowshipText;
                             } else if (matchingCv && isValid(matchingCv.bolsa)) {
                                 bolsaVal = matchingCv.bolsa;
                             }
@@ -3067,7 +3069,7 @@ window.JCRDBTools = {
 
                         const displayBolsa = isValid(bolsaVal) ? String(bolsaVal).replace('-', ' ').trim() : '-';
                         const badgeHtml = displayBolsa !== '-' 
-                            ? `<span style="background: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7; font-weight: bold; padding: 3px 10px; border-radius: 4px; font-size: 0.85em; display: inline-block; white-space: nowrap;">${this._esc(displayBolsa)}</span>`
+                            ? `<span${bolsaPorExtenso ? ` title="${this._esc(bolsaPorExtenso)}"` : ''} style="background: #E8F5E9; color: #2E7D32; border: 1px solid #A5D6A7; font-weight: bold; padding: 3px 10px; border-radius: 4px; font-size: 0.85em; display: inline-block; white-space: nowrap;">${this._esc(displayBolsa)}</span>`
                             : `<span style="color: #888; font-weight: bold;">-</span>`;
                         tbodyHtml += `<td${classAttr} style="text-align: center; white-space: nowrap; min-width: 95px;">${badgeHtml}</td>`;
                     } else if (m.key === 'instituicaoExecutora') {

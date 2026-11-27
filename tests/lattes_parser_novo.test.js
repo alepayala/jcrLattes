@@ -214,3 +214,27 @@ describe('_linkDoScholar', () => {
         assert.strictEqual(N._linkDoScholar(null), '');
     });
 });
+
+describe('_bolsaDoCartao', () => {
+    test('produtividade em pesquisa e em desenvolvimento tecnologico viram PQ e DT', () => {
+        assert.strictEqual(N._bolsaDoCartao(' Bolsista de produtividade em pesquisa 1B '), 'PQ 1B');
+        assert.strictEqual(N._bolsaDoCartao('Bolsista de Produtividade em Pesquisa 2'), 'PQ 2');
+        assert.strictEqual(N._bolsaDoCartao('Bolsista de produtividade em pesquisa SR'), 'PQ SR');
+        assert.strictEqual(N._bolsaDoCartao('Bolsista de produtividade em desenvolvimento tecnológico e extensão inovadora 2'), 'DT 2');
+    });
+    test('sem nivel, so a sigla', () => {
+        assert.strictEqual(N._bolsaDoCartao('Bolsista de produtividade em pesquisa'), 'PQ');
+    });
+    test('modalidade sem categoria: vale a sigla que o site poe no fim', () => {
+        assert.strictEqual(N._bolsaDoCartao('Bolsista de doutorado GD'), 'GD');
+        assert.strictEqual(N._bolsaDoCartao('Bolsista de iniciação científica PIBIC'), 'PIBIC');
+    });
+    test('outra modalidade fica com o nome que o site escreveu', () => {
+        assert.strictEqual(N._bolsaDoCartao('Bolsista de pesquisador visitante 2'), 'Pesquisador visitante 2');
+        assert.strictEqual(N._bolsaDoCartao('Bolsista de apoio técnico'), 'Apoio técnico');
+    });
+    test('vazio', () => {
+        assert.strictEqual(N._bolsaDoCartao(''), '');
+        assert.strictEqual(N._bolsaDoCartao(null), '');
+    });
+});

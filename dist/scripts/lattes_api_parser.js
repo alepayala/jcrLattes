@@ -125,8 +125,24 @@
         return doc || {};
     }
 
+    // Bolsa vigente, do bloco BOLSA da resposta "estrutura":
+    // { codModalidade: 'PQ', dscModalidade: 'Produtividade em Pesquisa', codCategoria: '1B' }.
+    // Vale para qualquer modalidade: a sigla e a do proprio CNPq. Sem o bloco, tudo vazio.
+    function _bolsa(doc) {
+        const b = doc && doc.BOLSA;
+        if (!b || typeof b !== 'object') return { texto: '', sigla: '' };
+        const cat = limpo(b.codCategoria), dsc = limpo(b.dscModalidade);
+        const mod = limpo(b.codModalidade) || dsc;
+        if (!mod) return { texto: '', sigla: '' };
+        return {
+            texto: limpo(`Bolsista de ${dsc || mod} ${cat}`),
+            sigla: cat ? `${mod} ${cat}` : mod
+        };
+    }
+
     function _identificacao(estrutura, citacoes) {
         const doc = _cvdoc(estrutura);
+        const bolsa = _bolsa(doc);
         const gerais = doc['DADOS-GERAIS'] || {};
         const id = limpo(doc['NUMERO-IDENTIFICADOR'] || (estrutura && estrutura.cvid) || '');
         const wos = (Array.isArray(citacoes) ? citacoes : []).find(c => c && c.codBaseBibliog === BASE_WOS);
@@ -139,11 +155,11 @@
             // perfil no Google Scholar: só quando há um endereço de perfil (no campo
             // próprio ou escrito no argumento); nome solto não serve
             googleScholarLink: scholar ? (pagina()._linkDoScholar(scholar.txtUriPesquisadorBase) || pagina()._linkDoScholar(scholar.txtArgumento)) : '',
-            // a bolsa de produtividade não vem em nenhuma resposta examinada (ver o
-            // leitor da página): fica vazia e quem grava não apaga a que já conhece
-            fellowshipText: '',
-            fellowshipString: '',
-            fellowshipUnknown: true
+            // sem o bloco BOLSA nao da para distinguir "sem bolsa" de "a API deixou de
+            // informar": fica desconhecida e quem grava nao apaga a que ja conhece
+            fellowshipText: bolsa.texto,
+            fellowshipString: bolsa.sigla,
+            fellowshipUnknown: !bolsa.sigla
         };
     }
 
