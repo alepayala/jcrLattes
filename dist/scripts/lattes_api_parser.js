@@ -147,6 +147,7 @@
         const id = limpo(doc['NUMERO-IDENTIFICADOR'] || (estrutura && estrutura.cvid) || '');
         const wos = (Array.isArray(citacoes) ? citacoes : []).find(c => c && c.codBaseBibliog === BASE_WOS);
         const scholar = (Array.isArray(citacoes) ? citacoes : []).find(c => c && c.codBaseBibliog === BASE_SCHOLAR);
+        const scopus = (Array.isArray(citacoes) ? citacoes : []).find(c => c && c.codBaseBibliog === BASE_SCOPUS);
         return {
             name: limpo(gerais['NOME-COMPLETO']),
             // o mesmo identificador que os outros leitores gravam
@@ -155,6 +156,8 @@
             // perfil no Google Scholar: só quando há um endereço de perfil (no campo
             // próprio ou escrito no argumento); nome solto não serve
             googleScholarLink: scholar ? (pagina()._linkDoScholar(scholar.txtUriPesquisadorBase) || pagina()._linkDoScholar(scholar.txtArgumento)) : '',
+            // Scopus ID: só quando o endereço ou o argumento o trazem; nomes de busca não servem
+            scopusAuthorId: scopus ? (pagina()._idScopusDoArgumento(scopus.txtUriPesquisadorBase) || pagina()._idScopusDoArgumento(scopus.txtArgumento)) : '',
             // sem o bloco BOLSA nao da para distinguir "sem bolsa" de "a API deixou de
             // informar": fica desconhecida e quem grava nao apaga a que ja conhece
             fellowshipText: bolsa.texto,

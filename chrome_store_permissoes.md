@@ -38,16 +38,16 @@ A extensão guarda no navegador ('chrome.storage.local') as opções do usuário
 A permissão 'unlimitedStorage' é essencial porque a extensão atua como um banco de dados local off-line ('chrome.storage.local') para pesquisadores e programas de pós-graduação. Os usuários podem salvar dezenas ou até centenas de currículos — contendo grandes arranjos de dados de artigos, patentes e orientações — para gerar relatórios coletivos. Esse volume de dados tabulares excede facilmente a cota padrão de 5MB imposta pelo Chrome, sendo o armazenamento ilimitado indispensável para evitar perdas de dados acadêmicos salvos localmente.
 ```
 
-**Justificativa de tabs** (498 caracteres):
+**Justificativa de tabs** (526 caracteres):
 
 ```
-A permissão 'tabs' é requerida para a extensão abrir e gerenciar abas. (1) Abre a página do banco de dados e os relatórios da própria extensão. (2) Para completar o relatório com o perfil público do pesquisador na Web of Science/ResearcherID e no Google Scholar, cujo endereço consta no currículo, abre a página do perfil numa aba inativa ('chrome.tabs.create({ active: false })'), acompanha o carregamento ('chrome.tabs.onUpdated') e fecha a aba em seguida, sem interromper a navegação do usuário.
+A permissão 'tabs' é requerida para a extensão abrir e gerenciar abas. (1) Abre a página do banco de dados e os relatórios da própria extensão. (2) Para completar o relatório com o perfil público do pesquisador na Web of Science/ResearcherID, no Google Scholar e no Scopus, cujo endereço ou identificador consta no currículo, abre a página do perfil numa aba inativa ('chrome.tabs.create({ active: false })'), acompanha o carregamento ('chrome.tabs.onUpdated') e fecha a aba em seguida, sem interromper a navegação do usuário.
 ```
 
-**Justificativa de scripting** (446 caracteres):
+**Justificativa de scripting** (457 caracteres):
 
 ```
-A permissão 'scripting' é necessária para ler as métricas públicas do pesquisador. O JCRLattes usa 'chrome.scripting.executeScript' somente nas abas da Web of Science/ResearcherID e do Google Scholar que ele mesmo abre temporariamente em segundo plano, para ler o índice H, o total de citações e o número de publicações, sem exigir que o usuário copie esses dados à mão. O script faz parte do pacote da extensão; nenhum código remoto é executado.
+A permissão 'scripting' é necessária para ler as métricas públicas do pesquisador. O JCRLattes usa 'chrome.scripting.executeScript' somente nas abas da Web of Science/ResearcherID, do Google Scholar e do Scopus que ele mesmo abre temporariamente em segundo plano, para ler o índice H, o total de citações e o número de publicações, sem exigir que o usuário copie esses dados à mão. O script faz parte do pacote da extensão; nenhum código remoto é executado.
 ```
 
 --------------------------------------------------
@@ -60,17 +60,17 @@ A permissão 'scripting' é necessária para ler as métricas públicas do pesqu
 The extension only reads pages the user can already open; it sends no data anywhere and stores everything locally.
 - buscatextual.cnpq.br, busca-cv-lattes.cnpq.br: the Lattes CV pages (old and new address), where the impact factor of each article is annotated.
 - busca-cv-lattes-api.cnpq.br: the public data service the new Lattes site itself calls; used to refresh CVs already saved in the local database, at the user's request, without opening one tab per CV.
-- researcherid.com, webofscience.com, scholar.google.com: the researcher's public profile, whose address is given in the CV; read to get the h-index, citations and number of publications (Scholar: at most once a day per researcher).
+- researcherid.com, webofscience.com, scholar.google.com, scopus.com: the researcher's public profile, whose address or ID is given in the CV; read to get the h-index, citations and number of publications (at most once a day per researcher).
 - efomento.cnpq.br, anexosform.cnpq.br, plsql1.cnpq.br: CNPq's grant system. For authorized reviewers only, reads the judgment spreadsheet, proposal PDFs and archived CVs they already have access to, and organizes them locally.
 ```
 
-Em português (962 caracteres):
+Em português (971 caracteres):
 
 ```
 A extensão só lê páginas que o usuário já consegue abrir; não envia dados a lugar nenhum e guarda tudo localmente.
 - buscatextual.cnpq.br, busca-cv-lattes.cnpq.br: as páginas do currículo Lattes (endereço antigo e novo), onde o fator de impacto de cada artigo é anotado.
 - busca-cv-lattes-api.cnpq.br: serviço de dados públicos que o próprio site novo do Lattes consulta; usado para atualizar currículos já salvos no banco local, a pedido do usuário, sem abrir uma aba por currículo.
-- researcherid.com, webofscience.com, scholar.google.com: perfil público do pesquisador, cujo endereço consta no currículo; lido para obter índice h, citações e número de publicações (Scholar: no máximo uma vez por dia por pesquisador).
+- researcherid.com, webofscience.com, scholar.google.com, scopus.com: perfil público do pesquisador, cujo endereço ou ID consta no currículo; lido para obter índice h, citações e número de publicações (no máximo uma vez por dia por pesquisador).
 - efomento.cnpq.br, anexosform.cnpq.br, plsql1.cnpq.br: sistema de fomento do CNPq. Só para avaliadores autorizados: lê a planilha de julgamento, os PDFs das propostas e os currículos arquivados a que já têm acesso, e os organiza localmente.
 ```
 
@@ -88,6 +88,9 @@ A extensão só lê páginas que o usuário já consegue abrir; não envia dados
 > * `scholar.google.com` — when the CV itself gives the address of the researcher's public
 >   Google Scholar profile, the extension opens that profile to read the public h-index,
 >   i10-index, citation count and number of publications. At most once a day per researcher.
+> * `www.scopus.com` — when the CV gives the researcher's Scopus ID, the extension opens the
+>   public author page (Scopus Preview, no login) to read the h-index, citation count and
+>   number of documents. At most once a day per researcher.
 > * `researcherid.com` / `webofscience.com` — read the user's public citation and h-index
 >   figures to complete the production report.
 > * `efomento.cnpq.br` — CNPq's grant management system. For users who are already
@@ -112,6 +115,9 @@ A extensão só lê páginas que o usuário já consegue abrir; não envia dados
 > * `scholar.google.com` — quando o próprio currículo informa o endereço do perfil público do
 >   pesquisador no Google Scholar, a extensão abre esse perfil para ler o índice h, o i10, as
 >   citações e o número de publicações, todos públicos. No máximo uma vez por dia por pesquisador.
+> * `www.scopus.com` — quando o currículo informa o Scopus ID do pesquisador, a extensão abre a
+>   página pública do autor (Scopus Preview, sem login) para ler o índice h, as citações e o
+>   número de documentos. No máximo uma vez por dia por pesquisador.
 > * `researcherid.com` / `webofscience.com` — leitura das citações e do índice h públicos.
 > * `efomento.cnpq.br` — sistema de fomento do CNPq. Para quem já é avaliador autorizado,
 >   a extensão lê a planilha de julgamento **à qual essa pessoa já tem acesso** e organiza
@@ -131,15 +137,15 @@ A extensão só lê páginas que o usuário já consegue abrir; não envia dados
 >   documentos ultrapassam a cota padrão.
 > * `tabs` — abrir a página do banco de dados e os relatórios em novas abas, e abrir (e fechar
 >   em seguida) a aba em segundo plano do perfil público do pesquisador no ResearcherID /
->   Web of Science e no Google Scholar.
+>   Web of Science, no Google Scholar e no Scopus.
 > * `scripting` — ler, na aba do perfil público do pesquisador que a extensão abre no
->   ResearcherID / Web of Science e no Google Scholar, o índice h, as citações e o número de
+>   ResearcherID / Web of Science, no Google Scholar e no Scopus, o índice h, as citações e o número de
 >   publicações (`chrome.scripting.executeScript` nessa aba, e só nela). A anotação do
 >   currículo em si é feita pelos content scripts declarados no manifest.
 >
 > English: `tabs` — open the extension's own database/report pages, and open (then close) a
-> background tab on the researcher's public ResearcherID / Web of Science and Google Scholar
-> profile. `scripting` — read the public h-index, citation count and number of publications
+> background tab on the researcher's public ResearcherID / Web of Science, Google Scholar and
+> Scopus profile. `scripting` — read the public h-index, citation count and number of publications
 > from that profile tab only (`chrome.scripting.executeScript`). `storage` /
 > `unlimitedStorage` — the CV database is kept in the user's browser.
 

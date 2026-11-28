@@ -249,6 +249,36 @@
         return /^https?:\/\//i.test(url) ? url : 'https://' + url;
     }
 
+    // Scopus ID (Author ID) no argumento da linha SCOPUS de "Resumo de citações por
+    // base". O campo é livre: há quem ponha "AU-ID(57194701676)", o endereço do perfil,
+    // só o número, ou os nomes usados na busca. Só vale o que for claramente o ID;
+    // qualquer outra coisa devolve '' e a base é ignorada.
+    function _idScopusDoArgumento(texto) {
+        const t = String(texto || '');
+        let m = t.match(/AU-?ID\s*\(\s*["']?\s*(\d{7,13})\s*["']?\s*\)/i);
+        if (!m) m = t.match(/scopus\.com\/[^\s"'<>]*\bauthor[Ii][Dd]=(\d{7,13})\b/);
+        if (!m) m = t.match(/^\s*(?:scopus\s*(?:author\s*)?id\s*[:=]?\s*)?(\d{9,13})\s*$/i);
+        return m ? m[1] : '';
+    }
+
+    // O Scopus ID do currículo: da âncora ou do texto do argumento da linha SCOPUS.
+    function lerIdScopus(doc) {
+        const d = doc || (typeof document !== 'undefined' ? document : null);
+        if (!d) return '';
+        const painel = _painel(d, 'producoes') || d;
+        let achado = '';
+        painel.querySelectorAll('tr').forEach(tr => {
+            if (achado) return;
+            const base = tr.querySelector('td[data-label="Base"]');
+            if (!base || !/scopus/i.test(base.textContent)) return;
+            const arg = tr.querySelector('td[data-label="Argumento"]');
+            if (!arg) return;
+            const ancoras = Array.from(arg.querySelectorAll('a[href]')).map(a => a.getAttribute('href')).join(' ');
+            achado = _idScopusDoArgumento(ancoras) || _idScopusDoArgumento(arg.textContent);
+        });
+        return achado;
+    }
+
     // Link do Google Scholar na tabela "Resumo de citações por base": o da âncora da
     // linha, se houver, ou o que estiver escrito no argumento.
     function lerLinkDoScholar(doc) {
@@ -321,6 +351,8 @@
             researcherIdLink: rid ? rid.href : '',
             // '' quando o pesquisador não pôs o endereço do perfil (só o nome, por exemplo)
             googleScholarLink: lerLinkDoScholar(d),
+            // '' quando o argumento do Scopus não traz o ID (nomes de busca, por exemplo)
+            scopusAuthorId: lerIdScopus(d),
             fellowshipText,
             fellowshipString,
             // quem grava o CV usa isto para não apagar a bolsa que já tem
@@ -632,6 +664,8 @@
         _idLattesDoEndereco: _idLattesDoEndereco,
         _linkDoScholar: _linkDoScholar,
         _bolsaDoCartao: _bolsaDoCartao,
+        _idScopusDoArgumento: _idScopusDoArgumento,
+        lerIdScopus: lerIdScopus,
         lerLinkDoScholar: lerLinkDoScholar,
         _categoriaDeOrientacao: _categoriaDeOrientacao,
         _tipoDoEvento: _tipoDoEvento

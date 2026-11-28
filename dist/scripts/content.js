@@ -176,6 +176,11 @@ const BUSCAR_RID = true;
 // perfil cujo endereço o currículo informa. Com false nada é pedido.
 const BUSCAR_SCHOLAR = true;
 
+// Busca das métricas no Scopus (aba em segundo plano, ação 'fetch_scopus_stats'): índice
+// H, citações e documentos do perfil do autor, quando o currículo informa o Scopus ID no
+// argumento da base. Com false nada é pedido.
+const BUSCAR_SCOPUS = true;
+
 // Curriculo lido pela API (window.JCRLattesApi) enquanto a pagina nao tem a lista de
 // artigos inteira; null quando nao foi preciso ou a API falhou. paginaCompletaDepois
 // resolve quando a pagina terminou de carregar e a montagem deve ser refeita.
@@ -1854,9 +1859,57 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
       });
   };
 
+  // Tabela do Scopus, depois da do Google Scholar (ou da do ResearcherID, ou das citações).
+  const injetarTabelaDoScopus = () => {
+      const anterior = document.getElementById('scopus-stats-table');
+      if (anterior) anterior.remove();
+      if (!nameLink.scopusStats) return;
+      const depoisDe = document.getElementById('scholar-stats-table') || document.getElementById('rid-stats-table')
+          || document.getElementById('tbody-citacoes')?.closest('.rodape-cv');
+      if (!depoisDe) return;
+      depoisDe.insertAdjacentHTML('afterend', window.JCRReportUtils.generateScopusTableHTML(nameLink.scopusStats, nameLink.scopusAuthorId));
+      const tabela = document.getElementById('scopus-stats-table');
+      if (tabela) tabela.style.display = jcrTablesState.citacoes ? 'none' : '';
+  };
+
+  // Busca as métricas do Scopus uma vez por carga da página (ou reaproveita as gravadas
+  // hoje), só quando o currículo traz o Scopus ID. Mesmo desenho do Google Scholar: o
+  // resultado fica em nameLink.scopusStats e a página é remontada. Se o Scopus pedir
+  // verificação, a busca para: a extensão não tenta passar por ela.
+  const buscarScopus = () => {
+      const urlScopus = window.JCRReportUtils.urlDoScopus(nameLink.scopusAuthorId);
+      if (!BUSCAR_SCOPUS || !urlScopus || window.__jcrScopusPedido) return;
+      window.__jcrScopusPedido = true;
+      const idLattes = ((nameLink.link || '').match(/\b\d{16}\b/) || [''])[0];
+      const concluir = (stats) => {
+          nameLink.scopusStats = stats;
+          processLattesPage(nameLink);
+      };
+      const gravado = (typeof window.JCRDBTools !== 'undefined' && typeof window.JCRDBTools.scopusGravadoHoje === 'function')
+          ? window.JCRDBTools.scopusGravadoHoje(nameLink.name, idLattes, nameLink.scopusAuthorId) : Promise.resolve(null);
+      gravado.then((deHoje) => {
+          if (deHoje) {
+              console.log('[JCRLattes] Scopus já atualizado hoje; usando os dados do banco.');
+              concluir(deHoje);
+              return;
+          }
+          console.log(`[JCRLattes] Buscando métricas no Scopus: ${urlScopus}`);
+          chrome.runtime.sendMessage({ action: 'fetch_scopus_stats', url: urlScopus }, (resposta) => {
+              if (chrome.runtime.lastError || !resposta || !resposta.success) {
+                  const motivo = (chrome.runtime.lastError && chrome.runtime.lastError.message) || (resposta && resposta.error) || 'sem resposta';
+                  console.warn(`[JCRLattes] Scopus não lido: ${motivo}`);
+                  return;
+              }
+              concluir(Object.assign({}, resposta.stats, { atualizadoEm: new Date().toISOString() }));
+          });
+      });
+  };
+
   const performRidExtractionAndInitPrivateTools = (isUnlocked) => {
       injetarTabelaDoScholar();
       buscarScholar();
+      injetarTabelaDoScopus();
+      buscarScopus();
       const injectRidTable = (ridStats) => {
           const citationContainer = document.getElementById('tbody-citacoes')?.closest('.rodape-cv');
           if (citationContainer) {

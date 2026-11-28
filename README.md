@@ -21,7 +21,7 @@ O repositório inclui:
 * **Segunda Linha de Gráficos**:
   - **Orientações por Ano**: Histograma de orientações concluídas de pós-graduação por ano (Pós-doutorado em Verde-azulado, Doutorado em Azul, Mestrado em Laranja), complementado por colunas para Orientações em Andamento (`EA`) com cores fracionadas, Iniciação Científica (`IC`) em Vermelho e Outras Orientações (`Out.`) em Cinza.
 * **Tabelas Estatísticas Dinâmicas**: Tabelas com Somatórios e Médias automáticas para períodos customizados.
-* **Citação e Índice H**: Consolidação automática do Índice H e número de citações para Web of Science e Scopus.
+* **Citação e Índice H**: Consolidação automática do Índice H e número de citações para Web of Science e Scopus. Quando o currículo informa o endereço do perfil no Google Scholar ou o Scopus ID, a extensão lê também esses perfis (índice H, citações e número de publicações).
 
 ### 2. Gerenciamento e Banco de Dados Local
 * **Banco de Dados de Currículos**: Salve múltiplos currículos Lattes localmente no seu navegador para consultas futuras e análises comparativas.

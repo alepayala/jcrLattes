@@ -1860,6 +1860,33 @@ window.JCRReportUtils = {
     ]);
   },
 
+  // Endereço do perfil do autor no Scopus a partir do Scopus ID; '' se não for um ID.
+  // Sem login a página abre como "Scopus Preview", que mostra os três números.
+  urlDoScopus: function (id) {
+    const m = String(id || '').match(/^\s*(\d{7,13})\s*$/);
+    return m ? `https://www.scopus.com/authid/detail.uri?authorId=${m[1]}` : '';
+  },
+
+  // Tabela do perfil no Scopus, na mesma grade das do ResearcherID e do Google Scholar.
+  // stats: { hIndex, publications, citations, citingDocuments, atualizadoEm }.
+  generateScopusTableHTML: function (stats, scopusId, atualizadoEm) {
+    const link = this.urlDoScopus(scopusId);
+    if (!stats || !link) return '';
+    const v = (x) => (x !== null && x !== undefined && x !== '' ? this._esc(String(x)) : '-');
+    const codigo = this._esc(String(scopusId).trim());
+    return this._tabelaDeBase('scopus-stats-table', [
+      { html: 'Scopus' + this._dataDaBusca(atualizadoEm || stats.atualizadoEm, 'Scopus'), dica: 'Perfil do autor no Scopus (Scopus ID informado no currículo)' },
+      { html: 'H-Index', dica: 'Índice h no Scopus' },
+      { html: 'Publicações', dica: 'Documentos do autor indexados no Scopus' },
+      { html: 'Citações', dica: 'Total de citações no Scopus' },
+      { html: 'Citado por', dica: 'Número de documentos que citam o autor no Scopus' },
+      { html: '' }
+    ], [
+      `<a href="${this._safeUrl(link)}" target="_blank" rel="noopener" title="Abrir o perfil no Scopus" style="color: #1565C0; text-decoration: none;">${codigo}</a>`,
+      v(stats.hIndex), v(stats.publications), v(stats.citations), v(stats.citingDocuments), ''
+    ]);
+  },
+
   // Tabela do ResearcherID / Web of Science. atualizadoEm: quando os dados foram buscados
   // (ISO); na falta dele vale ridStats.atualizadoEm. Registros antigos nao tem a data.
   // "Publicações" e o total indexado na Web of Science; "Core Collection" e a parte

@@ -67,6 +67,42 @@ async function extractScholarMetrics() {
     };
 }
 
+// Roda DENTRO da aba do perfil do autor no Scopus (injetada pelo 'fetch_scopus_stats').
+// Sem login a página é a "Scopus Preview", montada por script: espera os três números
+// aparecerem (até ~25 s) e os lê. Se a página for uma verificação anti-robô, devolve
+// captcha: true e não tenta mais nada: a extensão nunca tenta passar por ela.
+async function extractScopusMetrics() {
+    const espera = (ms) => new Promise(r => setTimeout(r, ms));
+    const num = (t) => { const n = parseInt(String(t || '').replace(/[^\d]/g, ''), 10); return isNaN(n) ? null : n; };
+    const verificacao = () => /just a moment|attention required|verify you are human|are you a robot/i.test(document.title + ' ' + (document.body ? document.body.innerText.slice(0, 400) : ''))
+        || !!document.querySelector('#challenge-form, #cf-challenge-running, iframe[src*="captcha"], iframe[src*="challenges.cloudflare.com"]');
+    const bloco = (id) => document.querySelector(`[data-testid="${id}"]`);
+    const valor = (id) => {
+        const b = bloco(id);
+        const el = b && (b.querySelector('[data-testid="unclickable-count"]') || b.querySelector('[data-testid="clickable-count"]'));
+        return el ? num(el.textContent) : null;
+    };
+    for (let i = 0; i < 100; i++) {
+        if (verificacao()) return { success: false, captcha: true, error: 'O Scopus pediu verificação.' };
+        if (bloco('metrics-section-h-index') && valor('metrics-section-h-index') !== null) break;
+        await espera(250);
+    }
+    const hIndex = valor('metrics-section-h-index');
+    if (hIndex === null) return { success: false, error: 'Página do autor no Scopus não reconhecida.' };
+    const citacoes = bloco('metrics-section-citations-count');
+    const citadoPor = citacoes && citacoes.querySelector('p strong');
+    return {
+        success: true,
+        url: location.href,
+        stats: {
+            hIndex: hIndex,
+            citations: valor('metrics-section-citations-count'),
+            publications: valor('metrics-section-document-count'),
+            citingDocuments: citadoPor ? num(citadoPor.textContent) : null
+        }
+    };
+}
+
 function extractMetrics() {
     const pageUrl = window.location.href;
     const pageTitle = document.title;
@@ -415,6 +451,46 @@ chrome.runtime.onInstalled.addListener((details) => {
         chrome.tabs.create({ url: request.url, active: false }, (aba) => {
             abaScholar = aba.id;
             setTimeout(() => fim({ success: false, error: 'Tempo esgotado (90 s).' }), 90000);
+        });
+        return true;
+    }
+
+    // Métricas do perfil do autor no Scopus: abre o perfil numa aba em segundo plano, lê
+    // (extractScopusMetrics) e fecha. Só aceita o endereço do perfil em www.scopus.com.
+    if (request.action === 'fetch_scopus_stats' && request.url) {
+        if (!/^https:\/\/www\.scopus\.com\/authid\/detail\.uri\?authorId=\d{7,13}$/.test(request.url)) {
+            sendResponse({ success: false, error: 'Endereço do Scopus inválido.' });
+            return false;
+        }
+        let abaScopus = null, respondido = false, ouvinte = null, lendo = false;
+        const fim = (resposta) => {
+            if (respondido) return;
+            respondido = true;
+            if (ouvinte) chrome.tabs.onUpdated.removeListener(ouvinte);
+            if (abaScopus !== null) chrome.tabs.remove(abaScopus).catch(() => {});
+            sendResponse(resposta);
+        };
+        ouvinte = (idAba, mudanca, aba) => {
+            if (idAba !== abaScopus || mudanca.status !== 'complete' || lendo) return;
+            const url = aba.url || '';
+            // foi levado para fora do perfil (login, outra página): para aqui
+            if (!/^https:\/\/www\.scopus\.com\/authid\/detail\.uri/.test(url)) {
+                if (/^https?:\/\//.test(url) && !/^https:\/\/www\.scopus\.com\//.test(url)) fim({ success: false, error: 'O Scopus redirecionou para outra página.' });
+                return;
+            }
+            lendo = true;
+            chrome.scripting.executeScript({ target: { tabId: abaScopus }, func: extractScopusMetrics }, (resultados) => {
+                if (chrome.runtime.lastError || !resultados || !resultados[0]) {
+                    fim({ success: false, error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'Falha ao ler o perfil.' });
+                } else {
+                    fim(resultados[0].result || { success: false, error: 'Sem resultado.' });
+                }
+            });
+        };
+        chrome.tabs.onUpdated.addListener(ouvinte);
+        chrome.tabs.create({ url: request.url, active: false }, (aba) => {
+            abaScopus = aba.id;
+            setTimeout(() => fim({ success: false, error: 'Tempo esgotado (60 s).' }), 60000);
         });
         return true;
     }

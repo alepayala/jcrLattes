@@ -1515,3 +1515,21 @@ describe('deduplicarImagensEmbutidas', () => {
         assert.strictEqual(R.deduplicarImagensEmbutidas(html), html);
     });
 });
+
+describe('Scopus: endereco do perfil e tabela', () => {
+    test('urlDoScopus so aceita um ID numerico', () => {
+        assert.strictEqual(R.urlDoScopus('57194701676'), 'https://www.scopus.com/authid/detail.uri?authorId=57194701676');
+        assert.strictEqual(R.urlDoScopus(' 7005551234 '), 'https://www.scopus.com/authid/detail.uri?authorId=7005551234');
+        assert.strictEqual(R.urlDoScopus('Lins, Ana'), '');
+        assert.strictEqual(R.urlDoScopus('57194701676&x=1'), '');
+        assert.strictEqual(R.urlDoScopus(''), '');
+    });
+    test('tabela com os numeros lidos; sem ID ou sem dados nao ha tabela', () => {
+        const html = R.generateScopusTableHTML({ hIndex: 35, publications: 324, citations: 5220, citingDocuments: 4425 }, '57194701676', '2026-11-28T12:00:00Z');
+        assert.match(html, /id="scopus-stats-table"/);
+        assert.match(html, /authorId=57194701676/);
+        ['35', '324', '5220', '4425'].forEach(n => assert.ok(html.includes('>' + n + '<'), n));
+        assert.strictEqual(R.generateScopusTableHTML({ hIndex: 35 }, 'Lins, Ana'), '');
+        assert.strictEqual(R.generateScopusTableHTML(null, '57194701676'), '');
+    });
+});

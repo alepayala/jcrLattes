@@ -77,6 +77,28 @@ class CVData:
         }
 
     @property
+    def scopus_author_id(self) -> str:
+        '''Scopus ID do pesquisador (campo scopusAuthorId), tirado do argumento da base
+        SCOPUS no curriculo; '' quando o curriculo nao o informa.'''
+        return str(self.raw_data.get('scopusAuthorId') or '')
+
+    @property
+    def scopus_profile_stats(self) -> Dict[str, Any]:
+        '''Metricas lidas do perfil do autor no Scopus (campo scopusStats): h_index,
+        citations, publications, citing_documents e updated_at (ISO). None/'' quando
+        nunca foram buscadas. Nao confundir com scopusHIndex/scopusCitations do
+        registro, que sao calculados das citacoes de cada artigo da lista.'''
+        s = self.raw_data.get('scopusStats') or {}
+        vazio = lambda v: None if v in ('', None) else v
+        return {
+            'h_index': vazio(s.get('hIndex')),
+            'citations': vazio(s.get('citations')),
+            'publications': vazio(s.get('publications')),
+            'citing_documents': vazio(s.get('citingDocuments')),
+            'updated_at': str(self.raw_data.get('scopusUpdatedAt') or ''),
+        }
+
+    @property
     def rid_updated_at(self) -> str:
         """Quando os dados do ResearcherID foram buscados (ISO, campo ridUpdatedAt); '' se
         nunca foram ou se o registro e anterior a esse campo."""

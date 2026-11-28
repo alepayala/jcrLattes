@@ -238,3 +238,25 @@ describe('_bolsaDoCartao', () => {
         assert.strictEqual(N._bolsaDoCartao(null), '');
     });
 });
+
+describe('_idScopusDoArgumento', () => {
+    test('AU-ID(...), endereco do perfil ou so o numero', () => {
+        assert.strictEqual(N._idScopusDoArgumento('AU-ID(57194701676)'), '57194701676');
+        assert.strictEqual(N._idScopusDoArgumento('au-id ( "7005551234" )'), '7005551234');
+        assert.strictEqual(N._idScopusDoArgumento('AUID(57194701676) OR AU-ID(7005551234)'), '57194701676');
+        assert.strictEqual(N._idScopusDoArgumento('https://www.scopus.com/authid/detail.uri?authorId=57194701676'), '57194701676');
+        assert.strictEqual(N._idScopusDoArgumento(' 57194701676 '), '57194701676');
+        // forma antiga do endereco, como alguns curriculos trazem na ancora do argumento
+        assert.strictEqual(N._idScopusDoArgumento('http://www.scopus.com/authid/detail.url?authorId=7005551234'), '7005551234');
+        assert.strictEqual(N._idScopusDoArgumento('Scopus ID: 57194701676'), '57194701676');
+    });
+    test('nomes de busca e outros textos nao viram ID', () => {
+        assert.strictEqual(N._idScopusDoArgumento('AUTHOR-NAME(lins, a. b.) OR AUTHOR-NAME(lins, ana)'), '');
+        assert.strictEqual(N._idScopusDoArgumento('Lins, Ana B.'), '');
+        assert.strictEqual(N._idScopusDoArgumento('Lins, A.B.M.; Lins ABM, deLins, A. B. M.; A.B.M. Lins; Ana B. M. Lins'), '');
+        assert.strictEqual(N._idScopusDoArgumento('H-Index: 41, 2024'), '');
+        assert.strictEqual(N._idScopusDoArgumento('ORCID 0000-0002-1234-5678'), '');
+        assert.strictEqual(N._idScopusDoArgumento(''), '');
+        assert.strictEqual(N._idScopusDoArgumento(null), '');
+    });
+});

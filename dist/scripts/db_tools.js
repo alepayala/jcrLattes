@@ -1743,6 +1743,14 @@ window.JCRDBTools = {
             scholarPublications: nameLink.scholarStats && nameLink.scholarStats.publications != null ? nameLink.scholarStats.publications : '',
             scholarStats: nameLink.scholarStats || {},
             scholarUpdatedAt: nameLink.scholarStats ? (nameLink.scholarStats.atualizadoEm || new Date().toISOString()) : '',
+            // Scopus ID do argumento da base SCOPUS ('' se o curriculo nao o traz; undefined
+            // em nameLink quando a fonte nao o le) e o que foi lido do perfil do autor:
+            // scopusStats = { hIndex, citations, publications, citingDocuments }. Os campos
+            // scopusHIndex/scopusCitations do registro sao OUTRA coisa: calculados das
+            // citacoes de cada artigo da lista.
+            scopusAuthorId: nameLink.scopusAuthorId || '',
+            scopusStats: nameLink.scopusStats || {},
+            scopusUpdatedAt: nameLink.scopusStats ? (nameLink.scopusStats.atualizadoEm || new Date().toISOString()) : '',
             ridHIndex: ridStats?.hIndex !== undefined && ridStats.hIndex !== null ? ridStats.hIndex : '',
             ridPublications: ridStats?.publications !== undefined && ridStats.publications !== null ? ridStats.publications : '',
             ridWosPublications: ridStats?.wosPublications !== undefined && ridStats.wosPublications !== null ? ridStats.wosPublications : '',
@@ -2171,6 +2179,19 @@ window.JCRDBTools = {
                 });
             }
 
+            // Scopus: mesma regra. O ID so e trocado por uma fonte que o le; as metricas
+            // do perfil ficam enquanto o ID for o mesmo e a leitura nova nao trouxer outras.
+            const fonteLeScopus = !!(this.lastArgs && this.lastArgs.nameLink && this.lastArgs.nameLink.scopusAuthorId !== undefined);
+            if (!fonteLeScopus && !this.currentCvData.scopusAuthorId && existing.scopusAuthorId) {
+                this.currentCvData.scopusAuthorId = existing.scopusAuthorId;
+            }
+            const semScopusNovo = !this.currentCvData.scopusStats || this.currentCvData.scopusStats.hIndex === undefined || this.currentCvData.scopusStats.hIndex === null;
+            if (semScopusNovo && existing.scopusStats && existing.scopusStats.hIndex != null
+                && this.currentCvData.scopusAuthorId && this.currentCvData.scopusAuthorId === existing.scopusAuthorId) {
+                this.currentCvData.scopusStats = existing.scopusStats;
+                this.currentCvData.scopusUpdatedAt = existing.scopusUpdatedAt || '';
+            }
+
             // Link do Google Scholar: so o Lattes novo o informa. Lido pelo formato antigo
             // (campo ausente em nameLink), o CV nao apaga o link que o banco ja tem.
             const fonteLeScholar = !!(this.lastArgs && this.lastArgs.nameLink && this.lastArgs.nameLink.googleScholarLink !== undefined);
@@ -2285,6 +2306,20 @@ window.JCRDBTools = {
             const r = cv.ridStats;
             if (!r || r.hIndex === undefined || r.hIndex === null) return null;
             return Object.assign({}, r, { atualizadoEm: cv.ridUpdatedAt });
+        } catch (e) {
+            return null;
+        }
+    },
+
+    // Metricas do Scopus ja gravadas HOJE para este pesquisador e este Scopus ID, ou null.
+    scopusGravadoHoje: async function (name, lattesId, scopusId) {
+        try {
+            const cv = this._acharPesquisador(await this.getDB(false), name, lattesId, c => !c.isProcesso);
+            if (!cv || !this._ehHoje(cv.scopusUpdatedAt)) return null;
+            if (scopusId && String(cv.scopusAuthorId || '') !== String(scopusId)) return null;
+            const s = cv.scopusStats;
+            if (!s || s.hIndex === undefined || s.hIndex === null) return null;
+            return Object.assign({}, s, { atualizadoEm: cv.scopusUpdatedAt });
         } catch (e) {
             return null;
         }
@@ -5311,6 +5346,8 @@ window.JCRDBTools = {
             window.JCRReportUtils.generateRidTableHTML(cvData.ridStats, cvData.researcherIdLink, this.isUnlocked, cvData.ridUpdatedAt) : '';
         const scholarTableHTML = (cvData.scholarStats && cvData.scholarStats.hIndex != null && cvData.googleScholarLink && !isGroup)
             ? window.JCRReportUtils.generateScholarTableHTML(cvData.scholarStats, cvData.googleScholarLink, cvData.scholarUpdatedAt) : '';
+        const scopusTableHTML = (cvData.scopusStats && cvData.scopusStats.hIndex != null && cvData.scopusAuthorId && !isGroup)
+            ? window.JCRReportUtils.generateScopusTableHTML(cvData.scopusStats, cvData.scopusAuthorId, cvData.scopusUpdatedAt) : '';
         const supervisionTableHTML = window.JCRReportUtils.generateSupervisionTableHTML(stats, state.customYears);
         const patentTableHTML = window.JCRReportUtils.generatePatentTableHTML(stats, state.customYears);
         const eventTableHTML = window.JCRReportUtils.generateEventTableHTML(stats, state.customYears);
@@ -5501,6 +5538,7 @@ window.JCRDBTools = {
                         <div class="collapsible-content">
                             ${ridTableHTML}
                             ${scholarTableHTML}
+                            ${scopusTableHTML}
                             ${citationTableHTML}
                         </div>
                     </div>` : ''}

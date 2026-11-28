@@ -175,7 +175,7 @@ describe('lerCurriculo e buscarCurriculo', () => {
     test('monta o curriculo inteiro; secao ausente vira vazio', () => {
         const r = API.lerCurriculo(bruto);
         assert.deepStrictEqual(r.identificacao, { name: 'Ana Beatriz Lins', link: 'http://lattes.cnpq.br/' + ID,
-            researcherIdLink: 'http://www.researcherid.com/rid/X-0000-2000', googleScholarLink: '', fellowshipText: '', fellowshipString: '', fellowshipUnknown: true });
+            researcherIdLink: 'http://www.researcherid.com/rid/X-0000-2000', googleScholarLink: '', scopusAuthorId: '', fellowshipText: '', fellowshipString: '', fellowshipUnknown: true });
         assert.deepStrictEqual(r.apelidos, ['LINS, ANA B. M.', 'LINS, A.']);
     });
     test('bolsa vigente: sigla e categoria do bloco BOLSA, de qualquer modalidade', () => {
@@ -199,6 +199,13 @@ describe('lerCurriculo e buscarCurriculo', () => {
     });
 
     // So interessa o endereco do perfil: quem escreve so o nome no argumento fica sem link.
+    test('Scopus ID: do argumento ou do endereco da linha SCOPUS; nomes de busca sao ignorados', () => {
+        const com = (linha) => API.lerCurriculo(Object.assign({}, bruto, { citacoes: [linha] })).identificacao.scopusAuthorId;
+        assert.strictEqual(com({ codBaseBibliog: 3, txtArgumento: 'AU-ID(57194701676)' }), '57194701676');
+        assert.strictEqual(com({ codBaseBibliog: 3, txtArgumento: 'Lins, Ana', txtUriPesquisadorBase: 'https://www.scopus.com/authid/detail.uri?authorId=7005551234' }), '7005551234');
+        assert.strictEqual(com({ codBaseBibliog: 3, txtArgumento: 'AUTHOR-NAME(lins, a.)' }), '');
+        assert.strictEqual(com({ codBaseBibliog: 1, txtArgumento: 'AU-ID(57194701676)' }), '');   // linha de outra base
+    });
     test('link do Google Scholar: do campo proprio ou do argumento, nunca de um nome solto', () => {
         const com = (scholar) => API.lerCurriculo(Object.assign({}, bruto, { citacoes: [scholar] })).identificacao.googleScholarLink;
         assert.strictEqual(com({ codBaseBibliog: 4, txtArgumento: 'H-Index: 41 - https://scholar.google.com.br/citations?user=zDw1aKkAAAAJ' }),
