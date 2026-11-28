@@ -382,10 +382,52 @@ describe('_matrizCoautoria', () => {
     });
 
     test('marca onde comeca cada grupo, e nao a primeira linha', () => {
-        const cvs = [cv('Ana', [P('a', 2024)]), cv('Bia', [P('b', 2024)])];
+        const cvs = [cv('Ana', [P('a', 2024)]), cv('Bia', [P('a', 2024)]), cv('Caio', [P('c', 2024)])];
         const r = B._matrizCoautoria(cvs, [], null, 2026);
         assert.strictEqual(r.gente[0].primeiroDoGrupo, false);   // a primeira nunca separa
-        assert.strictEqual(r.gente[1].primeiroDoGrupo, true);    // sem colaboracao: outro grupo
+        assert.strictEqual(r.gente[1].primeiroDoGrupo, false);   // Ana e Bia: mesmo grupo
+        assert.strictEqual(r.gente[2].primeiroDoGrupo, true);    // Caio, sem colaboracao: outro grupo
+    });
+
+    test('quem nao tem coautoria com ninguem fica num so grupo, no fim e em ordem alfabetica', () => {
+        const cvs = [
+            cv('Zara', [P('z', 2024)]), cv('Ana', [P('a', 2024)]), cv('Caio', [P('c', 2024)]),
+            cv('Dora', [P('d1', 2024)]), cv('Edu', [P('d1', 2024)])
+        ];
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
+        assert.deepStrictEqual(r.gente.map(g => g.nome), ['Dora', 'Edu', 'Ana', 'Caio', 'Zara']);
+        assert.strictEqual(r.grupos, 2);
+        assert.deepStrictEqual(r.gente.map(g => g.primeiroDoGrupo), [false, false, true, false, false]);
+    });
+
+    test('coordenador sem coautoria com a equipe ainda abre a matriz', () => {
+        const cvs = [cv('Ana', [P('a', 2024)]), cv('Bia', [P('a', 2024)]), cv('Zeca', [P('z', 2024)])];
+        const fichas = [{ name: 'Zeca', role: 'Proponente', formacao: 'Doutorado' }];
+        const r = B._matrizCoautoria(cvs, fichas, null, 2026);
+        assert.strictEqual(r.gente[0].nome, 'Zeca');
+        assert.strictEqual(r.gente[1].primeiroDoGrupo, true);
+    });
+
+    test('grupos sao comunidades: dois nucleos ligados por pouco ficam separados', () => {
+        // {A,B,C} publicam muito entre si, {D,E,F} tambem; um unico artigo liga C a D.
+        const varios = (prefixo, k) => Array.from({ length: k }, (_, i) => P(prefixo + i, 2024));
+        const cvs = [
+            cv('A', [...varios('abc', 8)]),
+            cv('B', [...varios('abc', 8)]),
+            cv('C', [...varios('abc', 8), P('ponte', 2024)]),
+            cv('D', [...varios('def', 8), P('ponte', 2024)]),
+            cv('E', [...varios('def', 8)]),
+            cv('F', [...varios('def', 8)])
+        ];
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
+        assert.strictEqual(r.grupos, 2);
+        const grupoDe = (nome) => r.gente.find(g => g.nome === nome).grupo;
+        assert.ok(grupoDe('A') === grupoDe('B') && grupoDe('B') === grupoDe('C'));
+        assert.ok(grupoDe('D') === grupoDe('E') && grupoDe('E') === grupoDe('F'));
+        assert.notStrictEqual(grupoDe('C'), grupoDe('D'));
+        // quem faz a ponte fica na borda: C e D em linhas vizinhas
+        const pos = (nome) => r.gente.findIndex(g => g.nome === nome);
+        assert.strictEqual(Math.abs(pos('C') - pos('D')), 1);
     });
 
     test('a matriz acompanha a reordenacao e continua simetrica', () => {
@@ -432,14 +474,85 @@ describe('_matrizCoautoria', () => {
         assert.ok(r.gente.every(g => g.primeiroDoGrupo === false));
     });
 
-    test('sem coordenador, a semente e quem mais colabora', () => {
+    test('sem coordenador, quem liga dois colegas fica entre eles', () => {
         const cvs = [
             cv('Ana',  [P('p1', 2024)]),
             cv('Bia',  [P('p1', 2024), P('p2', 2024)]),
             cv('Caio', [P('p2', 2024)])
         ];
         const r = B._matrizCoautoria(cvs, [], null, 2026);
-        assert.strictEqual(r.gente[0].nome, 'Bia');   // 2 colaboracoes, contra 1 dos outros
+        assert.strictEqual(r.gente[1].nome, 'Bia');   // Ana-Bia e Bia-Caio ficam vizinhos
+    });
+
+    test('o refino aproxima os pares que mais publicam juntos', () => {
+        // A-D e B-C sao os pares fortes; A-B e C-D, fracos. O guloso deixa um par forte longe.
+        const varios = (prefixo, n) => Array.from({ length: n }, (_, i) => P(prefixo + i, 2024));
+        const cvs = [
+            cv('A', [...varios('ad', 9), P('ab', 2024)]),
+            cv('B', [...varios('bc', 9), P('ab', 2024)]),
+            cv('C', [...varios('bc', 9), P('cd', 2024)]),
+            cv('D', [...varios('ad', 9), P('cd', 2024)])
+        ];
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
+        const pos = (nome) => r.gente.findIndex(g => g.nome === nome);
+        assert.strictEqual(Math.abs(pos('A') - pos('D')), 1);
+        assert.strictEqual(Math.abs(pos('B') - pos('C')), 1);
+        assert.strictEqual(r.grupos, 2);   // dois nucleos fortes, ligados por um artigo de cada lado
+    });
+
+    test('o refino nao tira o coordenador da primeira linha', () => {
+        const cvs = [
+            cv('Ana',  [P('p1', 2024)]),
+            cv('Bia',  [P('p1', 2024), P('p2', 2024)]),
+            cv('Caio', [P('p2', 2024)])
+        ];
+        const fichas = [{ name: 'Bia', role: 'Proponente', formacao: 'Doutorado' }];
+        const r = B._matrizCoautoria(cvs, fichas, null, 2026);
+        assert.strictEqual(r.gente[0].nome, 'Bia');
+    });
+
+    test('artigo com DOI num curriculo e sem DOI no outro conta como coautoria', () => {
+        const titulo = 'Raman scattering study of a ferroelectric crystal';
+        const cvs = [
+            cv('Ana',   [{ doi: '10.1/x', paperTitle: titulo, year: 2001 }]),
+            cv('Bruno', [{ doi: '', paperTitle: 'Raman Scattering Study of a Ferroelectric Crystal.', year: 2001 }])
+        ];
+        assert.strictEqual(B._matrizCoautoria(cvs, [], null, 2026).m[0][1], 1);
+    });
+
+    test('titulo+ano com dois DOIs diferentes nao e adotado pelo sem-DOI', () => {
+        const titulo = 'Proceedings of the national meeting on materials';
+        const cvs = [
+            cv('Ana',   [{ doi: '10.1/x', paperTitle: titulo, year: 2001 }]),
+            cv('Bruno', [{ doi: '', paperTitle: titulo, year: 2001 }]),
+            cv('Carla', [{ doi: '10.1/y', paperTitle: titulo, year: 2001 }])
+        ];
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
+        assert.strictEqual(r.pares, 0);
+    });
+
+    test('titulo curto demais nao adota DOI; ano diferente tambem nao casa', () => {
+        const curto = [
+            cv('Ana',   [{ doi: '10.1/x', paperTitle: 'Preface', year: 2001 }]),
+            cv('Bruno', [{ doi: '', paperTitle: 'Preface', year: 2001 }])
+        ];
+        assert.strictEqual(B._matrizCoautoria(curto, [], null, 2026).m[0][1], 0);
+        const titulo = 'Raman scattering study of a ferroelectric crystal';
+        const anos = [
+            cv('Ana',   [{ doi: '10.1/x', paperTitle: titulo, year: 2001 }]),
+            cv('Bruno', [{ doi: '', paperTitle: titulo, year: 2003 }])
+        ];
+        assert.strictEqual(B._matrizCoautoria(anos, [], null, 2026).m[0][1], 0);
+    });
+
+    test('o mesmo DOI com e sem o endereco na frente e um artigo so', () => {
+        const cvs = [
+            cv('Ana',   [P('https://doi.org/10.1103/PhysRevB.1.1', 2020)]),
+            cv('Bruno', [P('10.1103/physrevb.1.1', 2020)]),
+            cv('Carla', [P('doi: 10.1103/PhysRevB.1.1', 2020)])
+        ];
+        const r = B._matrizCoautoria(cvs, [], null, 2026);
+        assert.strictEqual(r.pares, 3);
     });
 
     test('a instituicao vem da ficha da equipe', () => {

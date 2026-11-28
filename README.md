@@ -58,7 +58,7 @@ A leitura segue as mesmas regras da extensão:
 * Aceita os três tipos de exportação: o banco geral, o backup de um grupo (ID customizado) e o backup de propostas. Só os currículos viram pesquisadores; propostas e registros de configuração ficam separados.
 * Identifica o pesquisador pelo ID Lattes (não pelo nome, para não juntar homônimos) e junta registros repetidos do mesmo ID, mantendo o currículo completo mais recente.
 * Marca os "esqueletos" (registros só com nome, sem o currículo).
-* Identifica cada artigo pelo DOI ou, sem ele, pelo título e ano — a mesma chave da Matriz de Coautoria.
+* Identifica cada artigo pelo DOI ou, sem ele, pelo título e ano — a mesma chave da Matriz de Coautoria. Para contar artigos em comum num conjunto de currículos, `pub_id_resolver(cvs)` aplica também a regra da matriz para o artigo que está com DOI num currículo e sem DOI no outro.
 
 ### Requisitos
 A leitura não precisa de nenhuma biblioteca externa. Só o exemplo do grafo precisa de:

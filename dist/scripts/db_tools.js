@@ -412,9 +412,22 @@ window.JCRDBTools = {
     // tambem roda na pagina do Lattes, onde aquele script nao e carregado.
     _chaveArtigo: function (pub) {
         if (!pub) return '';
-        const doi = String(pub.doi || '').trim().toLowerCase();
+        const doi = this._doiDoArtigo(pub);
         if (doi) return 'doi:' + doi;
-        const titulo = String(pub.paperTitle || pub.title || '')
+        return this._chaveDoTitulo(pub);
+    },
+
+    // O DOI de um artigo, em minusculas e sem o endereco na frente ("https://doi.org/",
+    // "doi:"): o mesmo DOI aparece escrito das duas formas em curriculos diferentes.
+    _doiDoArtigo: function (pub) {
+        return String((pub && pub.doi) || '').trim().toLowerCase()
+            .replace(/^(?:https?:\/\/)?(?:dx\.)?doi\.org\//, '')
+            .replace(/^doi:\s*/, '');
+    },
+
+    // Titulo normalizado + ano ("tt:..."), a identidade de quem nao tem DOI; '' sem titulo.
+    _chaveDoTitulo: function (pub) {
+        const titulo = String((pub && (pub.paperTitle || pub.title)) || '')
             .replace(/<[^>]*>/g, ' ')
             .replace(/&[a-z#0-9]+;/gi, ' ')
             .replace(/\$\$[\s\S]*?\$\$/g, ' ')
@@ -424,6 +437,41 @@ window.JCRDBTools = {
             .trim();
         if (!titulo) return '';
         return 'tt:' + titulo + '|' + (pub.year || '');
+    },
+
+    // Identidade dos artigos DENTRO de um conjunto de curriculos, para contar coautoria.
+    // A chave isolada (_chaveArtigo) falha quando o mesmo artigo esta com DOI num
+    // curriculo e sem DOI no outro (artigo antigo que um dos autores nunca completou):
+    // um vira "doi:..." e o outro "tt:...", e a coautoria some. Aqui o conjunto todo e
+    // olhado antes: se um titulo+ano aparece com UM unico DOI entre os curriculos, o
+    // artigo sem DOI com esse mesmo titulo+ano e aquele artigo e recebe a chave do DOI.
+    // Com dois ou mais DOIs para o mesmo titulo+ano (errata, serie com titulo repetido)
+    // nao da para saber qual e, e o sem-DOI fica com a chave do titulo. Titulo muito
+    // curto ("Preface", "Editorial") nao adota DOI de ninguem.
+    // Devolve uma funcao pub -> chave ('' se o artigo nao tem DOI nem titulo).
+    _identidadeNoConjunto: function (cvs) {
+        const TITULO_MINIMO = 15;   // letras e digitos do titulo normalizado
+        const doisDoTitulo = new Map();
+        (Array.isArray(cvs) ? cvs : []).forEach(cv => {
+            ((cv && Array.isArray(cv.publications)) ? cv.publications : []).forEach(p => {
+                const doi = this._doiDoArtigo(p);
+                if (!doi) return;
+                const t = this._chaveDoTitulo(p);
+                if (!t) return;
+                if (!doisDoTitulo.has(t)) doisDoTitulo.set(t, new Set());
+                doisDoTitulo.get(t).add(doi);
+            });
+        });
+        return (pub) => {
+            const doi = this._doiDoArtigo(pub);
+            if (doi) return 'doi:' + doi;
+            const t = this._chaveDoTitulo(pub);
+            if (!t) return '';
+            const dois = doisDoTitulo.get(t);
+            const tamanho = t.slice(3, t.lastIndexOf('|')).replace(/ /g, '').length;
+            if (dois && dois.size === 1 && tamanho >= TITULO_MINIMO) return 'doi:' + dois.values().next().value;
+            return t;
+        };
     },
 
     // Conjunto de artigos de um CV, para as intersecoes da matriz de coautoria.
@@ -922,6 +970,9 @@ window.JCRDBTools = {
         // carreira toda, que e o padrao do relatorio para a matriz.
         const corte = window.JCRReportUtils.inicioDoPeriodo(anos, anoAtual);
 
+        // a identidade e decidida olhando todos os curriculos do conjunto e a carreira
+        // toda (nao so o periodo): quanto mais registros, melhor se resolve o sem-DOI
+        const chaveDe = this._identidadeNoConjunto(lista);
         const artigosDe = (cv) => {
             const chaves = new Set();
             const pubs = (cv && Array.isArray(cv.publications)) ? cv.publications : [];
@@ -930,7 +981,7 @@ window.JCRDBTools = {
                     const ano = parseInt(p && p.year, 10);
                     if (isNaN(ano) || ano < corte) return;
                 }
-                const k = this._chaveArtigo(p);
+                const k = chaveDe(p);
                 if (k) chaves.add(k);
             });
             return chaves;
@@ -974,63 +1025,233 @@ window.JCRDBTools = {
         }
 
         // ---- Agrupamento: quem colabora junto fica junto ----
-        // Seriacao gulosa. Comeca pelo coordenador (na falta dele, por quem mais
-        // colabora) e, a cada passo, puxa quem tem mais artigos em comum com os ja
-        // posicionados. Esgotado um grupo conectado, abre o proximo pelo restante de
-        // maior colaboracao. Nao e clusterizacao otima — isso exigiria algo como
-        // Louvain, fora de proposito aqui —, mas concentra os blocos na diagonal, roda
-        // em O(n^2) e e deterministica, que e o que a leitura da matriz pede.
+        // Tres passos, todos deterministicos.
+        // 1) GRUPOS = comunidades de colaboracao (_comunidades), e nao componentes
+        //    conectados: num departamento quase todos se ligam por algum artigo e o
+        //    "componente" vira um bloco unico, que nao diz nada. A comunidade junta quem
+        //    publica muito mais entre si do que com o resto.
+        // 2) Ordem dos grupos: o do coordenador abre (na falta dele, o de maior
+        //    colaboracao); cada grupo seguinte e o mais ligado aos ja colocados, e a
+        //    sequencia e refinada para aproximar os grupos que mais publicam juntos.
+        // 3) Ordem dentro de cada grupo: gulosa a partir do mais central e depois
+        //    refinada (_refinarSegmentos) para a soma de (artigos em comum x distancia
+        //    na matriz) ser a menor possivel, contando tambem os vinculos com os grupos
+        //    vizinhos. Os numeros grandes ficam junto da diagonal e quem faz a ponte
+        //    entre dois grupos fica na borda.
+        // Quem nao tem coautoria com ninguem vai para um ultimo grupo, em ordem alfabetica.
+        // O coordenador fica sempre na primeira linha.
         const somaDe = (i) => m[i].reduce((s, v) => s + v, 0);
-        const restantes = new Set(gente.map((_, i) => i));
-        const ordem = [];
-        const grupo = new Array(n).fill(0);
-        let g = 0;
-
-        while (restantes.size > 0) {
-            g++;
-            // semente do grupo: o coordenador abre o primeiro; depois, o mais colaborativo
-            let semente = -1;
-            restantes.forEach(i => {
-                if (semente === -1) { semente = i; return; }
-                if (gente[i].coordenador !== gente[semente].coordenador) {
-                    if (gente[i].coordenador) semente = i;
-                    return;
-                }
-                const di = somaDe(i), ds = somaDe(semente);
-                if (di > ds || (di === ds && gente[i].nome.localeCompare(gente[semente].nome, 'pt-BR') < 0)) semente = i;
+        const porNome = (a, b) => gente[a].nome.localeCompare(gente[b].nome, 'pt-BR');
+        const com = this._comunidades(m);
+        const membros = new Map();
+        com.forEach((c, i) => { if (c >= 0) { if (!membros.has(c)) membros.set(c, []); membros.get(c).push(i); } });
+        const temCoord = (c) => membros.get(c).some(i => gente[i].coordenador);
+        const pesoTotal = (c) => membros.get(c).reduce((s, i) => s + somaDe(i), 0);
+        const primeiroNome = (c) => membros.get(c).slice().sort(porNome)[0];
+        const entre = (a, b) => { let s = 0; membros.get(a).forEach(i => membros.get(b).forEach(j => { s += m[i][j]; })); return s; };
+        // maior valor; no empate, a comunidade de maior colaboracao; depois, o nome
+        const escolher = (conjunto, valor) => {
+            let melhor = null, mv = -1;
+            conjunto.forEach(c => {
+                const v = valor(c);
+                const ganha = melhor === null || v > mv || (v === mv && (pesoTotal(c) > pesoTotal(melhor)
+                    || (pesoTotal(c) === pesoTotal(melhor) && porNome(primeiroNome(c), primeiroNome(melhor)) < 0)));
+                if (ganha) { melhor = c; mv = v; }
             });
-            restantes.delete(semente);
-            ordem.push(semente);
-            grupo[semente] = g;
+            return melhor;
+        };
 
-            // cresce o grupo enquanto houver quem colabore com ele
-            for (;;) {
-                let escolhido = -1, peso = 0;
-                restantes.forEach(i => {
-                    let p = 0;
-                    ordem.forEach(j => { if (grupo[j] === g) p += m[i][j]; });
-                    if (p > peso) { peso = p; escolhido = i; }
-                    else if (p === peso && p > 0 && escolhido >= 0) {
-                        // empate no vinculo com o grupo: sobe quem colabora mais no total,
-                        // para os centrais ficarem perto do coordenador. Numa equipe em que
-                        // todos publicam juntos os empates sao a regra, e sem este criterio
-                        // a ordem caia direto no alfabeto e nao dizia nada.
-                        const si = somaDe(i), se = somaDe(escolhido);
-                        if (si > se || (si === se && gente[i].nome.localeCompare(gente[escolhido].nome, 'pt-BR') < 0)) escolhido = i;
-                    }
-                });
-                if (escolhido === -1 || peso <= 0) break;
-                restantes.delete(escolhido);
-                ordem.push(escolhido);
-                grupo[escolhido] = g;
-            }
+        // passo 2: ordem das comunidades
+        let ordemC = [];
+        const restC = new Set(membros.keys());
+        while (restC.size > 0) {
+            const c = ordemC.length === 0
+                ? escolher(restC, x => (temCoord(x) ? 1 : 0))
+                : escolher(restC, x => ordemC.reduce((s2, y) => s2 + entre(x, y), 0));
+            restC.delete(c);
+            ordemC.push(c);
         }
+        if (ordemC.length > 2) {
+            const E = ordemC.map(a => ordemC.map(b => (a === b ? 0 : entre(a, b))));
+            ordemC = this._refinarOrdem(ordemC.map((_, i) => i), E, temCoord(ordemC[0])).map(i => ordemC[i]);
+        }
+
+        // passo 3 (inicio): ordem gulosa dentro de cada comunidade
+        const ordemInterna = (lista) => {
+            const resto = new Set(lista), feita = [];
+            const melhorDe = (valor) => {
+                let melhor = -1, mv = -1;
+                resto.forEach(i => {
+                    const v = valor(i);
+                    const ganha = melhor === -1 || v > mv || (v === mv && (somaDe(i) > somaDe(melhor)
+                        || (somaDe(i) === somaDe(melhor) && porNome(i, melhor) < 0)));
+                    if (ganha) { melhor = i; mv = v; }
+                });
+                return melhor;
+            };
+            while (resto.size > 0) {
+                const i = feita.length === 0
+                    ? melhorDe(x => (gente[x].coordenador ? 1 : 0))
+                    : melhorDe(x => feita.reduce((s2, j) => s2 + m[x][j], 0));
+                resto.delete(i);
+                feita.push(i);
+            }
+            return feita;
+        };
+
+        let ordem = [];
+        const grupo = new Array(n).fill(0);
+        const segmentos = [];
+        let g = 0;
+        const abrirGrupo = (lista) => {
+            if (lista.length === 0) return;
+            g++;
+            segmentos.push([ordem.length, ordem.length + lista.length]);
+            lista.forEach(i => { grupo[i] = g; ordem.push(i); });
+        };
+        const isolados = gente.map((_, i) => i).filter(i => com[i] < 0);
+        // coordenador sem coautoria com a equipe: ainda assim abre a matriz
+        abrirGrupo(isolados.filter(i => gente[i].coordenador));
+        ordemC.forEach(c => abrirGrupo(ordemInterna(membros.get(c))));
+        const fimDasComunidades = segmentos.length;
+        abrirGrupo(isolados.filter(i => !gente[i].coordenador).sort(porNome));
+
+        // passo 3 (fim): refino dentro de cada comunidade (os isolados ficam no alfabeto)
+        ordem = this._refinarSegmentos(ordem, segmentos.slice(0, fimDasComunidades), m, n > 0 && gente[ordem[0]].coordenador);
 
         // aplica a ordem a lista e a matriz
         const genteOrd = ordem.map((idx, pos) => Object.assign({}, gente[idx], { grupo: grupo[idx], primeiroDoGrupo: pos > 0 && grupo[idx] !== grupo[ordem[pos - 1]] }));
         const mOrd = ordem.map(i => ordem.map(j => m[i][j]));
 
         return { gente: genteOrd, m: mOrd, maior: maior, pares: pares, grupos: g };
+    },
+
+    // Comunidades de colaboracao de uma matriz de coautoria (m simetrica, diagonal zero).
+    // Aglomeracao gulosa por modularidade (Clauset-Newman-Moore): cada pessoa comeca
+    // sozinha e, a cada passo, juntam-se as duas comunidades cuja uniao mais aumenta a
+    // modularidade (artigos em comum dentro das comunidades, alem do que se esperaria ao
+    // acaso dado o quanto cada um colabora); para quando nenhuma uniao aumenta. E exata
+    // o bastante para dezenas ou poucas centenas de pessoas e sempre da o mesmo resultado
+    // (empates resolvidos pelo menor indice). Devolve, por pessoa, o id da comunidade;
+    // -1 para quem nao tem coautoria com ninguem.
+    _comunidades: function (m) {
+        const n = m.length;
+        const k = m.map(l => l.reduce((s, v) => s + v, 0));
+        const W2 = k.reduce((s, v) => s + v, 0);            // 2 x soma dos pesos
+        const com = k.map((v, i) => (v > 0 ? i : -1));
+        if (W2 === 0) return com;
+        const e = new Map(), a = new Map();
+        for (let i = 0; i < n; i++) { if (k[i] > 0) { e.set(i, new Map()); a.set(i, k[i]); } }
+        for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+            if (m[i][j]) { e.get(i).set(j, m[i][j]); e.get(j).set(i, m[i][j]); }
+        }
+        for (;;) {
+            let melhor = 1e-12, bc = -1, bd = -1;
+            e.forEach((vizinhos, c) => {
+                vizinhos.forEach((w, d) => {
+                    if (d <= c) return;
+                    const dq = w / W2 - (a.get(c) * a.get(d)) / (W2 * W2);
+                    if (dq > melhor + 1e-12 || (Math.abs(dq - melhor) <= 1e-12 && bc >= 0 && (c < bc || (c === bc && d < bd)))) {
+                        melhor = dq; bc = c; bd = d;
+                    }
+                });
+            });
+            if (bc < 0) break;
+            // une bd em bc
+            e.get(bd).forEach((w, x) => {
+                if (x === bc) return;
+                e.get(bc).set(x, (e.get(bc).get(x) || 0) + w);
+                e.get(x).delete(bd);
+                e.get(x).set(bc, e.get(bc).get(x));
+            });
+            e.get(bc).delete(bd);
+            e.delete(bd);
+            a.set(bc, a.get(bc) + a.get(bd));
+            a.delete(bd);
+            for (let i = 0; i < n; i++) if (com[i] === bd) com[i] = bc;
+        }
+        return com;
+    },
+
+    // Como _refinarOrdem, mas com a matriz inteira e os grupos presos no lugar: cada
+    // pessoa so se move dentro do segmento [inicio, fim) do seu grupo, e o custo conta
+    // todos os pares, inclusive os de grupos diferentes. E isso que leva para a borda do
+    // grupo quem publica com o grupo vizinho. primeiroFixo: a linha 0 nao se move.
+    _refinarSegmentos: function (ordemInicial, segmentos, m, primeiroFixo) {
+        const n = ordemInicial.length;
+        const LIMITE = 100, VOLTAS = 30;
+        let ordem = ordemInicial.slice();
+        if (n < 3 || n > LIMITE) return ordem;
+        const custo = (o) => {
+            let s = 0;
+            for (let x = 0; x < n; x++) {
+                const linha = m[o[x]];
+                for (let y = x + 1; y < n; y++) { const v = linha[o[y]]; if (v) s += v * (y - x); }
+            }
+            return s;
+        };
+        let atual = custo(ordem);
+        for (let volta = 0; volta < VOLTAS; volta++) {
+            let melhorou = false;
+            segmentos.forEach(([inicio, fim]) => {
+                const piso = (primeiroFixo && inicio === 0) ? 1 : inicio;
+                for (let de = piso; de < fim; de++) {
+                    let melhorCusto = atual, melhorOrdem = null;
+                    for (let para = piso; para < fim; para++) {
+                        if (para === de) continue;
+                        const tentativa = ordem.slice();
+                        const [quem] = tentativa.splice(de, 1);
+                        tentativa.splice(para, 0, quem);
+                        const c = custo(tentativa);
+                        if (c < melhorCusto) { melhorCusto = c; melhorOrdem = tentativa; }
+                    }
+                    if (melhorOrdem) { ordem = melhorOrdem; atual = melhorCusto; melhorou = true; }
+                }
+            });
+            if (!melhorou) break;
+        }
+        return ordem;
+    },
+
+    // Refina a ordem de um grupo da matriz de coautoria. idx: indices (na matriz m) na
+    // ordem atual. Custo de uma ordem = soma, sobre os pares, de m[i][j] x distancia entre
+    // as posicoes: quanto menor, mais perto da diagonal ficam os pares que publicam
+    // juntos. Busca local por insercao: tira uma pessoa e a recoloca na posicao de menor
+    // custo; repete enquanto houver ganho (ou ate o limite de voltas). So aceita ganho
+    // estrito e percorre sempre na mesma sequencia, entao o resultado e deterministico.
+    // primeiroFixo: a primeira posicao nao se move (o coordenador abre a matriz).
+    // Grupos muito grandes ficam com a ordem recebida: o custo do refino cresce com n^4.
+    _refinarOrdem: function (idx, m, primeiroFixo) {
+        const n = idx.length;
+        const LIMITE = 80, VOLTAS = 30;
+        if (n < 3 || n > LIMITE) return idx.slice();
+        let ordem = idx.slice();
+        const custo = (o) => {
+            let s = 0;
+            for (let a = 0; a < n; a++) {
+                const linha = m[o[a]];
+                for (let b = a + 1; b < n; b++) { const v = linha[o[b]]; if (v) s += v * (b - a); }
+            }
+            return s;
+        };
+        const piso = primeiroFixo ? 1 : 0;
+        let atual = custo(ordem);
+        for (let volta = 0; volta < VOLTAS; volta++) {
+            let melhorou = false;
+            for (let de = piso; de < n; de++) {
+                let melhorCusto = atual, melhorOrdem = null;
+                const semEle = ordem.slice(0, de).concat(ordem.slice(de + 1));
+                for (let para = piso; para < n; para++) {
+                    if (para === de) continue;
+                    const tentativa = semEle.slice(0, para).concat([ordem[de]], semEle.slice(para));
+                    const c = custo(tentativa);
+                    if (c < melhorCusto) { melhorCusto = c; melhorOrdem = tentativa; }
+                }
+                if (melhorOrdem) { ordem = melhorOrdem; atual = melhorCusto; melhorou = true; }
+            }
+            if (!melhorou) break;
+        }
+        return ordem;
     },
 
     // Le "Resultado da avaliação" e a justificativa do HTML de uma pagina de parecer.
@@ -7029,6 +7250,11 @@ window.JCRDBTools = {
             const periodo = window.JCRReportUtils.descricaoPeriodo(anos, currentYear).toLowerCase();
             const totalPares = (n * (n - 1)) / 2;
 
+            // A instituicao vem da ficha da equipe da proposta (piccTools). Na matriz feita
+            // do banco de CVs ninguem a tem, e a coluna nao aparece; no lugar fica uma
+            // coluna vazia que so absorve a largura que sobra.
+            const temInstituicao = gente.some(g => g.instituicao);
+
             // realce do coordenador: linha e coluna dele, para o cruzamento ficar obvio
             const FUNDO_COORD = '#FFF8E1';
             const cabecalho = gente.map((g, i) => `
@@ -7065,7 +7291,9 @@ window.JCRDBTools = {
                         <td style="padding: 4px 8px; text-align: center; color: #666; font-size: 0.85em;" title="Artigos identificados no período">${g.artigos.size}</td>
                         ${celulas}
                         <td style="padding: 4px 8px; text-align: center; border-left: 2px solid #90CAF9; font-weight: bold; color: #1B5E20;">${total}</td>
-                        <td style="padding: 4px 10px; border-left: 1px solid #E3F2FD; color: #555; font-size: 0.85em; max-width: 0; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this._esc(g.instituicao || 'Instituição não registrada na equipe')}">${g.instituicao ? this._esc(g.instituicao) : '<span style="color:#BDBDBD;">—</span>'}</td>
+                        ${temInstituicao
+                            ? `<td data-coaut-resto="instituicao" style="padding: 4px 10px; border-left: 1px solid #E3F2FD; color: #555; font-size: 0.85em; max-width: 0; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this._esc(g.instituicao || 'Instituição não registrada na equipe')}">${g.instituicao ? this._esc(g.instituicao) : '<span style="color:#BDBDBD;">—</span>'}</td>`
+                            : '<td data-coaut-resto="vazio" style="width: 100%; padding: 0;"></td>'}
                     </tr>`;
             }).join('');
 
@@ -7074,11 +7302,12 @@ window.JCRDBTools = {
                     ${n} pesquisadores — ${r.pares} de ${totalPares} pares com artigo em comum (${periodo})${r.grupos > 1 ? `, em <strong>${r.grupos}</strong> grupos de colaboração` : ''}.
                     ${manual
                         ? 'As linhas estão na ordem definida à mão pelas setas; o traço horizontal separa vizinhos de grupos de colaboração diferentes. <button type="button" id="btn-coautoria-ordem-auto" class="no-print" style="padding: 0 6px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff; font-size: 0.95em;">Restaurar ordem automática</button>'
-                        : 'As linhas estão agrupadas por colaboração, começando pelo coordenador; o traço horizontal separa um grupo do seguinte. Use as setas ao lado do nome para reorganizar.'}
-                    Contados por DOI e, na falta dele, por título e ano. Técnicos e alunos ficam de fora.
+                        : 'As linhas estão agrupadas por colaboração: cada grupo reúne quem publica muito mais entre si do que com os demais, e dentro dele quem mais publica junto fica em linhas vizinhas. O traço horizontal separa um grupo do seguinte; quem não tem coautoria com ninguém vai para o fim. O coordenador, quando há um, abre a matriz. Use as setas ao lado do nome para reorganizar.'}
+                    Contados por DOI e, na falta dele, por título e ano; o artigo sem DOI num currículo é reconhecido quando um coautor o informa com o mesmo título e ano. Técnicos e alunos ficam de fora.
                     ${r.pares === 0 ? '<strong style="color:#E65100;">Nenhuma coautoria encontrada entre os currículos disponíveis.</strong>' : ''}
+                    <button type="button" id="btn-coautoria-inteira" class="no-print" title="Abre a matriz numa janela sobre a página, reduzida para caber inteira na tela, sem rolagem horizontal" style="margin-left: 6px; padding: 0 8px; cursor: pointer; border-radius: 3px; border: 1px solid #90CAF9; background: #E3F2FD; color: #0D47A1; font-size: 0.95em;">⤢ Ver a matriz inteira</button>
                 </div>
-                <table style="border-collapse: collapse; font-size: 0.9em; width: 100%; table-layout: auto;">
+                <table id="tabela-coautoria" style="border-collapse: collapse; font-size: 0.9em; width: 100%; table-layout: auto;">
                     <thead>
                         <tr style="background: #E3F2FD; color: #0D47A1;">
                             <th style="padding: 4px 8px;">#</th>
@@ -7086,16 +7315,84 @@ window.JCRDBTools = {
                             <th style="padding: 4px 8px;" title="Artigos identificados no período">Artigos</th>
                             ${cabecalho}
                             <th style="padding: 4px 8px; border-left: 2px solid #90CAF9;" title="Soma dos artigos em comum com os demais">Σ</th>
-                            <th style="padding: 4px 10px; text-align: left; border-left: 1px solid #E3F2FD;">Instituição</th>
+                            ${temInstituicao
+                                ? '<th data-coaut-resto="instituicao" style="padding: 4px 10px; text-align: left; border-left: 1px solid #E3F2FD;">Instituição</th>'
+                                : '<th data-coaut-resto="vazio" style="width: 100%; padding: 0; background: #fff;"></th>'}
                         </tr>
                     </thead>
                     <tbody>${linhas}</tbody>
                 </table>`;
         };
 
+        // Matriz inteira numa janela sobre a pagina: com muitos pesquisadores a tabela pede
+        // rolagem horizontal e nao da para ver o conjunto. A janela mostra uma COPIA da
+        // tabela (sem as setas de reordenar), reduzida ate caber na largura e, se der sem
+        // ficar ilegivel, tambem na altura. Fecha no botao, com Esc ou clicando fora.
+        const abrirMatrizInteira = () => {
+            const tabela = doc.getElementById('tabela-coautoria');
+            if (!tabela) return;
+            const janela = doc.defaultView || window;
+            const anterior = doc.getElementById('coautoria-janela');
+            if (anterior) anterior.remove();
+
+            const fundo = doc.createElement('div');
+            fundo.id = 'coautoria-janela';
+            fundo.className = 'no-print';
+            fundo.style.cssText = 'position: fixed; inset: 0; z-index: 2147483000; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center;';
+            fundo.innerHTML = `
+                <div style="background: #fff; border-radius: 6px; box-shadow: 0 8px 30px rgba(0,0,0,0.35); width: 98vw; height: 96vh; display: flex; flex-direction: column; overflow: hidden;">
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid #E3F2FD; background: #F5FAFF; color: #0D47A1; font-family: Arial, sans-serif; font-size: 14px;">
+                        <strong>Matriz de Coautoria</strong>
+                        <span style="color: #777; font-size: 12px;">passe o mouse sobre um número para ver os dois nomes</span>
+                        <button type="button" data-fechar="1" title="Fechar (Esc)" style="margin-left: auto; padding: 2px 10px; cursor: pointer; border-radius: 3px; border: 1px solid #ccc; background: #fff;">✕ Fechar</button>
+                    </div>
+                    <div data-corpo="1" style="flex: 1; min-height: 0; overflow: auto; padding: 8px;"></div>
+                </div>`;
+            const corpo = fundo.querySelector('[data-corpo]');
+            const copia = tabela.cloneNode(true);
+            copia.removeAttribute('id');
+            copia.style.width = 'auto';
+            copia.querySelectorAll('.no-print').forEach(el => el.remove());
+            // a ultima coluna usa "largura que sobrar": a da instituicao ganha um limite
+            // e a vazia (matriz do banco de CVs) sai
+            copia.querySelectorAll('[data-coaut-resto="vazio"]').forEach(el => el.remove());
+            copia.querySelectorAll('td[data-coaut-resto="instituicao"]').forEach(td => { td.style.maxWidth = '220px'; td.style.width = 'auto'; });
+            corpo.appendChild(copia);
+            doc.body.appendChild(fundo);
+
+            const ajustar = () => {
+                copia.style.zoom = '1';
+                const largura = copia.offsetWidth, altura = copia.offsetHeight;
+                if (!largura || !altura) return;
+                const cabeL = (corpo.clientWidth - 20) / largura, cabeA = (corpo.clientHeight - 28) / altura;
+                // cabe na largura sempre que possivel; na altura so se nao ficar miudo demais
+                const MINIMO = 0.45;
+                let z = Math.min(1, cabeL);
+                if (cabeA < z && cabeA >= MINIMO) z = cabeA;
+                copia.style.zoom = String(Math.max(MINIMO, z).toFixed(3));
+            };
+            ajustar();
+
+            const fechar = () => {
+                doc.removeEventListener('keydown', aoTeclar);
+                janela.removeEventListener('resize', ajustar);
+                fundo.remove();
+            };
+            const aoTeclar = (ev) => { if (ev.key === 'Escape') fechar(); };
+            doc.addEventListener('keydown', aoTeclar);
+            janela.addEventListener('resize', ajustar);
+            fundo.addEventListener('click', (ev) => {
+                if (ev.target === fundo || ev.target.closest('[data-fechar]')) fechar();
+            });
+        };
+
         if (coautoriaContainer) {
             coautoriaContainer.addEventListener('click', (e) => {
                 if (!ultimaMatriz) return;
+                if (e.target.closest('#btn-coautoria-inteira')) {
+                    abrirMatrizInteira();
+                    return;
+                }
                 if (e.target.closest('#btn-coautoria-ordem-auto')) {
                     state.coautoriaOrdem = null;
                     desenharMatrizCoautoria();

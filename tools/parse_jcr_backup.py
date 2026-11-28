@@ -321,9 +321,58 @@ def get_pub_id(pub: Dict[str, Any]) -> str:
     Coautoria): o DOI; sem ele, o titulo normalizado + o ano. A referencia completa
     nao serve: traz a lista de autores, escrita de um jeito em cada CV.
     """
-    doi = str(pub.get('doi') or '').strip().lower()
+    doi = _pub_doi(pub)
     if doi:
         return 'doi:' + doi
+    return _title_key(pub)
+
+
+def _pub_doi(pub: Dict[str, Any]) -> str:
+    """DOI em minusculas e sem o endereco na frente ("https://doi.org/", "doi:"), como
+    JCRDBTools._doiDoArtigo."""
+    doi = str(pub.get('doi') or '').strip().lower()
+    doi = re.sub(r'^(?:https?://)?(?:dx\.)?doi\.org/', '', doi)
+    return re.sub(r'^doi:\s*', '', doi)
+
+
+def pub_id_resolver(cvs: List['CVData']):
+    """
+    Identidade dos artigos DENTRO de um conjunto de curriculos, igual a
+    JCRDBTools._identidadeNoConjunto (a regra da Matriz de Coautoria). Devolve uma funcao
+    pub -> chave. Difere de get_pub_id num caso: o artigo sem DOI cujo titulo+ano aparece
+    com UM unico DOI em algum curriculo do conjunto recebe a chave desse DOI. Sem isso, o
+    mesmo artigo com DOI num CV e sem DOI no outro nao contava como coautoria. Com dois
+    ou mais DOIs para o mesmo titulo+ano, ou titulo com menos de 15 letras/digitos, o
+    sem-DOI fica com a chave do titulo.
+    """
+    dois_do_titulo: Dict[str, set] = {}
+    for cv in cvs:
+        for pub in cv.publications:
+            doi = _pub_doi(pub)
+            if not doi:
+                continue
+            t = _title_key(pub)
+            if t:
+                dois_do_titulo.setdefault(t, set()).add(doi)
+
+    def resolve(pub: Dict[str, Any]) -> str:
+        doi = _pub_doi(pub)
+        if doi:
+            return 'doi:' + doi
+        t = _title_key(pub)
+        if not t:
+            return ''
+        dois = dois_do_titulo.get(t)
+        tamanho = len(t[3:t.rfind('|')].replace(' ', ''))
+        if t.startswith('tt:') and dois and len(dois) == 1 and tamanho >= 15:
+            return 'doi:' + next(iter(dois))
+        return t
+
+    return resolve
+
+
+def _title_key(pub: Dict[str, Any]) -> str:
+    """Titulo normalizado + ano ("tt:..."), como JCRDBTools._chaveDoTitulo; '' sem titulo."""
     title = str(pub.get('paperTitle') or pub.get('title') or '')
     title = re.sub(r'<[^>]*>', ' ', title)
     title = re.sub(r'&[a-z#0-9]+;', ' ', title, flags=re.I)
@@ -406,6 +455,8 @@ def generate_network_graph(cvs: List[CVData], output_file: str, zoom: float = 1.
     for cv in cvs:
         homonyms.setdefault(normalize_name(cv.name), []).append(cv)
 
+    # a mesma identidade de artigos da Matriz de Coautoria (resolve o sem-DOI no conjunto)
+    pub_id_of = pub_id_resolver(cvs)
     researcher_pubs = {}
     for cv in cvs:
         label = cv.name
@@ -413,7 +464,7 @@ def generate_network_graph(cvs: List[CVData], output_file: str, zoom: float = 1.
             label = f"{cv.name} (ID ...{cv.lattes_id[-4:]})"
         pub_ids = set()
         for pub in cv.publications:
-            pub_id = get_pub_id(pub)
+            pub_id = pub_id_of(pub)
             if pub_id:
                 pub_ids.add(pub_id)
 
