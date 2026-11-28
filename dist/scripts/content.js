@@ -1576,7 +1576,7 @@ async function injectReportTable(stats, startYearRecent, startYearLast10, startY
           extraCells.forEach(cell => cell.style.display = isCollapsed ? 'none' : '');
         }
         if (targetId === 'citacoes') {
-          ['rid-stats-table', 'scholar-stats-table'].forEach((idTabela) => {
+          ['rid-stats-table', 'scholar-stats-table', 'scopus-stats-table'].forEach((idTabela) => {
             const tabela = document.getElementById(idTabela);
             if (tabela) tabela.style.display = jcrTablesState.citacoes ? 'none' : '';
           });
